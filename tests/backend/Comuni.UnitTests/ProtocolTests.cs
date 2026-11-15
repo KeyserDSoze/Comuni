@@ -1,6 +1,7 @@
 using Comuni.Business.Organizations;
 using Comuni.Business.Protocol;
 using Comuni.Domains.Protocol;
+using Comuni.Domains.Audit;
 using Xunit;
 
 namespace Comuni.UnitTests;
@@ -36,7 +37,7 @@ public sealed class ProtocolTests
     public async Task Use_case_denies_disabled_module_before_writing()
     {
         var repo = new FakeRepository();
-        var service = new ProtocolService(repo, new FakeModules(false));
+        var service = new ProtocolService(repo, new FakeModules(false), new FakeActor());
 
         await Assert.ThrowsAsync<ModuleDisabledException>(
             () => service.RegisterAsync(Guid.NewGuid(), "Istanza", CancellationToken.None));
@@ -48,7 +49,7 @@ public sealed class ProtocolTests
     public async Task Use_case_scopes_every_read_to_the_given_organization()
     {
         var repo = new FakeRepository();
-        var service = new ProtocolService(repo, new FakeModules(true));
+        var service = new ProtocolService(repo, new FakeModules(true), new FakeActor());
         var organization = Guid.NewGuid();
 
         await service.ListAsync(organization, CancellationToken.None);
@@ -56,9 +57,35 @@ public sealed class ProtocolTests
         Assert.Equal(organization, repo.LastQueriedOrganization);
     }
 
+    [Fact]
+    public async Task Successful_registration_produces_minimal_audit_bound_to_the_record()
+    {
+        var repo = new FakeRepository();
+        var organization = Guid.NewGuid();
+        var service = new ProtocolService(repo, new FakeModules(true), new FakeActor());
+
+        var record = await service.RegisterAsync(organization, "Riservato e personale", CancellationToken.None);
+
+        var audit = Assert.Single(repo.Audits);
+        Assert.Equal(record.Id, audit.ResourceId);
+        Assert.Equal(organization, audit.OrganizationId);
+        Assert.Equal("unit-officer", audit.ActorSubject);
+        Assert.Equal("protocol.record.created", audit.Action);
+        Assert.Equal("protocol.record", audit.ResourceType);
+        Assert.Equal("unit-correlation", audit.CorrelationId);
+        Assert.DoesNotContain("Riservato e personale", System.Text.Json.JsonSerializer.Serialize(audit));
+    }
+
+    private sealed class FakeActor : ICurrentActorContext
+    {
+        public string ActorSubject => "unit-officer";
+        public string CorrelationId => "unit-correlation";
+    }
+
     private sealed class FakeRepository : IProtocolRepository
     {
         public List<ProtocolRecord> Saved { get; } = [];
+        public List<AuditEvent> Audits { get; } = [];
         public Guid LastQueriedOrganization { get; private set; }
 
         public Task<IReadOnlyList<ProtocolRecord>> ListAsync(Guid organizationId, CancellationToken ct)
@@ -67,8 +94,9 @@ public sealed class ProtocolTests
             return Task.FromResult<IReadOnlyList<ProtocolRecord>>([]);
         }
 
-        public Task AddAsync(ProtocolRecord record, CancellationToken ct)
+        public Task AddAsync(ProtocolRecord record, AuditEvent audit, CancellationToken ct)
         {
+            Audits.Add(audit);
             Saved.Add(record);
             return Task.CompletedTask;
         }

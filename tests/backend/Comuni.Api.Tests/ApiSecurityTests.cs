@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Comuni.Infrastructures.Persistence;
+using Npgsql;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -205,6 +206,51 @@ public sealed class ApiSecurityTests(ApiFactory factory) : IClassFixture<ApiFact
         using var client = factory.ClientFor(ApiFactory.OrgA, "Reader", "test-officer");
         var response = await client.PostAsJsonAsync("/api/v1/protocol/records", new { subject = $"Officer-{Guid.NewGuid():N}" });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Protocol_registration_writes_a_single_minimal_audit_entry()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Officer");
+        client.DefaultRequestHeaders.Add("X-Actor-Subject", "forged-admin");
+        var subject = $"SENSITIVE-{Guid.NewGuid():N}";
+        var response = await client.PostAsJsonAsync("/api/v1/protocol/records",
+            new { subject, actorSubject = "forged-admin", correlationId = "forged" });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var recordId = document.RootElement.GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        var audit = await db.AuditEvents.IgnoreQueryFilters()
+            .SingleAsync(x => x.ResourceId == recordId);
+        Assert.Equal(Guid.Parse(ApiFactory.OrgA), audit.OrganizationId);
+        Assert.Equal("test-officer", audit.ActorSubject);
+        Assert.Equal("protocol.record.created", audit.Action);
+        Assert.Equal("protocol.record", audit.ResourceType);
+        Assert.False(string.IsNullOrWhiteSpace(audit.CorrelationId));
+        Assert.NotEqual("forged", audit.CorrelationId);
+        Assert.DoesNotContain(subject, JsonSerializer.Serialize(audit));
+    }
+
+    [Fact]
+    public async Task Audit_history_rejects_sql_update_and_delete()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Officer");
+        var response = await client.PostAsJsonAsync("/api/v1/protocol/records",
+            new { subject = $"Guard-{Guid.NewGuid():N}" });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var recordId = document.RootElement.GetProperty("id").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        var audit = await db.AuditEvents.IgnoreQueryFilters()
+            .SingleAsync(x => x.ResourceId == recordId);
+        await Assert.ThrowsAsync<PostgresException>(() =>
+            db.Database.ExecuteSqlInterpolatedAsync($"UPDATE platform.audit_events SET action = {"forged"} WHERE id = {audit.Id}"));
+        await Assert.ThrowsAsync<PostgresException>(() =>
+            db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM platform.audit_events WHERE id = {audit.Id}"));
     }
 
 }
