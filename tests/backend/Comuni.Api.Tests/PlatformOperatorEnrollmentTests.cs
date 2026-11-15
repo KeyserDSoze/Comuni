@@ -121,7 +121,12 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/platform/session")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/context")).StatusCode);
 
-        var revoke = await ChangeAsync(issuer, subject, action: "revoke");
+        // Reusing the enrollment change ticket must NOT authorize a reversal.
+        Assert.NotEqual(0, (await ChangeAsync(issuer, subject, action: "revoke")).Code);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/platform/session")).StatusCode);
+
+        var revoke = await ChangeAsync(issuer, subject, action: "revoke",
+            ticket: "CHANGE-2026-REVOKE");
         Assert.Equal(0, revoke.Code);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/platform/session")).StatusCode);
         var stateAfter = await StateAsync(issuer, subject);
@@ -145,7 +150,10 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
             actions.Add(rows.GetString(1));
             Assert.Equal("platform.operator", rows.GetString(2));
             Assert.Equal(state.Id, rows.GetGuid(3));
-            Assert.Equal("operator:CHANGE-2026-00035", rows.GetString(4));
+            var expectedTicket = rows.GetString(1) == "platform.operator.revoked"
+                ? "operator:CHANGE-2026-REVOKE"
+                : "operator:CHANGE-2026-00035";
+            Assert.Equal(expectedTicket, rows.GetString(4));
             Assert.DoesNotContain(subject, string.Join("|", Enumerable.Range(0, 5)
                 .Select(i => rows.GetValue(i).ToString())));
             Assert.DoesNotContain(issuer, string.Join("|", Enumerable.Range(0, 5)
@@ -168,10 +176,11 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
             one.Enrolls, one.Revokes, one.Reactivations));
 
         var revocations = await Task.WhenAll(
-            ChangeAsync(issuer, subject, "revoke"),
-            ChangeAsync(issuer, subject, "revoke"));
+            ChangeAsync(issuer, subject, "revoke", ticket: "CHANGE-2026-REVOKE"),
+            ChangeAsync(issuer, subject, "revoke", ticket: "CHANGE-2026-REVOKE"));
         Assert.All(revocations, x => Assert.Equal(0, x.Code));
-        Assert.Equal(0, (await ChangeAsync(issuer, subject, "revoke")).Code);
+        Assert.Equal(0, (await ChangeAsync(issuer, subject, "revoke",
+            ticket: "CHANGE-2026-REVOKE")).Code);
 
         var after = await StateAsync(issuer, subject);
         Assert.Equal((1L, false, 1L, 1L, 0L), (after.Operators, after.Active,
