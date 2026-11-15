@@ -5,6 +5,7 @@ namespace Comuni.Business.Organizations;
 public interface IOrganizationDirectory
 {
     Task<Organization?> FindAsync(Guid organizationId, CancellationToken cancellationToken);
+    Task<bool> IsOperationalAsync(Guid organizationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<string>> EnabledModulesAsync(Guid organizationId, CancellationToken cancellationToken);
 }
 
