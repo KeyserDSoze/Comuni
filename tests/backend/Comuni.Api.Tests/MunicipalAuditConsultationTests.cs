@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Comuni.Infrastructures.Persistence;
+using Comuni.Business.Organizations;
+using Comuni.Domains.Audit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -121,6 +123,66 @@ public sealed class MunicipalAuditConsultationTests(ApiFactory factory) : IClass
 
         Assert.Empty(await ReadConsultationsAsync(active));
         Assert.Empty(await ReadConsultationsAsync(suspended));
+    }
+
+    [Fact]
+    public async Task Restricted_runtime_requires_signed_transaction_and_records_only_on_commit()
+    {
+        var id = await SeedAsync();
+        var connection = Environment.GetEnvironmentVariable("TEST_RUNTIME_DATABASE_CONNECTION")
+            ?? throw new InvalidOperationException("Restricted runtime connection is required.");
+        var signingKey = Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Test-only signed RLS key is required.");
+        var signer = new TenantProofSigner(signingKey);
+        var options = new DbContextOptionsBuilder<ComuniDbContext>()
+            .UseNpgsql(connection).Options;
+
+        var audit = AuditEvent.Create(id, "signed-runtime-admin", Action,
+            "platform.audit", id, "server-correlation");
+
+        // The repository must never start an unsigned, autonomous read/append
+        // outside the existing SQL proof transaction.
+        await using (var outside = new ComuniDbContext(options, new TestOrganization(id)))
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                new OrganizationAuditReader(outside).ListRecentAndRecordAsync(
+                    id, audit, CancellationToken.None));
+
+        await using (var db = new ComuniDbContext(options, new TestOrganization(id)))
+        {
+            await using var tx = await TenantDatabaseTransaction.BeginAsync(
+                db, signer, CancellationToken.None);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                new OrganizationAuditReader(db).ListRecentAndRecordAsync(
+                    Guid.NewGuid(), audit, CancellationToken.None));
+            var result = await new OrganizationAuditReader(db)
+                .ListRecentAndRecordAsync(id, audit, CancellationToken.None);
+            Assert.Single(result);
+            Assert.Equal("platform.module.protocol.enabled", result[0].Action);
+            await tx.RollbackAsync();
+        }
+        Assert.Empty(await ReadConsultationsAsync(id));
+
+        var newAudit = AuditEvent.Create(id, "signed-runtime-admin", Action,
+            "platform.audit", id, "second-server-correlation");
+        await using (var db = new ComuniDbContext(options, new TestOrganization(id)))
+        {
+            await using var tx = await TenantDatabaseTransaction.BeginAsync(
+                db, signer, CancellationToken.None);
+            Assert.Single(await new OrganizationAuditReader(db)
+                .ListRecentAndRecordAsync(id, newAudit, CancellationToken.None));
+            await tx.CommitAsync();
+        }
+
+        var committed = Assert.Single(await ReadConsultationsAsync(id));
+        Assert.Equal("signed-runtime-admin", committed.Actor);
+        Assert.Equal("second-server-correlation", committed.Correlation);
+        Assert.Equal(id, committed.Organization);
+        Assert.Equal(id, committed.Resource);
+    }
+
+    private sealed class TestOrganization(Guid id) : ICurrentOrganization
+    {
+        public Guid OrganizationId => id;
     }
 
     [Fact]
