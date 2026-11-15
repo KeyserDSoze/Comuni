@@ -22,3 +22,7 @@
 - Rete privata/endpoint Blob e Key Vault, firewall, WAF e policy aziendali da definire.
 
 **Non trattare il modulo Protocollo demo come registro ufficiale né inserire dati personali reali.**
+
+## Flusso amministrativo dei moduli — #13
+
+Il ruolo `Admin` è conferito da una membership attiva e verificata lato backend tramite `OrganizationRoleRequirement`, non dal JWT. Solo l'organization autenticata può consultare/modificare la propria configurazione `protocol`; nessun override del tenant da route, header o body. Aggiornamento feature flag e audit sono transazionali, con esito immediato nelle verifiche backend. La UI filtra il menu ma non costituisce confine di sicurezza. Questa slice **non** abilita operazioni platform/Superadmin, né una gestione generalizzata di cataloghi e dipendenze: #3 e #10 rimangono aperte.

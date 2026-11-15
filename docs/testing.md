@@ -35,3 +35,10 @@ Il bootstrap è sviluppato in due incrementi registrati su `main`: specifiche/te
 `TEST_DATABASE_CONNECTION="Host=localhost;Port=5432;Database=comuni_test;Username=comuni;Password=..." dotnet test tests/backend/Comuni.Api.Tests` per integration con PostgreSQL reale.
 `npm install && npx playwright install --with-deps chromium && npm run build --workspace @comuni/frontend && npm run test:e2e --workspace @comuni/frontend`.
 GitHub Actions ripete queste verifiche con PostgreSQL service.
+
+| Business/unit | modulazione Admin: modulo sconosciuto, tenant vuoto, audit, no-op | fail-closed / un evento al cambio |
+| API/PostgreSQL | Admin elenca/attiva/disattiva Protocollo | stato persistito, API Protocollo 403 quando disattivata |
+| API/PostgreSQL | Reader/Officer e JWT con ruolo Admin ma membership Reader | 403 su GET/PUT admin |
+| API/PostgreSQL | tenant spoofing da body | secondo Comune invariato |
+| API/PostgreSQL | flag già nel valore richiesto | nessun audit aggiuntivo |
+| E2E/Playwright | pagina Amministrazione e toggle | visibile solo ad Admin, menu aggiornato, errore visibile su fallimento |

@@ -28,3 +28,7 @@ L'immagine di riferimento mostra aree gestionali comunali, ma non costituisce sp
 5. Estensioni incrementali e integrazioni PagoPA, PDND, SEND, ANPR, ANSC, SPID/CIE secondo necessità e requisiti verificati.
 
 Ogni modulo futuro mantiene entità in `Domains/<Mod>`, use case in `Business/<Mod>`, adapter in `Infrastructures/<Mod>` e endpoint nella sola `Applications/Api`, con propri test e migrazioni EF versionate. Un modulo non abilitato deve essere invisibile in UI **e inaccessibile in API**.
+
+## Vertical slice amministrazione del Comune (#13)
+
+Il Core ora include un pannello riservato a membership `Admin` per consultare e modificare lo stato del modulo `protocol` **solo per il proprio Comune**. L'operazione è auditata e il flag è imposto nel backend. Non è ancora presente la gestione completa catalogo, dipendenze, amministratori, creazione e sospensione Comune o l'area Superadmin; queste attività restano tracciate nelle #3, #10 e #2.

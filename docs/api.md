@@ -21,3 +21,14 @@ PostgreSQL: `platform.organizations` (colonna `is_suspended`, default false), `p
 ## Audit (issue #11)
 
 La `POST /api/v1/protocol/records` completata con 201 registra anche un evento interno `protocol.record.created` in `platform.audit_events`, **nella stessa transazione**. Identità (`sub`) e correlation provengono dal server, non da campi request o header arbitrari. Le richieste 401/403/validation error non registrano documenti e non creano questo evento. Nessun endpoint pubblico di lettura o modifica del registro audit è previsto in questa slice. Il payload audit non include oggetto del documento o token.
+
+## Amministrazione moduli per Comune (issue #13)
+
+Gli endpoint amministrativi richiedono una **membership Admin attiva** nel PostgreSQL della organization derivata esclusivamente dal JWT validato:
+
+| Metodo | Endpoint | Ruoli | Risultato |
+| --- | --- | --- | --- |
+| GET | `/api/v1/admin/modules` | Admin | Lista degli stati dei moduli installati del proprio Comune (per ora `protocol`) |
+| PUT | `/api/v1/admin/modules/protocol` | Admin | Body `{"enabled":true|false}`, stato aggiornato in PostgreSQL e restituito |
+
+Anonimo: 401. Reader/Officer o organization sospesa: 403. Modulo non riconosciuto: 404. Campo `enabled` assente: 400. Il corpo non può scegliere il Comune da aggiornare; un eventuale `organizationId` inviato dal client è ignorato. Il cambio effettivo produce un evento audit `platform.module.protocol.enabled` o `platform.module.protocol.disabled` **nella stessa transazione**; una ripetizione identica è idempotente e non aggiunge audit. L'abilitazione è controllata lato backend in ogni use case: l'endpoint Protocollo restituisce 403 dopo la disattivazione.

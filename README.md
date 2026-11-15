@@ -37,3 +37,7 @@ Le [GitHub Issues](https://github.com/KeyserDSoze/Comuni/issues) sono la fonte d
 ## Identità API (in corso)
 
 La modalità di produzione ora richiede `Authentication:Mode=Oidc`, `Authentication:Authority=https://...`, `Authentication:Audience=...` per validare token RS256 tramite JWKS (ADR 0007). In Development/Testing soltanto, i token demo HS256 restano disponibili con `DevelopmentJwt`. Non è un login OIDC completo: l'interfaccia non possiede ancora un flusso OAuth e manca il provider reale, oltre al provisioning utenti per Comune (issue #2).
+
+## Amministrazione comunale — prima slice (#13)
+
+Un utente con membership `Admin` attiva può accedere alla voce **Amministrazione** del portale e attivare/disattivare il modulo Protocollo del proprio Comune. Il cambiamento è persistito su PostgreSQL, auditato e verificato dal backend. Non sono ancora implementati il catalogo completo né Superadmin. In Development il seed base ha il solo ruolo `Officer`; usare un Admin creato attraverso dati di sviluppo controllati per verificare la funzionalità.
