@@ -68,6 +68,66 @@ public sealed class TenantRlsTests
     }
 
     [Fact]
+    public async Task Prepared_statement_rechecks_HMAC_on_every_execution_and_rejects_tenant_substitution()
+    {
+        var authorized = await SeedAsync();
+        var other = await SeedAsync();
+        var signer = new TenantProofSigner(
+            Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Missing test signer key."));
+        var valid = signer.Create(authorized);
+        var forged = valid.Replace(authorized.ToString("N"), other.ToString("N"), StringComparison.Ordinal);
+        Assert.NotEqual(valid, forged);
+
+        await using var connection = new NpgsqlConnection(Runtime);
+        await connection.OpenAsync();
+        await using (var tx = await connection.BeginTransactionAsync())
+        {
+            await using (var prepared = new NpgsqlCommand(
+                "PREPARE tenant_count AS SELECT count(*) FROM protocol.records", connection, tx))
+                await prepared.ExecuteNonQueryAsync();
+
+            async Task<long> ExecutePreparedAsync()
+            {
+                await using var cmd = new NpgsqlCommand("EXECUTE tenant_count", connection, tx);
+                return (long)(await cmd.ExecuteScalarAsync())!;
+            }
+
+            async Task SetProofAsync(string assertion)
+            {
+                await using var set = new NpgsqlCommand(
+                    "SELECT set_config('comuni.tenant_assertion', @assertion, true)", connection, tx);
+                set.Parameters.AddWithValue("assertion", assertion);
+                await set.ExecuteScalarAsync();
+            }
+
+            await SetProofAsync(valid);
+            Assert.Equal(1L, await ExecutePreparedAsync());
+
+            // A proof for A is never valid for B just because an injected query edits its tenant.
+            await SetProofAsync(forged);
+            Assert.Equal(0L, await ExecutePreparedAsync());
+
+            // The old unsigned GUC must have no effect on a forged assertion.
+            await using (var unsigned = new NpgsqlCommand(
+                "SELECT set_config('comuni.organization_id', @tenant, true)", connection, tx))
+            {
+                unsigned.Parameters.AddWithValue("tenant", other.ToString("D"));
+                await unsigned.ExecuteScalarAsync();
+            }
+            Assert.Equal(0L, await ExecutePreparedAsync());
+
+            await SetProofAsync(valid);
+            Assert.Equal(1L, await ExecutePreparedAsync());
+            await tx.CommitAsync();
+        }
+
+        await using (var withoutTenant = new NpgsqlCommand(
+            "EXECUTE tenant_count", connection))
+            Assert.Equal(0L, (long)(await withoutTenant.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task All_five_tenant_owned_tables_have_RLS_enabled()
     {
         await using var connection = new NpgsqlConnection(Owner);
