@@ -147,6 +147,21 @@ class PlatformInventoryReleaseTests(unittest.TestCase):
         change["after"]["secret"][-1]["key_vault_secret_id"] = URI
         self.assertNotEqual(0, check(p, enabled=True, version=VERSION).returncode)
 
+    def test_compact_key_prefix_collision_fails_closed_without_overwriting_old_version(self):
+        # Different approved 32-hex versions can share the first 16 chars.
+        # A pre-existing ACA key with a different full URI must remain pinned;
+        # neither the old secret nor the current revision can be overwritten.
+        p = valid_plan(True)
+        different_full_version = VERSION[:16] + "d" * 16
+        before = p["resource_changes"][0]["change"]["before"]
+        before["secret"].append({
+            "name": SECRET, "key_vault_secret_id":
+                VAULT_URI + "secrets/platform-inventory-connection/" + different_full_version,
+        })
+        result = check(p, enabled=True, version=VERSION)
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn(URI, result.stdout + result.stderr)
+
     def test_preflight_requires_exact_enabled_version_without_reading_secret_value(self):
         self.assertTrue(PREFLIGHT.is_file(), "platform inventory metadata preflight missing")
         text = PREFLIGHT.read_text()
