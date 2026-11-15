@@ -109,3 +109,28 @@ Nessun nuovo endpoint HTTP. La concessione/revoca di `platform.platform_operator
 L'unica React PWA utilizza **l'endpoint esistente** `GET /api/v1/platform/session`; nessuna nuova API o permesso di elenco/CRUD cross-Comune è stato introdotto. Con il browser OIDC Authorization Code + PKCE, il token API in memoria viene verificato **indipendentemente** per contesto comunale (`GET /api/v1/context`) e sessione piattaforma. Per visualizzare il menu e la pagina `/platform` è indispensabile una risposta piattaforma **200, esattamente `{"role":"Superadmin"}`**, e il contesto comunale negato. La sessione piattaforma non usa `organization_id` in URL/body/storage e non legge dati comunali. Le risposte 401/403, errori, payload con proprietà extra, esiti tenant/platform ambigui e token DeveloperJwt non permettono l'accesso alla vista.
 
 Il percorso `/platform` è una navigazione **client-side**; un deep link non ignora la policy backend. Prima di navigare e su focus della pagina viene riverificata la sessione, per nascondere l'area alla revoca. Logout e refresh richiedono un nuovo login OIDC; il ruolo visualizzato non è un'autorizzazione a consultare gli enti. Vedere ADR 0030.
+
+
+## Superadmin: inventario Comuni a metadati minimi (#37 / ADR 0031)
+
+`GET /api/v1/platform/organizations?limit=10&after=<uuid>` — unica API .NET 10, **sola lettura**. È protetta dalla policy **`PlatformOperator`** già verificata su RS256/JWKS e sul database (issuer+sub attivi, senza `organization_id`). In aggiunta l'inventario richiede `PlatformInventory:Enabled=true` e la connessione **dedicata** `comuni_platform_reader`; per default è disabilitato (503 per un operatore autorizzato, 401/403 per token non autorizzati). Non esiste alcun fallback alla connessione comunale, alla credenziale owner o alla modalità DevelopmentJwt.
+
+Risposta `200`:
+
+```json
+{
+  "organizations": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Comune di esempio",
+      "isSuspended": false,
+      "protocolEnabled": false
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+La lista è ordinata per UUID crescente; `limit` predefinito 10, ammesso **1–25**. `after` è facoltativo, UUID non nullo nel formato canonico; `nextCursor` è l'ID dell'ultima riga restituita solo se esiste un'altra pagina. Niente `count` né ricerca nome o parametri di tenant. Query sconosciute/duplicate, limit fuori intervallo e cursor malformato danno **400**, senza leggere enti o inserire audit. Token anonimi/errati danno **401/403**. L'endpoint non legge né restituisce utenti, ruoli, documenti, tributi, operatori globali o dati sensibili. Il backend scrive un evento append-only `platform.organizations.listed` per ogni pagina riuscita, con ID opaco dell'operatore e correlation random, nella stessa transazione della SELECT. La UI in `/platform` mostra una tabella e un pulsante per le pagine successive, ma è **solo presentazione** e non attribuisce diritti.
+
+Non sono disponibili endpoint per creazione, modifica, sospensione/riattivazione o impersonificazione. Vedere ADR 0031, `docs/deployment.md` e `docs/security.md`.
