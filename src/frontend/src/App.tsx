@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, registerRecord, getPlatformSession, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership } from './api';
+import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, registerRecord, getPlatformSession, getPlatformOrganizations, PlatformInventoryHttpError,
+  type PlatformOrganization, type PlatformOrganizationsPage, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership } from './api';
 import { cn } from './lib/utils';
 import {
   beginOidcLogin, captureOidcCallback, clearPendingOidc,
@@ -41,6 +42,12 @@ export function App() {
   const [context, setContext] = useState<OrganizationContext | null>(null);
   const [platformSession, setPlatformSession] = useState<PlatformSession | null>(null);
   const [checkingSession, setCheckingSession] = useState(false);
+  const [inventory, setInventory] = useState<PlatformOrganization[]>([]);
+  const [inventoryCursor, setInventoryCursor] = useState<string | null>(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
+  const [inventoryError, setInventoryError] = useState(false);
+  const initialInventory = useRef<Promise<PlatformOrganizationsPage> | null>(null);
   const [page, setPage] = useState<Page>('dashboard');
   const [dark, setDark] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -176,6 +183,84 @@ export function App() {
     };
   }, [token, platformSession, browserOidc?.mode, t]);
 
+  // StrictMode executes effects twice: keep a single in-flight audited GET.
+  // The platform response is server-authorized on every actual request.
+  useEffect(() => {
+    if (!platformSession || !token || context) {
+      initialInventory.current = null;
+      setInventory([]);
+      setInventoryCursor(null);
+      setInventoryLoaded(false);
+      setInventoryError(false);
+      setInventoryLoading(false);
+      return;
+    }
+    let active = true;
+    setInventoryLoading(true);
+    const work = initialInventory.current ?? getPlatformOrganizations(token);
+    initialInventory.current = work;
+    void work.then(result => {
+      if (!active) return;
+      setInventory(result.organizations);
+      setInventoryCursor(result.nextCursor);
+      setInventoryError(false);
+      setInventoryLoaded(true);
+    }).catch(reason => {
+      if (!active) return;
+      setInventory([]);
+      setInventoryCursor(null);
+      setInventoryLoaded(false);
+      setInventoryError(true);
+      if (reason instanceof PlatformInventoryHttpError &&
+          (reason.status === 401 || reason.status === 403)) {
+        setPlatformSession(null);
+        setPage('dashboard');
+        setError(t('invalidToken'));
+        if (window.location.pathname === '/platform')
+          window.history.replaceState(window.history.state, '', '/');
+      }
+    }).finally(() => {
+      if (active) setInventoryLoading(false);
+    });
+    return () => { active = false; };
+  }, [token, platformSession, context, t]);
+
+  async function loadInventoryNext() {
+    if (!token || !platformSession || inventoryLoading) return;
+    setInventoryLoading(true);
+    setInventoryError(false);
+    try {
+      const result = await getPlatformOrganizations(
+        token, inventoryLoaded ? inventoryCursor ?? undefined : undefined);
+      if (inventoryLoaded && inventoryCursor) {
+        setInventory(previous => [
+          ...previous,
+          ...result.organizations.filter(item =>
+            !previous.some(existing => existing.id === item.id))
+        ]);
+      } else {
+        setInventory(result.organizations);
+      }
+      setInventoryCursor(result.nextCursor);
+      setInventoryLoaded(true);
+    } catch (reason) {
+      setInventoryError(true);
+      if (reason instanceof PlatformInventoryHttpError &&
+          (reason.status === 401 || reason.status === 403)) {
+        setPlatformSession(null);
+        setInventory([]);
+        setInventoryCursor(null);
+        setInventoryLoaded(false);
+        setPage('dashboard');
+        setError(t('invalidToken'));
+        if (window.location.pathname === '/platform')
+          window.history.replaceState(window.history.state, '', '/');
+      }
+    } finally {
+      setInventoryLoading(false);
+    }
+  }
+
   const loadRecords = useCallback(async () => {
     if (!token) return;
     setLoadingRecords(true);
@@ -279,6 +364,11 @@ export function App() {
     setContext(null);
     setPlatformSession(null);
     setCheckingSession(false);
+    initialInventory.current = null;
+    setInventory([]);
+    setInventoryCursor(null);
+    setInventoryLoaded(false);
+    setInventoryError(false);
     setRecords([]);
     setAdminModules([]);
     setAdminMemberships([]);
@@ -390,6 +480,46 @@ export function App() {
                 <p className="text-sm text-muted-foreground">{t('platformRestricted')}</p>
               </CardContent>
             </Card>
+            <section aria-labelledby="inventory-heading" className="space-y-4">
+              <h2 id="inventory-heading" className="text-xl font-semibold">{t('inventoryTitle')}</h2>
+              {inventoryLoading && <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p>}
+              {inventoryError && <div role="alert" className="space-y-3 rounded-md border border-rose-300 p-3">
+                <p className="text-sm text-rose-700 dark:text-rose-300">{t('inventoryUnavailable')}</p>
+                <Button variant="outline" onClick={() => void loadInventoryNext()} disabled={inventoryLoading}>
+                  {t('inventoryRetry')}
+                </Button>
+              </div>}
+              {inventoryLoaded && !inventoryError && inventory.length === 0 &&
+                <p className="text-sm text-muted-foreground">{t('inventoryEmpty')}</p>}
+              {inventoryLoaded && !inventoryError && inventory.length > 0 && (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table aria-label={t('inventoryTitle')} className="w-full min-w-[560px] text-left text-sm">
+                    <thead className="bg-muted text-muted-foreground">
+                      <tr>
+                        <th scope="col" className="px-4 py-3">{t('inventoryName')}</th>
+                        <th scope="col" className="px-4 py-3">{t('inventoryId')}</th>
+                        <th scope="col" className="px-4 py-3">{t('inventoryState')}</th>
+                        <th scope="col" className="px-4 py-3">{t('protocol')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {inventory.map(item => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 font-medium">{item.name}</td>
+                          <td className="px-4 py-3 font-mono text-xs">{item.id}</td>
+                          <td className="px-4 py-3">{item.isSuspended ? t('inventorySuspended') : t('inventoryActive')}</td>
+                          <td className="px-4 py-3">{item.protocolEnabled ? t('moduleActive') : t('moduleInactive')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {inventoryLoaded && inventoryCursor && !inventoryError && (
+                <Button variant="outline" disabled={inventoryLoading}
+                  onClick={() => void loadInventoryNext()}>{t('inventoryLoadMore')}</Button>
+              )}
+            </section>
           </main>
         </div>
       </div>

@@ -80,3 +80,66 @@ export async function getPlatformSession(token: string): Promise<PlatformSession
   }
   return { role: 'Superadmin' };
 }
+
+
+/** Metadata-only platform inventory. Never uses or accepts organization context. */
+export interface PlatformOrganization {
+  id: string;
+  name: string;
+  isSuspended: boolean;
+  protocolEnabled: boolean;
+}
+
+export interface PlatformOrganizationsPage {
+  organizations: PlatformOrganization[];
+  nextCursor: string | null;
+}
+
+export class PlatformInventoryHttpError extends Error {
+  constructor(readonly status: number) {
+    super('Platform inventory API ' + status);
+  }
+}
+
+const guidD = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function getPlatformOrganizations(
+  token: string, after?: string, limit = 10
+): Promise<PlatformOrganizationsPage> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 25 ||
+      (after !== undefined && !guidD.test(after))) {
+    throw new Error('Invalid inventory pagination');
+  }
+  const url = '/api/v1/platform/organizations?limit=' + limit +
+    (after === undefined ? '' : '&after=' + encodeURIComponent(after));
+  const response = await fetch(url, {
+    method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new PlatformInventoryHttpError(response.status);
+  const result: unknown = await response.json();
+  if (typeof result !== 'object' || result === null || Array.isArray(result) ||
+      Object.keys(result).length !== 2 ||
+      !('organizations' in result) || !Array.isArray(result.organizations) ||
+      result.organizations.length > limit ||
+      !('nextCursor' in result) ||
+      !(result.nextCursor === null ||
+        (typeof result.nextCursor === 'string' && guidD.test(result.nextCursor)))) {
+    throw new Error('Invalid platform inventory response');
+  }
+  const items: PlatformOrganization[] = [];
+  for (const item of result.organizations) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item) ||
+        Object.keys(item).length !== 4 ||
+        !('id' in item) || typeof item.id !== 'string' || !guidD.test(item.id) ||
+        !('name' in item) || typeof item.name !== 'string' ||
+        item.name.length < 1 || item.name.length > 200 ||
+        !('isSuspended' in item) || typeof item.isSuspended !== 'boolean' ||
+        !('protocolEnabled' in item) || typeof item.protocolEnabled !== 'boolean') {
+      throw new Error('Invalid municipality metadata');
+    }
+    items.push({ id: item.id, name: item.name,
+      isSuspended: item.isSuspended, protocolEnabled: item.protocolEnabled });
+  }
+  return { organizations: items, nextCursor: result.nextCursor };
+}

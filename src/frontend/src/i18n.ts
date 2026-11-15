@@ -48,7 +48,12 @@ void i18n.use(initReactI18next).init({
       platformTitle: 'Area Superadmin',
       platformDescription: 'Solo consultazione del proprio accesso piattaforma.',
       platformRoleTitle: 'Ruolo verificato dal server',
-      platformRestricted: 'Nessuna gestione dei Comuni o impersonificazione disponibile in questa fase.'
+      platformRestricted: 'Nessuna gestione dei Comuni o impersonificazione disponibile in questa fase.',
+      inventoryTitle: 'Comuni registrati', inventoryLoadMore: 'Carica altri Comuni',
+      inventoryRetry: 'Riprova inventario', inventoryUnavailable: 'Inventario non disponibile. Riprova.',
+      inventoryEmpty: 'Nessun Comune disponibile.', inventoryName: 'Comune',
+      inventoryId: 'ID Comune', inventoryState: 'Stato',
+      inventoryActive: 'Attivo', inventorySuspended: 'Sospeso'
     } },
     en: { translation: {
       appName: 'Comuni', appTagline: 'Digital services for local authorities',
@@ -95,7 +100,12 @@ void i18n.use(initReactI18next).init({
       platformTitle: 'Superadmin area',
       platformDescription: 'Read-only access to your own platform session.',
       platformRoleTitle: 'Server-verified role',
-      platformRestricted: 'Municipality management and impersonation are not available at this stage.'
+      platformRestricted: 'Municipality management and impersonation are not available at this stage.',
+      inventoryTitle: 'Registered municipalities', inventoryLoadMore: 'Load more municipalities',
+      inventoryRetry: 'Retry inventory', inventoryUnavailable: 'Inventory unavailable. Try again.',
+      inventoryEmpty: 'No municipalities available.', inventoryName: 'Municipality',
+      inventoryId: 'Municipality ID', inventoryState: 'Status',
+      inventoryActive: 'Active', inventorySuspended: 'Suspended'
     } }
   },
   lng: 'it',
