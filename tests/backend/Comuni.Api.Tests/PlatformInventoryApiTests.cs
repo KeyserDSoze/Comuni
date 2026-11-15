@@ -95,7 +95,11 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
             Assert.True(row.GetProperty("name").GetString()!.Length is > 0 and <= 200);
             Assert.DoesNotContain(subject, root.ToString());
             Assert.DoesNotContain("identityIssuer", root.ToString());
-            Assert.DoesNotContain("membership", root.ToString(), StringComparison.OrdinalIgnoreCase);
+            // A municipality's public name may legitimately contain "membership".
+            // Reject forbidden JSON FIELD NAMES, not ordinary name text.
+            Assert.DoesNotContain(row.EnumerateObject(),
+                property => property.Name.Contains("membership",
+                    StringComparison.OrdinalIgnoreCase));
             var cursor = root.GetProperty("nextCursor");
             after = cursor.ValueKind == JsonValueKind.Null ? null : cursor.GetString();
             pages++;
