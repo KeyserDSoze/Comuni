@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Globalization;
+using System.Threading.RateLimiting;
 using Comuni.Api.Security;
 using Comuni.Business.Audit;
 using Comuni.Business.Organizations;
@@ -7,6 +9,7 @@ using Comuni.Domains.Protocol;
 using Comuni.Infrastructures.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +18,7 @@ var authentication = AuthenticationConfiguration.Read(
     builder.Configuration, builder.Environment.EnvironmentName);
 var connection = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
+var protection = ApiProtectionSettings.Read(builder.Configuration);
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentOrganization, HttpCurrentOrganization>();
@@ -29,6 +33,31 @@ builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
 builder.Services.AddScoped<ProtocolService>();
 builder.Services.AddScoped<IModuleAdministrationStore, ModuleAdministrationRepository>();
 builder.Services.AddScoped<ModuleAdministrationService>();
+builder.Services.AddRateLimiter(options =>
+{
+    // In-memory partition per replica, not a distributed denial-of-service defence.
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
+        context => RateLimitPartition.GetFixedWindowLimiter(
+            ApiProtectionSettings.PartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = protection.PermitLimit,
+                Window = TimeSpan.FromSeconds(protection.WindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.OnRejected = context =>
+    {
+        var retrySeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var duration)
+            ? Math.Max(1, (int)Math.Ceiling(duration.TotalSeconds))
+            : protection.WindowSeconds;
+        context.HttpContext.Response.Headers["Retry-After"] =
+            retrySeconds.ToString(CultureInfo.InvariantCulture);
+        return ValueTask.CompletedTask;
+    };
+});
+
 builder.Services.AddOpenApi();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -72,7 +101,18 @@ if (app.Environment.IsDevelopment())
         """);
 }
 
+// Apply response headers before any middleware can short-circuit with 401/403/429.
+app.Use(async (context, next) =>
+{
+    ApiProtectionSettings.ApplyResponseHeaders(context);
+    await next(context);
+});
+
 app.UseAuthentication();
+// Limit API requests only; operational health probes and static PWA assets are not throttled.
+app.UseWhen(
+    context => context.Request.Path.StartsWithSegments("/api"),
+    branch => branch.UseRateLimiter());
 app.UseAuthorization();
 
 app.MapOpenApi();
