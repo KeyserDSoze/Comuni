@@ -6,14 +6,14 @@
 \if :{?tenant_proof_key}
 \else
     \echo 'TENANT_PROOF_KEY missing; refusing to provision.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 SELECT CASE WHEN octet_length(:'tenant_proof_key') >= 32 THEN 'true' ELSE 'false' END AS valid \gset
 \if :valid
 \else
     \echo 'TENANT_PROOF_KEY must contain at least 32 bytes.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 BEGIN;
@@ -37,5 +37,5 @@ SELECT CASE WHEN
 \else
     ROLLBACK;
     \echo 'Legacy key mismatch or retirement; use the versioned staging procedure.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif

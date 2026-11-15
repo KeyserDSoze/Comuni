@@ -61,6 +61,10 @@ jobs:
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/retire-tenant-proof-key.sql
+          if env -u TENANT_PROOF_KEY psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql; then
+            echo "ERROR: missing signing material did not fail" >&2
+            exit 1
+          fi
           if psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql; then
             echo "ERROR: a retired key was reactivated" >&2
             exit 1

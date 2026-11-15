@@ -8,12 +8,12 @@
 \if :{?new_key_id}
 \else
     \echo 'TENANT_PROOF_KEY_ID missing.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 \if :{?new_key}
 \else
     \echo 'TENANT_PROOF_KEY missing.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 SELECT CASE WHEN :'new_key_id' ~ '^[a-z][a-z0-9_-]{0,31}$'
@@ -23,7 +23,7 @@ SELECT CASE WHEN :'new_key_id' ~ '^[a-z][a-z0-9_-]{0,31}$'
 \if :valid
 \else
     \echo 'Invalid staged key ID or secret length.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 BEGIN;
@@ -42,5 +42,5 @@ SELECT CASE WHEN EXISTS (
 \else
     ROLLBACK;
     \echo 'Key ID already exists with different material, has expired, or was revoked.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif

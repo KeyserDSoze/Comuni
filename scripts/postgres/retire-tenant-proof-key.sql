@@ -8,12 +8,12 @@
 \if :{?retire_id}
 \else
     \echo 'TENANT_PROOF_RETIRE_KEY_ID missing.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 \if :{?grace_secs}
 \else
     \echo 'TENANT_PROOF_GRACE_SECONDS missing.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 SELECT CASE WHEN :'retire_id' ~ '^[a-z][a-z0-9_-]{0,31}$'
@@ -23,7 +23,7 @@ SELECT CASE WHEN :'retire_id' ~ '^[a-z][a-z0-9_-]{0,31}$'
 \if :valid
 \else
     \echo 'Invalid key ID or grace seconds (0..3600).'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 BEGIN;
@@ -42,5 +42,5 @@ SELECT CASE WHEN EXISTS (
 \else
     ROLLBACK;
     \echo 'Unknown key ID; no changes applied.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif

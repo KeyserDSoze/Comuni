@@ -6,7 +6,7 @@
 \if :{?runtime_password}
 \else
     \echo 'Missing RUNTIME_DB_PASSWORD: refusing to provision runtime role.'
-    \quit 3
+    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
 \endif
 
 -- psql's quoted variable is a SQL literal, escaped before format(%L).
