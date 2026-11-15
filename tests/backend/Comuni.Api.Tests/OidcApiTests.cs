@@ -50,7 +50,14 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
             {
                 ["Authentication:Mode"] = "Oidc",
                 ["Authentication:Authority"] = Issuer,
-                ["Authentication:Audience"] = Audience
+                ["Authentication:Audience"] = Audience,
+                // CI provisions a SEPARATE PostgreSQL role and connection.
+                // Never use the schema-owner connection as platform reader.
+                ["PlatformInventory:Enabled"] =
+                    Environment.GetEnvironmentVariable("TEST_PLATFORM_DATABASE_CONNECTION") is null
+                        ? "false" : "true",
+                ["ConnectionStrings:PlatformRead"] =
+                    Environment.GetEnvironmentVariable("TEST_PLATFORM_DATABASE_CONNECTION")
             }));
         builder.ConfigureTestServices(services =>
             services.PostConfigure<JwtBearerOptions>(

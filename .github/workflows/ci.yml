@@ -28,6 +28,7 @@ jobs:
     env:
       TEST_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni;Password=integration-only-password
       TEST_RUNTIME_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni_app_runtime;Password=ci-test-runtime-only-password
+      TEST_PLATFORM_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni_platform_reader;Password=ci-only-platform-reader-password-not-production-2026
       Security__TenantProofKey: ci-test-only-hmac-key-for-comuni-rls-2026-11
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +48,13 @@ jobs:
           sudo apt-get install -y -qq postgresql-client
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-runtime-role.sql
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-runtime-role.sql
+      - name: Provision separate platform inventory reader (twice for idempotence)
+        env:
+          PGPASSWORD: integration-only-password
+          PLATFORM_READ_DB_PASSWORD: ci-only-platform-reader-password-not-production-2026
+        run: |
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-platform-read-role.sql
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-platform-read-role.sql
       - name: Install signed tenant verification material (test-only secret)
         env:
           PGPASSWORD: integration-only-password

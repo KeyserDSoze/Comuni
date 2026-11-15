@@ -21,6 +21,8 @@ var connection = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 var protection = ApiProtectionSettings.Read(builder.Configuration);
 var browserOidc = BrowserOidcSettings.Read(builder.Configuration, authentication.Mode, builder.Environment.EnvironmentName);
+var platformInventory = PlatformInventorySettings.Read(
+    builder.Configuration, authentication.Mode, connection, builder.Environment.EnvironmentName);
 var tenantProofKey = builder.Configuration["Security:TenantProofKey"];
 var tenantProofSigner = new TenantProofSigner(tenantProofKey ?? string.Empty, builder.Configuration["Security:TenantProofKeyId"]);
 
@@ -35,6 +37,9 @@ builder.Services.AddScoped<IOrganizationModuleStore>(s => s.GetRequiredService<O
 builder.Services.AddSingleton(new MembershipIssuerPolicy(authentication.Mode == "Oidc"));
 builder.Services.AddScoped<IOrganizationMembershipStore, OrganizationMembershipStore>();
 builder.Services.AddScoped<IPlatformOperatorStore, PlatformOperatorStore>();
+if (platformInventory.Enabled)
+    builder.Services.AddScoped<IPlatformInventoryStore>(
+        _ => new PlatformInventoryStore(platformInventory.ConnectionString!));
 builder.Services.AddScoped<IAuthorizationHandler, OrganizationRoleHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, PlatformOperatorHandler>();
 builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
@@ -169,6 +174,52 @@ app.MapGet("/api/v1/auth/browser", () => Results.Ok(browserOidc))
 // platform identity endpoint. It does NOT grant cross-organization data access.
 app.MapGet("/api/v1/platform/session", () => Results.Ok(new { role = "Superadmin" }))
     .WithName("GetPlatformSession").RequireAuthorization("PlatformOperator");
+
+// PlatformInventory is disabled by default. It never falls back to the
+// municipal SQL runtime or a schema-owner connection. Auth policy is applied
+// BEFORE any query parsing or cross-organization read.
+app.MapGet("/api/v1/platform/organizations", async (
+    HttpContext context, CancellationToken ct) =>
+{
+    if (!platformInventory.Enabled)
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+    // Keyset pagination only. Do not allow hidden tenant/subject selectors.
+    if (context.Request.Query.Keys.Any(k => k is not ("limit" or "after")) ||
+        context.Request.Query.Any(k => k.Value.Count != 1))
+        return Results.BadRequest(new { code = "invalid_inventory_query" });
+
+    var limit = 10;
+    if (context.Request.Query.TryGetValue("limit", out var limitValue) &&
+        (!int.TryParse(limitValue.ToString(), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out limit) ||
+         limit is < 1 or > 25))
+        return Results.BadRequest(new { code = "invalid_inventory_query" });
+
+    Guid? after = null;
+    if (context.Request.Query.TryGetValue("after", out var afterValue))
+    {
+        if (!Guid.TryParseExact(afterValue.ToString(), "D", out var cursor) ||
+            cursor == Guid.Empty)
+            return Results.BadRequest(new { code = "invalid_inventory_query" });
+        after = cursor;
+    }
+
+    var issuer = context.User.FindFirst("iss")?.Value;
+    var subject = context.User.FindFirst("sub")?.Value;
+    if (string.IsNullOrEmpty(issuer) || string.IsNullOrEmpty(subject))
+        return Results.Forbid();
+
+    try
+    {
+        var inventory = context.RequestServices.GetRequiredService<IPlatformInventoryStore>();
+        return Results.Ok(await inventory.ListAsync(issuer, subject, limit, after, ct));
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.Forbid();
+    }
+}).WithName("ListPlatformOrganizations").RequireAuthorization("PlatformOperator");
 
 app.MapOpenApi();
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))

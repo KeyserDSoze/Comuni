@@ -11,9 +11,12 @@
 \endif
 
 -- Reject an empty or trivially weak secret; no secret printed.
-SELECT CASE WHEN length(:'platform_password') >= 32
-    THEN 1 ELSE (1/0) END AS password_guard
+SELECT (length(:'platform_password') >= 32)::int AS strong_password
 \gset
+\if :strong_password
+\else
+    DO $ BEGIN RAISE EXCEPTION 'Platform role password too short'; END $;
+\endif
 
 SELECT format(
     'CREATE ROLE comuni_platform_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
