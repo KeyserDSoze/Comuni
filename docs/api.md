@@ -86,3 +86,14 @@ La creazione di una nuova organization **non è** accessibile agli Admin comunal
 ## Stato sospensione Comune — effetto API (#33, ADR 0008/0027)
 
 Non è stato aggiunto alcun endpoint HTTP di sospensione o riattivazione: questa operazione è accessibile **solo** allo schema owner PostgreSQL tramite `scripts/postgres/set-organization-suspension.sql` con autorizzazione esterna, change ticket e audit transazionale. Ogni **nuova** richiesta tenant protetta a un Comune sospeso restituisce 403 (anche Admin/Protocollo e anche con un JWT firmato già valido), indipendentemente dai suoi moduli o membership. `/health/live` e `/health/ready` rimangono endpoint di monitoraggio non tenant. La riattivazione non modifica i moduli, i ruoli o i token: restituisce l'accesso soltanto alle membership ancora attive, sui moduli ancora abilitati. Non equivale a revoca OIDC o arresto di richieste in volo.
+
+
+## Identity platform-only (slice Superadmin, #34 / ADR 0028)
+
+| Metodo | Endpoint | Policy | Risultato |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/platform/session` | `PlatformOperator` | `{"role":"Superadmin"}` **solo per il proprio access token OIDC platform** |
+
+L'endpoint è **sola lettura** e non restituisce utenti o enti: **non** esistono ancora `POST/PUT/DELETE`, elenco Comuni, toggle moduli cross-tenant o impersonificazione. Risposte: nessun/invalid JWT **401**; JWT OIDC valido ma senza attivazione `iss+sub` in `platform.platform_operators`, con issuer errato, membership solo comunale, record disabilitato oppure contenente `organization_id`: **403**. `DevelopmentJwt` non può conferire privilegi platform neppure con `role=Superadmin`. I claim `role` e `groups` non attribuiscono privilegi; l'ID del tenant non può essere selezionato tramite body/query/header.
+
+Il token platform **privo del claim `organization_id`** non soddisfa nessuna policy comunale: `/context`, `/admin/*` e `/protocol/*` continuano a rispondere 403. L'accesso 200 a questa rotta non conferisce permessi applicativi oltre alla lettura del proprio stato. Un IdP reale, l'onboarding/approval e i permessi Superadmin granulari rimangono lavori futuri.

@@ -1,0 +1,22 @@
+# ADR 0028 — Boundary identità Superadmin OIDC separato dalle membership comunali (sola sessione)
+
+- Stato: Accepted come fondazione **read-only e fail-closed** per l'epica #10 (issue #34)
+- Data: 2026-11-15
+- Dipendenze: ADR 0001–0002, 0005–0007, 0011–0013, 0020–0022, 0025–0027; issue #2/#3/#5/#10
+- Riferimenti: [OpenID Connect Core — Issuer and Subject](https://openid.net/specs/openid-connect-core-1_0.html#ClaimStabilityAndUniqueness), [PostgreSQL SECURITY DEFINER](https://www.postgresql.org/docs/17/sql-createfunction.html), [ASP.NET Core policy authorization](https://learn.microsoft.com/en-us/aspnet/core/security/authorization/policies).
+
+## Contesto
+
+L'Admin comunale è una membership `(organization_id, issuer, sub, role)` nel DB che controlla **solo il proprio Comune**. Un ruolo globale letto dal claim JWT `role=Superadmin`, un bypass su `organization_id` o un'API che consente di scegliere tenant aprirebbe una escalation di privilegi. Il browser PKCE e il backend RS256/JWKS esistono, ma non è stato collegato un identity provider reale; gli script di onboarding e lifecycle dei Comuni usano oggi un DB owner con approvazione esterna.
+
+## Decisione
+
+1. **Identità piattaforma esplicita e separata.** Nuova tabella PostgreSQL `platform.platform_operators`, PK composta `identity_issuer` HTTPS + `subject` OIDC esatto, `is_active` con default **FALSE**, senza organization ID né auto-seeding/backfill. La migration 0010 è additiva, esplicitamente raw SQL; questa tabella non è esposta come `DbSet` EF e non attribuisce ruoli comunali. Solo un futuro processo di onboarding owner-reviewed può attivare un operatore; questa slice non concede ruoli reali.
+2. **Auth fail-closed lato API.** `PlatformOperatorRequirement` è distinto da `OrganizationRoleRequirement`. Richiede JWT OIDC RS256 validato dal middleware (issuer, aud, firma, scadenza), `iss`+`sub` attendibili e **assenza completa del claim `organization_id`**; rifiuta `DevelopmentJwt`, claim `role`/groups inventati, membership solo comunali e record revocati. Nessun fallback su email, nome utente o issuer NULL; l'identità non si seleziona mediante body/header/querystring.
+3. **Risoluzione DB con superficie minima.** Il ruolo SQL `comuni_app_runtime` NON ha `SELECT`, `INSERT`, `UPDATE`, `DELETE` su `platform.platform_operators`. La migration crea un predicato `platform.is_active_platform_operator(text,text)` con `SECURITY DEFINER`, `SET search_path = pg_catalog, platform` e `EXECUTE` revocato a PUBLIC. `scripts/postgres/provision-runtime-role.sql` concede **solo EXECUTE** sull'esatto predicato, senza enumerare il roster. Il repository invoca la funzione con parametri SQL interpolati EF, senza concatenazione di input.
+4. **Una sola rotta self-service e nessun dato cross-tenant.** `GET /api/v1/platform/session` risponde 200 **solo** se la membership platform è attiva e la policy è soddisfatta. Payload intenzionalmente ristretto a `{ "role": "Superadmin" }`, senza ID, issuer, subject, organizzazioni o altri dati. PUT/POST non sono esposti. Il token platform privo di `organization_id` non può chiamare `/api/v1/context`, Admin comunale, moduli o Protocollo: le vecchie policy tenant restano intatte. Un token con organization claim, **anche se il subject è anche operatore**, è respinto dalla rotta platform.
+5. **TDD RED → GREEN.** I test xUnit chiamano l'API OIDC contro JWKS RSA locale con PostgreSQL 17 e verificano 401/403/200, ruoli JWT fittizi, isolamento municipal/platform, mismatch issuer, revoca immediata e privilegi database con login runtime. I dati di test sono sintetici; non c'è altro frontend, database o servizio.
+
+## Limiti espliciti
+
+Non esiste ancora un workflow di enrollment operatori, verifica dell'identità esterna, doppia approvazione, MFA/session management, console UI, impersonificazione, lista degli enti o mutazione di impostazioni cross-tenant. Il predicato booleano, se abusato da un account runtime compromesso, può fungere da **oracolo di esistenza** su coppie issuer/sub indovinate; non permette la scansione della tabella ma non equivale a protezione completa contro SQL injection. La policy usa al momento l'audience API OIDC unica e richiede un'analisi di audience/scope e token separation per operazioni amministrative future. Non attivare operatori reali o amministrazione multi-tenant prima di approvazione, audit e test IdP/Azure live. Nessuna conformità GDPR, CAD, AgID o SPID/CIE è certificata. Le epiche #2/#5/#10 restano aperte.

@@ -77,3 +77,8 @@ Per **nuove** organization con UUID verificato, il runner PostgreSQL owner può 
 ## Test lifecycle Comune (#33 / ADR 0027)
 
 `scripts/postgres/set-organization-suspension.sql` implementa soltanto transizioni approvate offline `suspend`/`reactivate` con `COMUNI_LIFECYCLE_ORGANIZATION_ID`, `COMUNI_LIFECYCLE_ACTION`, `COMUNI_LIFECYCLE_CHANGE_TICKET`, `COMUNI_LIFECYCLE_APPROVER` e `COMUNI_LIFECYCLE_REASON_CODE`. Non è un endpoint API o un bottone Admin, e non eseguirlo come `comuni_app_runtime`. In CI `OrganizationLifecycleTests` verifica PostgreSQL reale, psql e blocchi 403 su un Comune sintetico; la riattivazione non riabilita membership disattivate o moduli. Leggere il runbook `docs/deployment.md` e ADR 0027 prima di qualunque change; provider e autorizzazioni dell'operatore non sono presenti nel repository.
+
+
+## Gate identità Superadmin read-only (#34 / ADR 0028)
+
+`/api/v1/platform/session` è un endpoint di verifica del proprio ruolo **esclusivamente OIDC** (non un accesso ai dati dei Comuni): richiede JWT RS256 verificato senza `organization_id` e riga owner-managed `platform.platform_operators` `is_active=TRUE`, non un claim JWT `role`. La migration EF `202611150010_PlatformOperatorIdentityBoundary` crea tabella e funzione booleana; dopo ogni migrazione eseguire lo script di provisioning runtime per il grant `EXECUTE` sulla funzione senza accesso alla tabella. In modalità DevelopmentJwt il test deve essere 403 senza alcun seed; le fixture OIDC RSA e il DB locale PostgreSQL generano soli operatori sintetici. Non inserire identità/ruoli Superadmin manualmente su DB reale: manca il processo di approval e onboarding.
