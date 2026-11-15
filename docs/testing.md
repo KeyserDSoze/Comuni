@@ -42,3 +42,11 @@ GitHub Actions ripete queste verifiche con PostgreSQL service.
 | API/PostgreSQL | tenant spoofing da body | secondo Comune invariato |
 | API/PostgreSQL | flag già nel valore richiesto | nessun audit aggiuntivo |
 | E2E/Playwright | pagina Amministrazione e toggle | visibile solo ad Admin, menu aggiornato, errore visibile su fallimento |
+
+## Test HTTP security (#15)
+
+- Configurazione del limiter: valori invalidi su permit e finestra fanno fallire l'avvio.
+- Partizione: un IP dichiarato via `X-Forwarded-For` non aggira la quota; per JWT autenticato il bucket è differenziato per `organization_id` + `sub`.
+- Tre richieste API anonime consentite nel fixture di test, la quarta è `429` con `Retry-After`, anche se il client cambia `X-Forwarded-For`.
+- Health check `/health/live` non è soggetto al limiter; response headers presenti anche sulle risposte 401; risposte API hanno `Cache-Control: no-store`.
+- Tutte le altre verifiche su modulo, ruolo e isolation continuano nella suite di regressione. Test e build nel workflow CI.

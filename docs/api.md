@@ -32,3 +32,9 @@ Gli endpoint amministrativi richiedono una **membership Admin attiva** nel Postg
 | PUT | `/api/v1/admin/modules/protocol` | Admin | Body `{"enabled":true|false}`, stato aggiornato in PostgreSQL e restituito |
 
 Anonimo: 401. Reader/Officer o organization sospesa: 403. Modulo non riconosciuto: 404. Campo `enabled` assente: 400. Il corpo non può scegliere il Comune da aggiornare; un eventuale `organizationId` inviato dal client è ignorato. Il cambio effettivo produce un evento audit `platform.module.protocol.enabled` o `platform.module.protocol.disabled` **nella stessa transazione**; una ripetizione identica è idempotente e non aggiunge audit. L'abilitazione è controllata lato backend in ogni use case: l'endpoint Protocollo restituisce 403 dopo la disattivazione.
+
+## Hardening HTTP (#15)
+
+Una finestra fissa in-memory per replica limita soltanto gli endpoint `/api`: default **120 richieste per 60 secondi** per identità JWT validata (`organization_id` + `sub`) o IP della connessione per richieste anonime. Superata la quota, risposta `429 Too Many Requests` con `Retry-After` (secondi, valore conservativo). Non fare retry aggressivo. `/health/live`, `/health/ready` e asset statici PWA non sono limitati. Non fidarsi di `X-Forwarded-For` fornito dai client.
+
+API incluse risposte 401/403/429 sono `Cache-Control: no-store`. Gli header di protezione browser si applicano a tutte le risposte. Questo non sostituisce WAF/edge e quote centralizzate per deployment multipli.

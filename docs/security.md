@@ -26,3 +26,11 @@
 ## Flusso amministrativo dei moduli — #13
 
 Il ruolo `Admin` è conferito da una membership attiva e verificata lato backend tramite `OrganizationRoleRequirement`, non dal JWT. Solo l'organization autenticata può consultare/modificare la propria configurazione `protocol`; nessun override del tenant da route, header o body. Aggiornamento feature flag e audit sono transazionali, con esito immediato nelle verifiche backend. La UI filtra il menu ma non costituisce confine di sicurezza. Questa slice **non** abilita operazioni platform/Superadmin, né una gestione generalizzata di cataloghi e dipendenze: #3 e #10 rimangono aperte.
+
+## Protezioni HTTP iniziali — issue #15
+
+Le richieste `/api` sono limitate mediante il rate limiter **in memoria per replica** di ASP.NET Core con finestra fissa (default **120 richieste/60 secondi**), senza coda, 429 e `Retry-After`. Le richieste con JWT valido sono partizionate per coppia `organization_id` e `sub`; richieste anonime/non autenticate per IP della connessione **senza fidarsi di X-Forwarded-For**. Health check e asset PWA sono esclusi. Parametri `Security:ApiRateLimit:PermitLimit` (1–10000) e `Security:ApiRateLimit:WindowSeconds` (1–3600) hanno validazione fail-fast.
+
+Risposte API incluse 401/403/429: `Cache-Control: no-store`, `Pragma: no-cache`. Tutte le risposte: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` restrittiva, CSP con script/worker solo dalla stessa origine e `frame-ancestors 'none'`. La CSP consente ancora CSS inline (`style-src 'unsafe-inline'`) per compatibilità e richiede revisione con il frontend definitivo.
+
+**Limiti obbligatori per il go-live:** con più repliche ACA la quota **non è globale**; istanze diverse non condividono contatori. Dietro reverse proxy l'IP visto da Kestrel potrebbe essere quello del proxy, con effetto di aggregazione sui client anonimi; non prendere mai `X-Forwarded-For` senza restringere i proxy fidati. Difesa DDoS, WAF, limiti edge, load test, proxy chain attendibile, HSTS e redirect HTTPS gestiti in frontiera richiedono configurazione/validazione Azure separata. Queste protezioni **non** risolvono PostgreSQL RLS e privilegi DB (resta aperta #5).
