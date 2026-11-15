@@ -67,3 +67,8 @@ Per aggiornare consapevolmente le dipendenze, modificare i manifest, eseguire da
 ## Test tecnico bootstrap primo Admin (#31)
 
 Lo script `scripts/postgres/bootstrap-initial-admin.sql` è riservato all'owner su una organization **già esistente e priva di Admin**; non usarlo sui seed Development con Admin legacy. La CI PostgreSQL 17 esegue `InitialAdminBootstrapTests` con organization e subject sintetici e `psql` presente nel runner; non c'è alcun IdP reale. Prima di una procedura autorizzata consultare ADR 0025 e `docs/deployment.md`. Il bootstrap richiede esplicitamente issuer, subject, organization UUID, change ticket e reviewer esterni: non è un backfill automatico e non è accessibile dalla SPA/API.
+
+
+## Provisioning tecnico di organizzazioni (ADR 0026 / #32)
+
+Per **nuove** organization con UUID verificato, il runner PostgreSQL owner può usare `scripts/postgres/provision-organization.sql` dopo aver valorizzato `COMUNI_PROVISION_ORGANIZATION_ID`, `COMUNI_PROVISION_ORGANIZATION_NAME`, `COMUNI_PROVISION_CHANGE_TICKET`, `COMUNI_PROVISION_APPROVER`. Richiede change e revisore approvati esternamente; nessun segreto, dato personale o password nel repository. Vedere `docs/deployment.md` per comando `psql`, TLS, guardie owner e verifiche post-esecuzione. Lo script non assegna ruoli: il primo Admin si crea in un passaggio **separato** (ADR 0025) solo dopo verifica issuer/sub IdP. La riga `protocol` nasce disabled e può essere attivata esclusivamente da un Admin autenticato via l'API già presente; tutti i test CI usano organizzazioni sintetiche.

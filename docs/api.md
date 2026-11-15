@@ -76,3 +76,8 @@ La PK attuale non permette che un medesimo `subject` abbia la stessa membership 
 ## Provisioning primo Admin (nessuna API, #31)
 
 Il primo Admin OIDC non è assegnabile da HTTP, né dal menu Amministrazione, né dagli endpoint Reader/Officer. Esiste solo uno script owner PostgreSQL offline `scripts/postgres/bootstrap-initial-admin.sql`, con issuer/sub attestati esternamente, organization già attiva e vuota di Admin, approvazione change separata e audit atomico. Le policy API per Reader/Officer, il JWT OIDC e il divieto runtime di assegnare Admin restano invariati. Vedere ADR 0025 e `docs/deployment.md` per prerequisiti e rischio di una membership illegittima.
+
+
+## Onboarding organization (nessun endpoint HTTP, #32)
+
+La creazione di una nuova organization **non è** accessibile agli Admin comunali né al browser. `scripts/postgres/provision-organization.sql` è un'operazione owner-only offline (ADR 0026) con UUID e nome approvati esternamente; inserisce `platform.organizations`, il flag `protocol` **disabled** e l'audit `platform.organization.created` atomicamente, senza creare membership. Un nuovo Comune resta 403 per tutte le route tenant protette finché non è predisposto un primo Admin OIDC tramite il diverso strumento owner (#31 / ADR 0025), e il Protocollo richiede successiva attivazione Admin. Nessun endpoint Superadmin o tenant override è stato aggiunto.

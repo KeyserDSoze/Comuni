@@ -91,3 +91,8 @@ Il confine auth separa due modalità. `Oidc` richiede che `issuer + subject + or
 ## Boundary iniziale per l'Admin OIDC (ADR 0025 / #31)
 
 Quando non esiste ancora un Admin di Comune, non viene introdotta una scorciatoia API/SPA né un secondo identity service. Un runner owner con change ticket verificato fuori dal sistema aggiunge **una sola membership Admin** con `identity_issuer`+`subject` esatti e audit atomico nello stesso PostgreSQL, serializzando la riga organization. Il login runtime continua a non poter scrivere Admin. Ogni operazione successiva passa per la stessa API e membership RLS esistenti; il provider esterno e la console Superadmin rimangono attività distinte.
+
+
+## Creazione isolata dei Comuni — bootstrap offline (ADR 0026 / #32)
+
+Il Core non espone ancora la creazione cross-tenant all'API: un comando `psql` eseguibile **solo con owner dello schema** crea una organization e un flag `protocol=FALSE` con un evento di audit in un'unica transazione, acquisendo un advisory lock per UUID. Le membership sono vuote; il contesto tenant e i permessi continuano a essere imposti da JWT verificato, membership PostgreSQL, RLS firmata e stato organization, non da un parametro client. Il bootstrap del primo Admin OIDC (ADR 0025) è **una operazione distinta** subordinata alla verifica esterna della persona. La console Superadmin, l'approvazione real-time e il lifecycle completo di Comuni rimangono #3/#10; una sola API .NET, un React e un PostgreSQL.

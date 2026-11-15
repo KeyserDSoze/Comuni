@@ -226,3 +226,25 @@ psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode
 `PGPASSWORD`/connessione devono arrivare dal secret store dell'operatore, non essere scritti nella shell history. Un exit non-zero blocca tutto; **non** ignorarlo. Il comando è serializzato dalla row lock organization, crea un solo Admin e un evento di audit atomico, e un identico retry non aggiunge audit. Non è consentito eseguirlo con `comuni_app_runtime`. In caso di successo, in una sessione owner autorizzata **separata** verificare che vi sia esattamente un Admin attivo con issuer e subject previsti, un evento `platform.membership.admin.initialized` con correlation `bootstrap:<ticket>`, e provare un access token di test OIDC breve: accesso al proprio tenant consentito, a un altro tenant e con issuer errato negato. Non riportare token o subject in log operativi.
 
 **Errore, incident, rollback:** non disabilitare i controlli, non modificare a mano `identity_issuer` per un errore o migrare automaticamente Admin legacy. Conservare l'audit, bloccare login/release, aprire un change owner separato con approvazione per remediation e ripetere la verifica IdP. Non viene eseguito alcun accesso reale da questa repository e non è garantita conformità PA.
+
+
+## Creazione owner-only di un nuovo Comune (ADR 0026 / #32)
+
+L'onboarding tecnico `scripts/postgres/provision-organization.sql` crea una **organization mai esistita** in PostgreSQL, il flag `protocol` inizialmente **disabilitato** e un evento append-only `platform.organization.created` nella stessa transazione. Non crea alcun utente, membership, IdP, organizzazione di secondo livello o applicazione. L'organization è memorizzata con `is_suspended=FALSE`, ma **tutte le API tenant richiedono membership backend attiva** e restano 403 fino al bootstrap separato del primo Admin (#31). Il Protocollo resta 403 fino all'abilitazione consapevole dall'Admin.
+
+**Prerequisiti obbligatori esterni, non verificabili dallo script:** confermare l'identità dell'ente e l'autorizzazione della piattaforma a gestirlo, decidere e approvare un UUID univoco, sottoporre un change ticket a un **revisore indipendente**, verificare l'ambiente, il principio di least privilege e le conseguenze sul trattamento dati. Non usare l'ambiente live con dati PA reali prima delle verifiche formali. Database PostgreSQL migrato (incluse audit e RLS), runner privato con accesso alla subnet DB e ruolo proprietario delle tabelle platform (non `comuni_app_runtime`), TLS e credenziali del vault.
+
+Preparare nel runner, **senza stampare valori in command line/history o issue**, queste quattro variabili:
+- `COMUNI_PROVISION_ORGANIZATION_ID`: UUID non nullo del Comune approvato.
+- `COMUNI_PROVISION_ORGANIZATION_NAME`: denominazione 1–200 caratteri, senza spazi esterni o caratteri di controllo.
+- `COMUNI_PROVISION_CHANGE_TICKET`: riferimento change approvato (senza dati personali).
+- `COMUNI_PROVISION_APPROVER`: alias reviewer esterno. Non equivale a una firma digitale o approvazione autenticata dall'app.
+
+Eseguire con variabili già in environment, senza `set -x`, `psql -a` o `psql -e`:
+```bash
+psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+  -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-organization.sql
+```
+Le credenziali `PGPASSWORD` arrivano dal vault/runner protetto, non da GitHub o argomenti CLI. **Exit non zero = stop immediato**: non ritentare con UUID/nome diversi senza nuovo change. Un retry con **stesso UUID/nome** è no-op soltanto quando la riga ha audit di provisioning coerente e la feature `protocol` esiste; non riattiva un Comune sospeso, né cambia moduli o utenti già gestiti. Il lock advisory per UUID serializza chiamate concorrenti. In caso di UUID già usato con nome diverso o riga legacy senza audit, aprire un incident/change: non usare UPDATE correttivi automatici.
+
+**Verifica post-esecuzione (owner, read-only e senza esportare dati personali):** esattamente una organization con nome/ID attesi, nessuna membership, riga `protocol.enabled=FALSE`, evento unico `platform.organization.created` con `resource_id=organization_id` e correlation `bootstrap:<ticket>`; token sintetico privo di membership deve ricevere 403 su `/api/v1/context`. Completare separatamente ADR 0025 / #31 per il primo Admin con issuer+sub verificati dal provider; quindi attivare manualmente i moduli dall'Admin usando API già protette. Nessun deploy, utenti reali o approvazione sono stati effettuati in questa CI.
