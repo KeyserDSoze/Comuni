@@ -73,8 +73,6 @@ public sealed class ApiProtectionFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Jwt__SigningKey", ApiFactory.SigningKey);
         Environment.SetEnvironmentVariable("Jwt__Issuer", "Comuni.Tests");
         Environment.SetEnvironmentVariable("Jwt__Audience", "Comuni.Api");
-        Environment.SetEnvironmentVariable("Security__ApiRateLimit__PermitLimit", "3");
-        Environment.SetEnvironmentVariable("Security__ApiRateLimit__WindowSeconds", "60");
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
