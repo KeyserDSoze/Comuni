@@ -43,7 +43,8 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
             RedirectStandardError = true
         };
         foreach (var arg in new[] { "-X", "-q", "-v", "ON_ERROR_STOP=1",
-            "-h", b.Host, "-p", b.Port.ToString(), "-U", b.Username,
+            "-h", b.Host, "-p", b.Port.ToString(), "-U",
+            b.Username ?? throw new InvalidOperationException("PostgreSQL test username required."),
             "-d", b.Database, "-f", Script })
             start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = b.Password;
