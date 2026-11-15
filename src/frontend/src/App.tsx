@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowRight, Building2, CheckCircle2, ClipboardList, Files, Globe2,
@@ -8,6 +8,11 @@ import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { getContext, getRecords, getAdminModules, setAdminModule, registerRecord, type OrganizationContext, type ProtocolRecord, type AdminModule } from './api';
 import { cn } from './lib/utils';
+import {
+  beginOidcLogin, captureOidcCallback, clearPendingOidc,
+  completeOidcLogin, loadBrowserOidc,
+  type BrowserOidcConfig, type OidcAccessToken
+} from './oidc';
 
 type Page = 'dashboard' | 'protocol' | 'admin';
 
@@ -30,6 +35,9 @@ export function App() {
   const { t, i18n } = useTranslation();
   const [tokenInput, setTokenInput] = useState('');
   const [token, setToken] = useState('');
+  const [browserOidc, setBrowserOidc] = useState<BrowserOidcConfig | null>(null);
+  const [oidcExpiresAt, setOidcExpiresAt] = useState<number | null>(null);
+  const authBootstrap = useRef<Promise<{ config: BrowserOidcConfig; result: OidcAccessToken | null }> | null>(null);
   const [context, setContext] = useState<OrganizationContext | null>(null);
   const [page, setPage] = useState<Page>('dashboard');
   const [dark, setDark] = useState(false);
@@ -50,6 +58,54 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
   }, [dark]);
+
+  useEffect(() => {
+    let active = true;
+    // React StrictMode invokes effects twice in Development. Keep the same
+    // single-use callback/PKCE exchange promise across both invocations.
+    if (!authBootstrap.current) {
+      const callback = captureOidcCallback();
+      authBootstrap.current = loadBrowserOidc().then(async config => ({
+        config, result: await completeOidcLogin(config, callback)
+      }));
+    }
+    void authBootstrap.current.then(({ config, result }) => {
+      if (!active) return;
+      setBrowserOidc(config);
+      if (result) {
+        setToken(result.accessToken);
+        setOidcExpiresAt(result.expiresAt);
+        setPage('dashboard');
+      }
+    }).catch(() => {
+      if (!active) return;
+      // Never reopen the technical JWT form on a failed OIDC callback.
+      setBrowserOidc({ mode: 'Oidc', enabled: false, issuer: null,
+        clientId: null, authorizationEndpoint: null, tokenEndpoint: null, scope: null });
+      setError(t('oidcError'));
+    });
+    return () => { active = false; };
+  }, [t]);
+
+  useEffect(() => {
+    if (!oidcExpiresAt) return;
+    const remaining = oidcExpiresAt - Date.now() - 30_000;
+    if (remaining <= 0) {
+      setToken('');
+      setContext(null);
+      setOidcExpiresAt(null);
+      setError(t('oidcExpired'));
+      return;
+    }
+    const expiryTimer = window.setTimeout(() => {
+      setToken('');
+      setContext(null);
+      setRecords([]);
+      setOidcExpiresAt(null);
+      setError(t('oidcExpired'));
+    }, remaining);
+    return () => window.clearTimeout(expiryTimer);
+  }, [oidcExpiresAt, t]);
 
   useEffect(() => {
     if (!token) return;
@@ -127,7 +183,15 @@ export function App() {
     }
   }
 
+  function startOidc() {
+    if (!browserOidc?.enabled) return;
+    setError('');
+    void beginOidcLogin(browserOidc).catch(() => setError(t('oidcError')));
+  }
+
   function logout() {
+    clearPendingOidc();
+    setOidcExpiresAt(null);
     setToken('');
     setTokenInput('');
     setContext(null);
@@ -191,9 +255,14 @@ export function App() {
           <Card className="border-sky-200/60 shadow-xl dark:border-slate-700">
             <CardHeader>
               <CardTitle>{t('access')}</CardTitle>
-              <p className="text-sm text-muted-foreground">{t('tokenHelp')}</p>
+              <p className="text-sm text-muted-foreground">
+                {browserOidc?.mode === 'Oidc' ? t('oidcHelp') : t('tokenHelp')}
+              </p>
             </CardHeader>
             <CardContent>
+              {browserOidc === null ? (
+                <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p>
+              ) : browserOidc.mode === 'DevelopmentJwt' ? (
               <form onSubmit={enter} className="space-y-4">
                 <div>
                   <label htmlFor="jwt" className="mb-2 block text-sm font-medium">{t('tokenLabel')}</label>
@@ -202,9 +271,15 @@ export function App() {
                     value={tokenInput} onChange={event => setTokenInput(event.target.value)}
                     placeholder={t('tokenPlaceholder')} required />
                 </div>
-                {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
+
                 <Button className="w-full" type="submit">{t('useToken')} <ArrowRight aria-hidden="true" className="h-4 w-4" /></Button>
               </form>
+              ) : browserOidc.enabled ? (
+                <Button className="w-full" type="button" onClick={startOidc}>
+                  {t('oidcSignIn')} <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                </Button>
+              ) : <p className="text-sm text-muted-foreground">{t('oidcNotConfigured')}</p>}
+              {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
               <p className="mt-5 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">{t('demoNotice')}</p>
             </CardContent>
           </Card>

@@ -5,6 +5,10 @@ const organizationId = '11111111-1111-1111-1111-111111111111';
 async function openDashboard(page: import('@playwright/test').Page, roles: string[]) {
   let enabled = true;
   let failUpdate = false;
+  await page.route('**/api/v1/auth/browser', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ mode: 'DevelopmentJwt', enabled: false })
+  }));
   await page.route('**/api/v1/context', route => route.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify({
