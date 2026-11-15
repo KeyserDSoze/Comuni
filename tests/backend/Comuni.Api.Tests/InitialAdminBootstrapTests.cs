@@ -61,11 +61,11 @@ public sealed class InitialAdminBootstrapTests
     private static async Task<(int ExitCode, string Output)> BootstrapAsync(
         Guid org, string? issuer = "https://identity.example.test/tenant/v2.0",
         string? subject = "synthetic-first-admin", string? ticket = "CHANGE-2026-00031",
-        string? reviewer = "security-reviewer")
+        string? reviewer = "security-reviewer", string? connectionOverride = null)
     {
         var script = ScriptPath;
         Assert.True(File.Exists(script), "Owner-only bootstrap script missing.");
-        var db = new NpgsqlConnectionStringBuilder(ConnectionString);
+        var db = new NpgsqlConnectionStringBuilder(connectionOverride ?? ConnectionString);
         var start = new ProcessStartInfo("psql")
         {
             RedirectStandardOutput = true,
@@ -176,6 +176,18 @@ public sealed class InitialAdminBootstrapTests
         Assert.NotEqual(0, (await BootstrapAsync(org, subject: " signed-in-admin ")).ExitCode);
         Assert.NotEqual(0, (await BootstrapAsync(org, ticket: null)).ExitCode);
         Assert.NotEqual(0, (await BootstrapAsync(org, reviewer: null)).ExitCode);
+        Assert.Equal((0L, 0L), await CountsAsync(org));
+    }
+
+    [Fact]
+    public async Task Restricted_runtime_database_login_cannot_bootstrap_Admin()
+    {
+        var org = await SeedOrganizationAsync();
+        var runtime = Environment.GetEnvironmentVariable("TEST_RUNTIME_DATABASE_CONNECTION")
+            ?? throw new InvalidOperationException("Restricted runtime connection required.");
+
+        var attempted = await BootstrapAsync(org, connectionOverride: runtime);
+        Assert.NotEqual(0, attempted.ExitCode);
         Assert.Equal((0L, 0L), await CountsAsync(org));
     }
 

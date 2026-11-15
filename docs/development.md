@@ -63,3 +63,7 @@ Questo runbook è **una specifica per una futura procedura autorizzata**: nessun
 Dalla root usare sempre `npm ci` dopo il clone (Node.js 22 e npm 10). `npm ci` rifiuta manifest e lockfile incoerenti e non aggiorna il lockfile. Il file `package-lock.json` versionato nella root risolve anche il workspace `src/frontend`: **non** installare separatamente dentro la cartella frontend e non creare un secondo lockfile.
 
 Per aggiornare consapevolmente le dipendenze, modificare i manifest, eseguire dalla **root** `npm install --package-lock-only --ignore-scripts` con un registry affidabile, esaminare le differenze di lockfile incluse URL e integrity SHA-512, quindi verificare `npm ci`, build e Playwright prima di committare manifest e lock insieme. Non usare `npm audit fix` come aggiornamento non revisionato. La CI su `main` riesegue `npm ci` in frontend e Docker, oltre all'audit npm runtime.
+
+## Test tecnico bootstrap primo Admin (#31)
+
+Lo script `scripts/postgres/bootstrap-initial-admin.sql` è riservato all'owner su una organization **già esistente e priva di Admin**; non usarlo sui seed Development con Admin legacy. La CI PostgreSQL 17 esegue `InitialAdminBootstrapTests` con organization e subject sintetici e `psql` presente nel runner; non c'è alcun IdP reale. Prima di una procedura autorizzata consultare ADR 0025 e `docs/deployment.md`. Il bootstrap richiede esplicitamente issuer, subject, organization UUID, change ticket e reviewer esterni: non è un backfill automatico e non è accessibile dalla SPA/API.

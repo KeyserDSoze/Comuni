@@ -201,3 +201,28 @@ python3 scripts/azure/smoke-candidate-oidc.py \
 La migration `202611150009_MembershipIdentityIssuer` è additiva ma **non** converte dati legacy. Sotto `Oidc` le membership con `identity_issuer=NULL` sono **non autorizzate**. Prima di cambiare Authority/issuer, pianificare provisioning con change approval e identità verificate in IdP; assicurare almeno un Admin collegato per ciascun Comune mediante workflow owner controllato e audit esterno. La differenza tra issuer del discovery token e issuer memorizzato è case-sensitive. Se esiste un record legacy/conflicting, la API ritorna 409 e non trasferisce autorizzazioni. Re-eseguire dopo migrazione `scripts/postgres/provision-runtime-role.sql` per il nuovo grant INSERT(identity_issuer) senza concedere UPDATE. Validare con il client HTTP OIDC e con due tenant sintetici, non con dati PA reali.
 
 **Nessun provisioning su Azure o IdP è stato eseguito** in questa implementazione e nessun script automatico di backfill viene incluso. Attivare OIDC prematuramente causa intenzionalmente 403 per le membership non verificate.
+
+## Bootstrap controllato del primo Admin OIDC (ADR 0025 / #31)
+
+Questo runbook si applica **soltanto** a un Comune già creato, attivo, privo di qualunque membership Admin. Non crea organization, IdP, sessioni, credenziali o token e non può trasferire una riga Admin legacy. Non è idoneo per un ambiente contenente dati reali senza verifiche di sicurezza, accessi e autorizzazioni.
+
+**Gate umano indispensabile, fuori dallo script:** identificare legalmente l'operatore responsabile, ottenere change ticket approvato da reviewer indipendente, verificare attraverso il provider OIDC reale e la sua discovery HTTPS l'issuer canonico `iss`, la sua audience API, la validità di un access token firmato e il `sub` esatto/case-sensitive dell'utente da nominare. Verificare la titolarità del Comune e che quella persona debba effettivamente ricevere Admin. Non dedurre il `sub` da email, nome, codice fiscale o un altro provider. Il ticket deve registrare approvatore, responsabile owner del database, data e piano di incident handling; lo script non può verificarne l'autenticità.
+
+**Prerequisiti:** migrazioni PostgreSQL fino al binding `identity_issuer` (ADR 0022), database creato su subnet privata, schema owner distinto da `comuni_app_runtime`, client psql e TLS, connessione owner e materiale sensibile fornito **solo** da un vault/runner autorizzato. Esaminare in read-only `platform.organizations` e `platform.organization_memberships` per ID/stato/ruoli; qualunque Admin preesistente richiede un processo distinto, **non** questo bootstrap. Preparare nell'ambiente protetto le cinque variabili richieste (non inserirne i valori in comandi, log, issue, `tfvars`, shell history o GitHub Actions):
+
+- `COMUNI_BOOTSTRAP_ORGANIZATION_ID`: UUID del Comune approvato.
+- `COMUNI_BOOTSTRAP_IDENTITY_ISSUER`: `iss` OIDC HTTPS esatto, già verificato.
+- `COMUNI_BOOTSTRAP_SUBJECT`: `sub` verificato per quell'issuer.
+- `COMUNI_BOOTSTRAP_CHANGE_TICKET`: riferimento change approvato, senza dati personali.
+- `COMUNI_BOOTSTRAP_APPROVER`: alias del revisore esterno (non verifica crittografica).
+
+Con queste variabili già presenti nel runner, eseguire **senza** `set -x`, `psql -a` o `psql -e` e senza password nella CLI:
+
+```bash
+psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+  -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/bootstrap-initial-admin.sql
+```
+
+`PGPASSWORD`/connessione devono arrivare dal secret store dell'operatore, non essere scritti nella shell history. Un exit non-zero blocca tutto; **non** ignorarlo. Il comando è serializzato dalla row lock organization, crea un solo Admin e un evento di audit atomico, e un identico retry non aggiunge audit. Non è consentito eseguirlo con `comuni_app_runtime`. In caso di successo, in una sessione owner autorizzata **separata** verificare che vi sia esattamente un Admin attivo con issuer e subject previsti, un evento `platform.membership.admin.initialized` con correlation `bootstrap:<ticket>`, e provare un access token di test OIDC breve: accesso al proprio tenant consentito, a un altro tenant e con issuer errato negato. Non riportare token o subject in log operativi.
+
+**Errore, incident, rollback:** non disabilitare i controlli, non modificare a mano `identity_issuer` per un errore o migrare automaticamente Admin legacy. Conservare l'audit, bloccare login/release, aprire un change owner separato con approvazione per remediation e ripetere la verifica IdP. Non viene eseguito alcun accesso reale da questa repository e non è garantita conformità PA.

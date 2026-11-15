@@ -72,3 +72,7 @@ In produzione `Authentication:Mode=Oidc` ogni operazione protetta richiede un JW
 - Se esiste già una riga `(organization_id, subject, role)` con issuer diverso o NULL in modalità OIDC, il PUT **rifiuta il riassociamento** con `409 Conflict` (code `identity_issuer_mismatch`); la procedura di verifica del provider/migrazione deve essere autorizzata separatamente. No-op con lo stesso issuer non aggiunge audit.
 
 La PK attuale non permette che un medesimo `subject` abbia la stessa membership `role` contemporaneamente presso due issuer nello stesso Comune. Il repository supporta **un solo provider fidato** per l'API; nessun alias/multi-provider o automatismo di trasferimento autorizzazioni è disponibile.
+
+## Provisioning primo Admin (nessuna API, #31)
+
+Il primo Admin OIDC non è assegnabile da HTTP, né dal menu Amministrazione, né dagli endpoint Reader/Officer. Esiste solo uno script owner PostgreSQL offline `scripts/postgres/bootstrap-initial-admin.sql`, con issuer/sub attestati esternamente, organization già attiva e vuota di Admin, approvazione change separata e audit atomico. Le policy API per Reader/Officer, il JWT OIDC e il divieto runtime di assegnare Admin restano invariati. Vedere ADR 0025 e `docs/deployment.md` per prerequisiti e rischio di una membership illegittima.

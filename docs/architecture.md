@@ -87,3 +87,7 @@ Nel Core `MembershipAdministrationService` implementa la validazione di tenant/r
 ## Membership vincolata a issuer OIDC (ADR 0022)
 
 Il confine auth separa due modalità. `Oidc` richiede che `issuer + subject + organization_id` provenienti dal Principal JWT validato corrispondano alla membership persistita con `identity_issuer` non-NULL (migrazione 0009). `DevelopmentJwt` consente per demo le righe senza issuer, ma non si può attivare in Production. `OrganizationRoleHandler` e `/api/v1/context` interrogano la stessa `OrganizationMembershipStore` con `iss` autenticato; la policy PostgreSQL RLS rimane tenant-scoped. Il service Admin passa l'issuer del JWT verificato al repository, e il repository usa un INSERT con binding immutabile e verifica di conflitto su righe legacy; spostare una riga tra provider richiede autorizzazione operativa separata. La UI mostra issuer in sola lettura; una sola API, un React e lo stesso PostgreSQL.
+
+## Boundary iniziale per l'Admin OIDC (ADR 0025 / #31)
+
+Quando non esiste ancora un Admin di Comune, non viene introdotta una scorciatoia API/SPA né un secondo identity service. Un runner owner con change ticket verificato fuori dal sistema aggiunge **una sola membership Admin** con `identity_issuer`+`subject` esatti e audit atomico nello stesso PostgreSQL, serializzando la riga organization. Il login runtime continua a non poter scrivere Admin. Ogni operazione successiva passa per la stessa API e membership RLS esistenti; il provider esterno e la console Superadmin rimangono attività distinte.
