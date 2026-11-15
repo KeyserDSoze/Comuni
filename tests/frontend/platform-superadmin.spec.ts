@@ -92,15 +92,29 @@ test('Admin comunale non ottiene menu Superadmin nemmeno se il JWT dichiara quel
   await expect(page.getByRole('navigation').getByText('Amministrazione')).toBeVisible();
 });
 
-test('OIDC non autorizzato e payload inatteso 200 non aprono la console', async ({ page }) => {
-  let reply: PlatformResponse = { status: 403 };
-  await loginOidc(page, () => reply);
+test('401/403 platform rifiutati non aprono la console con un access token OIDC', async ({ page }) => {
+  await loginOidc(page, () => ({ status: 401 }));
   await expect(page.getByRole('heading', { name: 'Area Superadmin' })).toHaveCount(0);
   await expect(page.getByRole('navigation').getByRole('button', { name: 'Superadmin' })).toHaveCount(0);
-  // A 200 body with fabricated tenant fields cannot be treated as valid session.
+});
+
+test('payload platform 200 inatteso è rifiutato durante la sessione attiva', async ({ page }) => {
+  let reply: PlatformResponse = { status: 200 };
+  const auth = await loginOidc(page, () => reply);
+  await expect(page.getByRole('heading', { name: 'Area Superadmin' })).toBeVisible();
+  const before = auth.calls();
   reply = { status: 200, payload: { role: 'Superadmin', organizations: ['private-tenant'] } };
-  await page.reload();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => auth.calls()).toBeGreaterThan(before);
   await expect(page.getByRole('heading', { name: 'Area Superadmin' })).toHaveCount(0);
+});
+
+test('ambiguità fra risposta tenant 200 e platform 200 nega entrambi i contesti', async ({ page }) => {
+  await loginOidc(page, () => ({ status: 200 }), 200);
+  await expect(page.getByRole('heading', { name: 'Area Superadmin' })).toHaveCount(0);
+  await expect(page.locator('header').getByText('Comune Riservato')).toHaveCount(0);
+  await expect(page.getByRole('navigation').getByRole('button', { name: 'Superadmin' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toBeVisible();
 });
 
 test('revoca 403 durante la sessione nasconde subito la console su focus', async ({ page }) => {
