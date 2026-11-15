@@ -76,6 +76,7 @@ public sealed class RuntimeDatabasePrivilegesTests
         var options = new DbContextOptionsBuilder<ComuniDbContext>()
             .UseNpgsql(RuntimeConnection).Options;
         await using var db = new ComuniDbContext(options, new CurrentTestOrganization(org));
+        await using var tenant = await TenantDatabaseTransaction.BeginAsync(db, CancellationToken.None);
 
         Assert.True(await db.Organizations.AsNoTracking().AnyAsync(x => x.Id == org));
         Assert.True(await db.OrganizationMemberships.AsNoTracking()
@@ -94,6 +95,7 @@ public sealed class RuntimeDatabasePrivilegesTests
         Assert.Equal(ModuleUpdateStatus.Updated,
             await service.SetEnabledAsync(org, "protocol", false, moduleAudit, CancellationToken.None));
 
+        await tenant.CommitAsync();
         await using var admin = new NpgsqlConnection(AdminConnection);
         await admin.OpenAsync();
         await using var check = new NpgsqlCommand("""
