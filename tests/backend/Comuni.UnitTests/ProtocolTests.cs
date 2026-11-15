@@ -1,4 +1,5 @@
 using Comuni.Business.Organizations;
+using Comuni.Business.Audit;
 using Comuni.Business.Protocol;
 using Comuni.Domains.Protocol;
 using Comuni.Domains.Audit;
