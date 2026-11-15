@@ -53,7 +53,7 @@ def fixture_plan():
         "ingress": [{
             "traffic_weight": [
                 {"latest_revision": False, "revision_suffix": STABLE_REVISION, "percentage": 100},
-                {"latest_revision": True, "revision_suffix": None, "percentage": 0},
+                {"latest_revision": True, "revision_suffix": None, "percentage": 0, "label": CANDIDATE_REVISION},
             ],
         }],
     }
@@ -73,6 +73,7 @@ class StagedRolloutTests(unittest.TestCase):
         self.assertIn("revision_suffix = var.candidate_revision_suffix", TERRAFORM)
         self.assertRegex(TERRAFORM, r'min_replicas\s*=\s*1')
         self.assertIn("revision_suffix = var.stable_revision_suffix", TERRAFORM)
+        self.assertIn("label           = var.candidate_revision_suffix", TERRAFORM)
         self.assertRegex(TERRAFORM, r'percentage\s*=\s*0\s+latest_revision\s*=\s*true')
         self.assertNotRegex(TERRAFORM, r'percentage\s*=\s*100\s+latest_revision\s*=\s*true')
         for name in ("stable_revision_suffix", "candidate_revision_suffix", "stable_tenant_proof_secret_version"):
@@ -161,6 +162,17 @@ class StagedRolloutTests(unittest.TestCase):
         cases.append(p)
         for plan in cases:
             self.assertNotEqual(0, self.gate(plan).returncode)
+
+    def test_plan_rejects_candidate_label_missing_or_pointing_elsewhere(self):
+        plan = fixture_plan()
+        plan["resource_changes"][0]["change"]["after"]["ingress"][0]["traffic_weight"][1].pop("label")
+        self.assertNotEqual(0, self.gate(plan).returncode)
+        plan = fixture_plan()
+        plan["resource_changes"][0]["change"]["after"]["ingress"][0]["traffic_weight"][1]["label"] = "stable"
+        self.assertNotEqual(0, self.gate(plan).returncode)
+        plan = fixture_plan()
+        plan["resource_changes"][0]["change"]["after"]["ingress"][0]["traffic_weight"][0]["label"] = CANDIDATE_REVISION
+        self.assertNotEqual(0, self.gate(plan).returncode)
 
     def test_auto_promotion_wrong_suffix_and_missing_key_id_are_rejected(self):
         cases = []

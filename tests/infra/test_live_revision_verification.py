@@ -54,7 +54,7 @@ def valid_revisions():
 def valid_traffic():
     return [
         {"revisionName": APP + "-" + STABLE, "latestRevision": False, "weight": 100},
-        {"latestRevision": True, "weight": 0},
+        {"latestRevision": True, "weight": 0, "label": CANDIDATE},
     ]
 
 
@@ -169,6 +169,22 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         for revisions in cases:
             result, _ = self.call(revisions=revisions)
             self.assertNotEqual(0, result.returncode)
+
+    def test_rejects_missing_or_misdirected_candidate_label(self):
+        p = valid_traffic()
+        p[1].pop("label")
+        result, _ = self.call(traffic=p)
+        self.assertNotEqual(0, result.returncode)
+
+        p = valid_traffic()
+        p[1]["label"] = "wrong-label"
+        result, _ = self.call(traffic=p)
+        self.assertNotEqual(0, result.returncode)
+
+        p = valid_traffic()
+        p[0]["label"] = CANDIDATE
+        result, _ = self.call(traffic=p)
+        self.assertNotEqual(0, result.returncode)
 
     def test_rejects_traffic_drift_or_automatic_promotion(self):
         cases = []
