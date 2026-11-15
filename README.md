@@ -33,3 +33,7 @@ La vertical slice attuale è **dimostrativa, non pronta per dati comunali reali*
 ## Issue tracking
 
 Le [GitHub Issues](https://github.com/KeyserDSoze/Comuni/issues) sono la fonte di verità per roadmap, stato, dipendenze e criteri di accettazione. Prima di ogni sessione verificare issue e CI di `main`. Vedere [convenzioni di issue](docs/issues.md).
+
+## Identità API (in corso)
+
+La modalità di produzione ora richiede `Authentication:Mode=Oidc`, `Authentication:Authority=https://...`, `Authentication:Audience=...` per validare token RS256 tramite JWKS (ADR 0007). In Development/Testing soltanto, i token demo HS256 restano disponibili con `DevelopmentJwt`. Non è un login OIDC completo: l'interfaccia non possiede ancora un flusso OAuth e manca il provider reale, oltre al provisioning utenti per Comune (issue #2).

@@ -3,7 +3,7 @@
 Base path: `/api/v1`; OpenAPI: `/openapi/v1.json` (generato da ASP.NET Core).
 
 ## Autenticazione
-`Authorization: Bearer <JWT>`. Firmato HS256, issuer e audience configurati; `organization_id` = GUID e `sub` = identità esterna. **La policy legge i ruoli effettivi (`Admin`, `Officer`, `Reader`) da `platform.organization_memberships`, solo membership attive**. Il claim `role`, anche se presente nel JWT, non conferisce privilegi. L'organization deriva **solo** dall'identità verificata. OIDC/provider esterno è una fase successiva (ADR 0004, 0005).
+ `Authorization: Bearer <JWT>`. Solo in Development/Testing è disponibile HS256 locale (`DevelopmentJwt`); in Production l'API accetta esclusivamente access token RS256 validati da un issuer OIDC HTTPS tramite metadata/JWKS (ADR 0007). `organization_id` = GUID e `sub` = identità esterna. **La policy legge i ruoli effettivi (`Admin`, `Officer`, `Reader`) da `platform.organization_memberships`, solo membership attive**. Il claim `role`, anche se presente nel JWT, non conferisce privilegi. L'organization deriva **solo** dall'identità verificata. La validazione OIDC è implementata, ma l'emissione/ottenimento reale del token, login frontend, onboarding e ruoli amministrativi restano da sviluppare (ADR 0005/0007 e issue #2).
 
 | Metodo | Endpoint | Ruoli | Note |
 | --- | --- | --- | --- |

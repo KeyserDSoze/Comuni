@@ -22,6 +22,11 @@ Il bootstrap è sviluppato in due incrementi registrati su `main`: specifiche/te
 | Business | registrazione associa record a evento audit | stessa organization e resource ID |
 | API/PostgreSQL | POST Protocollo riuscita | 1 AuditEvent con actor e correlation del server |
 | API/PostgreSQL | tentativi UPDATE/DELETE audit | trigger rifiuta la mutazione |
+| API/unit | Production + DevelopmentJwt | startup rifiutato |
+| API/unit | Authority OIDC non HTTPS o Audience mancante | startup rifiutato |
+| API/integration | RS256 trusted OIDC JWKS locale | 200, membership da PostgreSQL |
+| API/integration | issuer, audience, alg HS256 o scadenza errati | 401 |
+| API/integration | OIDC valido ma membership assente/Reader che scrive | 403 |
 | Frontend/E2E | menu per moduli | menu condizionale |
 | Frontend/E2E | accesso Reader | niente azione di creazione |
 
