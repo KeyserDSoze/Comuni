@@ -158,12 +158,12 @@ public sealed class RuntimeDatabasePrivilegesTests
             Environment.GetEnvironmentVariable("Security__TenantProofKey")
             ?? throw new InvalidOperationException("Tenant proof key is required."));
         await using var transaction = await TenantDatabaseTransaction.BeginAsync(db, signer, CancellationToken.None);
-        var store = new MembershipAdministrationRepository(db, signer);
+        var store = new MembershipAdministrationRepository(db, signer, new MembershipIssuerPolicy(false));
         var audit = AuditEvent.Create(org, "runtime-test-admin",
             "platform.membership.officer.activated", "platform.membership",
             Guid.NewGuid(), "runtime-member-trace");
         Assert.Equal(MembershipUpdateStatus.Updated, await store.SetActiveAsync(
-            org, "runtime-new-officer", "Officer", true, audit, CancellationToken.None));
+            org, "runtime-new-officer", "Officer", true, null, audit, CancellationToken.None));
 
         // Even if an attacker bypasses API validation and submits direct SQL,
         // restrictive RLS must block Admin INSERT and UPDATE (is_active).

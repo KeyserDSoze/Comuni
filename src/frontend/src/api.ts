@@ -48,6 +48,7 @@ export interface AdminMembership {
   subject: string;
   role: 'Admin' | 'Reader' | 'Officer';
   enabled: boolean;
+  issuer?: string | null;
 }
 
 export const getAdminMemberships = (token: string) =>

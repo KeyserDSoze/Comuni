@@ -31,6 +31,25 @@ public sealed class OrganizationMembershipTests
             OrganizationMembership.Grant(Guid.NewGuid(), "user", role));
     }
 
+    [Theory]
+    [InlineData("http://issuer.example.test/")]
+    [InlineData("https://user:pass@issuer.example.test/")]
+    [InlineData("https://issuer.example.test/?code=bad")]
+    [InlineData("https://issuer.example.test/#frag")]
+    public void Membership_rejects_untrusted_external_issuer(string issuer)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            OrganizationMembership.Grant(Guid.NewGuid(), "subject", "Reader", issuer));
+    }
+
+    [Fact]
+    public void Membership_can_bind_to_a_specific_OIDC_issuer()
+    {
+        var issuer = "https://issuer.example.test/tenant";
+        var membership = OrganizationMembership.Grant(Guid.NewGuid(), "sub", "Officer", issuer);
+        Assert.Equal(issuer, membership.IdentityIssuer);
+    }
+
     [Fact]
     public void Can_suspend_and_reactivate_membership_without_changing_organization()
     {

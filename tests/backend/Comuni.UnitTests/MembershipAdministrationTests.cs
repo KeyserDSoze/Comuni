@@ -20,7 +20,7 @@ public sealed class MembershipAdministrationTests
         public Task<IReadOnlyList<MembershipState>> ListAsync(Guid tenant, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<MembershipState>>([]);
         public Task<MembershipUpdateStatus> SetActiveAsync(Guid tenant, string subject, string role,
-            bool active, AuditEvent audit, CancellationToken ct)
+            bool active, string? validatedIssuer, AuditEvent audit, CancellationToken ct)
         {
             Changes++;
             Audit = audit;

@@ -459,6 +459,11 @@ export function App() {
                         <div className="min-w-0">
                           <p className="break-all text-sm font-semibold">{member.subject}</p>
                           <p className="text-sm text-muted-foreground">{member.role} · {member.enabled ? t('moduleActive') : t('moduleInactive')}</p>
+                          {member.issuer && (
+                            <p className="break-all text-xs text-muted-foreground" title={t('memberIssuer')}>
+                              {member.issuer}
+                            </p>
+                          )}
                         </div>
                         {member.role !== 'Admin' && (member.role === 'Officer' || member.role === 'Reader') && (
                           <Button type="button" disabled={savingMembership} variant="outline"
