@@ -68,6 +68,12 @@ with open(os.environ["AZ_CALL_LOG"], "a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\n")
 if os.environ.get("AZ_FAIL") == "1":
     sys.exit(1)
+if args[:3] == ["containerapp", "revision", "list"] and os.environ.get("AZ_FAIL_ONCE") == "1":
+    marker = os.environ["AZ_FAIL_MARKER"]
+    if not os.path.exists(marker):
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write("transient")
+        sys.exit(1)
 if args[:3] == ["containerapp", "revision", "list"]:
     print(os.environ["AZ_REVISIONS"])
 elif args[:4] == ["containerapp", "ingress", "traffic", "show"]:
@@ -81,7 +87,7 @@ else:
 
 class LiveRevisionVerificationTests(unittest.TestCase):
     def call(self, revisions=None, traffic=None, mode="Multiple", *, az_fail=False,
-             candidate= CANDIDATE, image=IMAGE, attempts="1"):
+             fail_once=False, candidate=CANDIDATE, image=IMAGE, attempts="1"):
         with tempfile.TemporaryDirectory() as folder:
             fake_az = Path(folder) / "az"
             fake_az.write_text(MOCK_AZ, encoding="utf-8")
@@ -94,6 +100,8 @@ class LiveRevisionVerificationTests(unittest.TestCase):
                 "AZ_REVISIONS": json.dumps(valid_revisions() if revisions is None else revisions),
                 "AZ_TRAFFIC": json.dumps(valid_traffic() if traffic is None else traffic),
                 "AZ_MODE": mode, "AZ_FAIL": "1" if az_fail else "0",
+                "AZ_FAIL_ONCE": "1" if fail_once else "0",
+                "AZ_FAIL_MARKER": str(Path(folder) / "first-failure"),
             }
             cmd = [
                 "python3", str(VERIFY),
@@ -192,6 +200,16 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         result, _ = self.call(image="http://invalid/image")
         self.assertNotEqual(0, result.returncode)
+
+    def test_bounded_retry_recovers_transient_azure_metadata_failure(self):
+        result, calls = self.call(fail_once=True, attempts="2")
+        self.assertEqual(0, result.returncode, result.stderr)
+        revision_requests = [x for x in calls if x[:3] == ["containerapp", "revision", "list"]]
+        self.assertEqual(2, len(revision_requests))
+
+        # One attempt must fail closed; it must not silently skip the verification.
+        rejected, _ = self.call(fail_once=True, attempts="1")
+        self.assertNotEqual(0, rejected.returncode)
 
     def test_workflow_requires_read_only_verify_after_apply_and_no_promotion(self):
         self.assertTrue(VERIFY.is_file())
