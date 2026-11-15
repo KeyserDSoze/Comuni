@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 APP_ADDRESS = "azurerm_container_app.main"
 STABLE_SECRET = "tenant-proof-key"
+PLATFORM_INVENTORY_SECRET = "platform-inventory-connection"
 VERSION = re.compile(r"[0-9a-fA-F]{32}\Z")
 KEY_ID = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
 SUFFIX = re.compile(r"[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\Z")
@@ -53,7 +54,31 @@ def secret_version_uri(value, version):
     )
 
 
+def platform_inventory_version_uri(value, version, trusted_vault_host):
+    """Pinned Key Vault URI, same vault as the tenant-proof-key candidate."""
+    if not isinstance(value, str) or not isinstance(trusted_vault_host, str):
+        return False
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc == trusted_vault_host
+        and (parsed.path or "").lower()
+            == ("/secrets/" + PLATFORM_INVENTORY_SECRET + "/" + version).lower()
+        and not parsed.query and not parsed.fragment and not parsed.username
+        and not parsed.password
+    )
+
+
 def validate(plan, args):
+    require(args.inventory_enabled in ("true", "false"),
+            "invalid inventory activation flag")
+    enable_inventory = args.inventory_enabled == "true"
+    require(not enable_inventory or bool(VERSION.fullmatch(args.inventory_secret_version)),
+            "inventory stage requires explicit pinned Key Vault version")
+    require(args.inventory_secret_version == "" or
+            bool(VERSION.fullmatch(args.inventory_secret_version)),
+            "invalid inventory version metadata")
+
     for version in (args.stable_secret_version, args.candidate_secret_version):
         require(bool(VERSION.fullmatch(version)), "invalid pinned secret version")
     require(bool(KEY_ID.fullmatch(args.candidate_key_id)), "invalid candidate key ID")
@@ -114,6 +139,27 @@ def validate(plan, args):
     require(candidate_name != STABLE_SECRET,
             "candidate must use a separate app-scoped secret name")
 
+    inventory_secret_name = "platform-read-v" + args.inventory_secret_version
+    if enable_inventory:
+        inventory_secret = named(after_secrets, inventory_secret_name)
+        trusted_vault = urlparse(candidate_secret["key_vault_secret_id"]).netloc
+        require(platform_inventory_version_uri(inventory_secret.get("key_vault_secret_id"),
+                                                args.inventory_secret_version,
+                                                trusted_vault),
+                "platform inventory must use approved pinned version in the same vault")
+
+    # Reject new app-scoped secrets unrelated to this release, even if they
+    # appear benign. Existing secret names/URIs remain immutable in either mode.
+    existing_names = {item["name"] for item in before_secrets}
+    allowed_new = {candidate_name}
+    if enable_inventory:
+        allowed_new.add(inventory_secret_name)
+    for item in after_secrets:
+        require(isinstance(item, dict) and isinstance(item.get("name"), str),
+                "invalid candidate secret definition")
+        require(item["name"] in existing_names or item["name"] in allowed_new,
+                "unexpected new application secret in stage")
+
     template = one_block(after, "template")
     require(template.get("revision_suffix") == args.candidate_revision,
             "unexpected candidate revision suffix")
@@ -131,6 +177,33 @@ def validate(plan, args):
     require(proof_id.get("value") == args.candidate_key_id and
             not proof_id.get("secret_name"),
             "candidate key ID must match approved PostgreSQL verifier ID")
+
+    # No JWT claim or tenant context may activate this setting; only the
+    # explicitly approved workflow option selects a platform-read secret.
+    env = containers[0].get("env", [])
+    require(isinstance(env, list), "invalid container environment")
+    inventory_flags = [e for e in env if isinstance(e, dict)
+                       and e.get("name") == "PlatformInventory__Enabled"]
+    require(len(inventory_flags) <= 1, "ambiguous inventory activation flag")
+    if enable_inventory:
+        flag = named(env, "PlatformInventory__Enabled")
+        require(flag.get("value") == "true" and not flag.get("secret_name"),
+                "approved inventory enablement missing from candidate")
+        connection = named(env, "ConnectionStrings__PlatformRead")
+        require(connection.get("secret_name") == inventory_secret_name and
+                not connection.get("value"),
+                "platform inventory connection must use approved ACA Key Vault secret")
+    else:
+        # Missing flag is fail-closed for legacy revision plans; new templates
+        # explicitly set the flag to false. A connection env is never allowed.
+        if inventory_flags:
+            require(inventory_flags[0].get("value") == "false" and
+                    not inventory_flags[0].get("secret_name"),
+                    "inventory must remain disabled by default")
+        require(not any(isinstance(e, dict) and
+                        e.get("name") == "ConnectionStrings__PlatformRead"
+                        for e in env),
+                "disabled candidate must not receive platform DB credentials")
 
     ingress = one_block(after, "ingress")
     weights = ingress.get("traffic_weight", [])
@@ -165,6 +238,8 @@ def main():
     parser.add_argument("--stable-secret-version", required=True)
     parser.add_argument("--candidate-secret-version", required=True)
     parser.add_argument("--candidate-key-id", required=True)
+    parser.add_argument("--inventory-enabled", default="false")
+    parser.add_argument("--inventory-secret-version", default="")
     args = parser.parse_args()
     try:
         plan = json.load(sys.stdin)
