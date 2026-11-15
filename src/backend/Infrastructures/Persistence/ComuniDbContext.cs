@@ -27,6 +27,7 @@ public sealed class ComuniDbContext(
             b.HasKey(x => x.Id);
             b.Property(x => x.Id).HasColumnName("id");
             b.Property(x => x.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+            b.Property(x => x.IsSuspended).HasColumnName("is_suspended").HasDefaultValue(false).IsRequired();
         });
 
         modelBuilder.Entity<OrganizationModule>(b =>
