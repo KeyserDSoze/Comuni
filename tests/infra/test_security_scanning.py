@@ -39,8 +39,9 @@ class SecurityScanningContracts(unittest.TestCase):
         self.assertIn("github/codeql-action/init@v4", CI)
         self.assertIn("github/codeql-action/analyze@v4", CI)
         self.assertIn("security-events: write", CI)
-        self.assertIn("build-mode: manual", CI)
-        self.assertIn("build-mode: none", CI)
+        self.assertIn("build_mode: manual", CI)
+        self.assertIn("build_mode: none", CI)
+        self.assertIn("build-mode: ${{ matrix.build_mode }}", CI)
         self.assertIn("dotnet build src/backend/Applications/Api/Comuni.Api.csproj", CI)
         self.assertNotIn("continue-on-error: true", CI)
 
