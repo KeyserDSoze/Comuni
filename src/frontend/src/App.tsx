@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next';
 import {
   ArrowRight, Building2, CheckCircle2, ClipboardList, Files, Globe2,
-  Layers3, LogOut, Menu, Moon, Plus, Settings2, ShieldCheck, Sun, X,
+  Layers3, LogOut, Menu, Moon, Plus, Settings2, ShieldCheck, Sun, X, LockKeyhole,
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, registerRecord, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership } from './api';
+import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, registerRecord, getPlatformSession, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership } from './api';
 import { cn } from './lib/utils';
 import {
   beginOidcLogin, captureOidcCallback, clearPendingOidc,
@@ -14,7 +14,7 @@ import {
   type BrowserOidcConfig, type OidcAccessToken
 } from './oidc';
 
-type Page = 'dashboard' | 'protocol' | 'admin';
+type Page = 'dashboard' | 'protocol' | 'admin' | 'platform';
 
 function Brand() {
   const { t } = useTranslation();
@@ -39,6 +39,8 @@ export function App() {
   const [oidcExpiresAt, setOidcExpiresAt] = useState<number | null>(null);
   const authBootstrap = useRef<Promise<{ config: BrowserOidcConfig; result: OidcAccessToken | null }> | null>(null);
   const [context, setContext] = useState<OrganizationContext | null>(null);
+  const [platformSession, setPlatformSession] = useState<PlatformSession | null>(null);
+  const [checkingSession, setCheckingSession] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
   const [dark, setDark] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -97,6 +99,7 @@ export function App() {
     if (remaining <= 0) {
       setToken('');
       setContext(null);
+      setPlatformSession(null);
       setOidcExpiresAt(null);
       setError(t('oidcExpired'));
       return;
@@ -104,6 +107,7 @@ export function App() {
     const expiryTimer = window.setTimeout(() => {
       setToken('');
       setContext(null);
+      setPlatformSession(null);
       setRecords([]);
       setOidcExpiresAt(null);
       setError(t('oidcExpired'));
@@ -112,19 +116,65 @@ export function App() {
   }, [oidcExpiresAt, t]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setCheckingSession(false);
+      return;
+    }
     let active = true;
-    void getContext(token).then(result => {
+    setCheckingSession(true);
+    // Never trust the role claim in an access token. The backend decides which
+    // mutually exclusive security context is valid for THIS validated token.
+    // OIDC platform tokens have no organization_id, so municipal context is 403.
+    const municipal = getContext(token).catch(() => null);
+    const platform = browserOidc?.mode === 'Oidc'
+      ? getPlatformSession(token).catch(() => null)
+      : Promise.resolve(null);
+    void Promise.all([municipal, platform]).then(([municipalContext, operator]) => {
       if (!active) return;
-      setContext(result);
-      setError('');
-    }).catch(() => {
-      if (!active) return;
-      setContext(null);
-      setError(t('invalidToken'));
+      setCheckingSession(false);
+      if (municipalContext && !operator) {
+        setPlatformSession(null);
+        setContext(municipalContext);
+        setPage('dashboard');
+        if (window.location.pathname === '/platform')
+          window.history.replaceState(window.history.state, '', '/');
+        setError('');
+      } else if (operator && !municipalContext) {
+        setContext(null);
+        setPlatformSession(operator);
+        setPage('platform');
+        setError('');
+      } else {
+        // Both success (ambiguous) and both denied are fail-closed.
+        setContext(null);
+        setPlatformSession(null);
+        setError(t('invalidToken'));
+      }
     });
     return () => { active = false; };
-  }, [token, t]);
+  }, [token, browserOidc?.mode, t]);
+
+  // Recheck a platform session on focus. Revocation in PostgreSQL denies the
+  // next protected request, even if the external access token has not expired.
+  useEffect(() => {
+    if (!token || !platformSession || browserOidc?.mode !== 'Oidc') return;
+    let active = true;
+    const recheck = () => {
+      void getPlatformSession(token).catch(() => {
+        if (!active) return;
+        setPlatformSession(null);
+        setPage('dashboard');
+        setError(t('invalidToken'));
+        if (window.location.pathname === '/platform')
+          window.history.replaceState(window.history.state, '', '/');
+      });
+    };
+    window.addEventListener('focus', recheck);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', recheck);
+    };
+  }, [token, platformSession, browserOidc?.mode, t]);
 
   const loadRecords = useCallback(async () => {
     if (!token) return;
@@ -227,12 +277,33 @@ export function App() {
     setToken('');
     setTokenInput('');
     setContext(null);
+    setPlatformSession(null);
+    setCheckingSession(false);
     setRecords([]);
     setAdminModules([]);
     setAdminMemberships([]);
     setMemberSubject('');
     setPage('dashboard');
     setError('');
+    if (window.location.pathname === '/platform')
+      window.history.replaceState(window.history.state, '', '/');
+  }
+
+  async function navigatePlatform() {
+    if (!token || !platformSession || browserOidc?.mode !== 'Oidc') return;
+    try {
+      // Revalidate before navigating; a visible menu is never an authorization.
+      await getPlatformSession(token);
+      setPage('platform');
+      setMenuOpen(false);
+      window.history.pushState(window.history.state, '', '/platform');
+    } catch {
+      setPlatformSession(null);
+      setPage('dashboard');
+      setError(t('invalidToken'));
+      if (window.location.pathname === '/platform')
+        window.history.replaceState(window.history.state, '', '/');
+    }
   }
 
   function navigate(next: Page) {
@@ -269,6 +340,62 @@ export function App() {
     </div>
   );
 
+  if (platformSession && !context && !checkingSession && browserOidc?.mode === 'Oidc') {
+    return (
+      <div className="min-h-screen bg-background text-foreground md:flex">
+        {menuOpen && <button aria-label={t('closeMenu')} className="fixed inset-0 z-20 bg-slate-950/40 md:hidden" onClick={() => setMenuOpen(false)} />}
+        <aside className={cn('fixed inset-y-0 left-0 z-30 flex w-64 -translate-x-full flex-col border-r border-border bg-card px-4 py-6 transition-transform md:sticky md:top-0 md:h-screen md:translate-x-0', menuOpen && 'translate-x-0')}>
+          <Brand />
+          <p className="mt-10 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('workspace')}</p>
+          <nav aria-label="Navigazione principale" className="mt-3 flex flex-col gap-2">
+            <Button variant="default" className="justify-start" onClick={() => void navigatePlatform()}>
+              <LockKeyhole className="h-4 w-4" aria-hidden="true" />{t('platformNavigation')}
+            </Button>
+          </nav>
+          <div className="mt-auto rounded-lg bg-muted p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <ShieldCheck className="h-4 w-4 text-teal-500" aria-hidden="true" />{t('platformScope')}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">{t('platformRestricted')}</p>
+          </div>
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between gap-3 border-b border-border bg-card/95 px-4 backdrop-blur sm:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <Button variant="ghost" size="icon" className="md:hidden" aria-label={t('menu')} onClick={() => setMenuOpen(true)}>
+                <Menu className="h-5 w-5" aria-hidden="true" />
+              </Button>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold sm:text-lg">{t('platformNavigation')}</div>
+                <div className="text-xs text-muted-foreground">{t('platformScope')}</div>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {controls}
+              <Button variant="ghost" size="sm" onClick={logout}>
+                <LogOut className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">{t('signOut')}</span>
+              </Button>
+            </div>
+          </header>
+          <main className="mx-auto max-w-7xl space-y-7 px-4 py-8 sm:px-8">
+            <p className="text-sm font-semibold text-teal-600 dark:text-teal-400">{t('overview')} / {t('platformNavigation')}</p>
+            <h1 className="text-3xl font-bold tracking-tight">{t('platformTitle')}</h1>
+            <p className="text-sm text-muted-foreground">{t('platformDescription')}</p>
+            {error && <div role="alert" className="rounded-md border border-rose-300 p-3 text-sm text-rose-700">{error}</div>}
+            <Card className="max-w-2xl">
+              <CardHeader><CardTitle>{t('platformRoleTitle')}</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <p className="font-semibold">Superadmin</p>
+                <p className="text-sm text-muted-foreground">{t('platformRestricted')}</p>
+              </CardContent>
+            </Card>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
   if (!context) {
     return (
       <div className="min-h-screen bg-background text-foreground">
@@ -294,7 +421,9 @@ export function App() {
               </p>
             </CardHeader>
             <CardContent>
-              {browserOidc === null ? (
+              {checkingSession ? (
+                <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p>
+              ) : browserOidc === null ? (
                 <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p>
               ) : browserOidc.mode === 'DevelopmentJwt' ? (
               <form onSubmit={enter} className="space-y-4">

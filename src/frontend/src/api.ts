@@ -59,3 +59,24 @@ export const setAdminMembership = (
 ) => request<AdminMembership>(`/api/v1/admin/memberships/${role}`, token, {
   method: 'PUT', body: JSON.stringify({ subject, enabled })
 });
+
+
+/** A platform OIDC session has no tenant context or operator roster details.
+ * Never infer this privilege from a decoded JWT role or from municipal context.
+ */
+export interface PlatformSession { role: 'Superadmin' }
+
+export async function getPlatformSession(token: string): Promise<PlatformSession> {
+  const response = await fetch('/api/v1/platform/session', {
+    method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(`Platform API ${response.status}`);
+  const result: unknown = await response.json();
+  if (!result || typeof result !== 'object' || Array.isArray(result) ||
+      Object.keys(result).length !== 1 ||
+      !('role' in result) || result.role !== 'Superadmin') {
+    throw new Error('Invalid platform session response');
+  }
+  return { role: 'Superadmin' };
+}

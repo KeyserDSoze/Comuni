@@ -43,7 +43,12 @@ void i18n.use(initReactI18next).init({
       secure: 'Separazione dei dati per Comune', appStatus: 'Piattaforma operativa',
       lang: 'Lingua', theme: 'Tema', menu: 'Apri menu', closeMenu: 'Chiudi menu',
       home: 'Home', onlyEnabled: 'La navigazione mostra solo i moduli abilitati.',
-      integration: 'Pronta per estensioni modulari', context: 'Contesto organizzativo'
+      integration: 'Pronta per estensioni modulari', context: 'Contesto organizzativo',
+      platformNavigation: 'Superadmin', platformScope: 'Accesso piattaforma',
+      platformTitle: 'Area Superadmin',
+      platformDescription: 'Solo consultazione del proprio accesso piattaforma.',
+      platformRoleTitle: 'Ruolo verificato dal server',
+      platformRestricted: 'Nessuna gestione dei Comuni o impersonificazione disponibile in questa fase.'
     } },
     en: { translation: {
       appName: 'Comuni', appTagline: 'Digital services for local authorities',
@@ -85,7 +90,12 @@ void i18n.use(initReactI18next).init({
       secure: 'Data segregation by municipality', appStatus: 'Platform available',
       lang: 'Language', theme: 'Theme', menu: 'Open menu', closeMenu: 'Close menu',
       home: 'Home', onlyEnabled: 'Navigation shows only enabled modules.',
-      integration: 'Ready for modular extensions', context: 'Organization context'
+      integration: 'Ready for modular extensions', context: 'Organization context',
+      platformNavigation: 'Superadmin', platformScope: 'Platform access',
+      platformTitle: 'Superadmin area',
+      platformDescription: 'Read-only access to your own platform session.',
+      platformRoleTitle: 'Server-verified role',
+      platformRestricted: 'Municipality management and impersonation are not available at this stage.'
     } }
   },
   lng: 'it',
