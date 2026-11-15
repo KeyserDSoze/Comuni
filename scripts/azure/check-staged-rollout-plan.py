@@ -139,7 +139,7 @@ def validate(plan, args):
     require(candidate_name != STABLE_SECRET,
             "candidate must use a separate app-scoped secret name")
 
-    inventory_secret_name = "platform-read-v" + args.inventory_secret_version
+    inventory_secret_name = "pi-" + args.inventory_secret_version[:16]
     if enable_inventory:
         inventory_secret = named(after_secrets, inventory_secret_name)
         trusted_vault = urlparse(candidate_secret["key_vault_secret_id"]).netloc

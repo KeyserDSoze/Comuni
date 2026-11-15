@@ -238,7 +238,7 @@ resource "azurerm_container_app" "main" {
   dynamic "secret" {
     for_each = var.platform_inventory_enabled ? [var.platform_inventory_secret_version] : []
     content {
-      name                = "platform-read-v${secret.value}"
+      name                = "pi-${substr(secret.value, 0, 16)}"
       identity            = azurerm_user_assigned_identity.app.id
       key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/platform-inventory-connection/${secret.value}"
     }
@@ -282,7 +282,7 @@ resource "azurerm_container_app" "main" {
         for_each = var.platform_inventory_enabled ? [var.platform_inventory_secret_version] : []
         content {
           name        = "ConnectionStrings__PlatformRead"
-          secret_name = "platform-read-v${env.value}"
+          secret_name = "pi-${substr(env.value, 0, 16)}"
         }
       }
       env {
