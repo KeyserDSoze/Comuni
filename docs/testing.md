@@ -18,6 +18,10 @@ Il bootstrap è sviluppato in due incrementi registrati su `main`: specifiche/te
 | API/PostgreSQL | membership assente o disattivata | 403 |
 | API/PostgreSQL | subject solo nel tenant A usa token per tenant B | 403 |
 | API/PostgreSQL | JWT Reader ma membership Officer | scrittura consentita dal ruolo DB |
+| Domain | AuditEvent valido, campi obbligatori e minimizzazione | invariant rispettati |
+| Business | registrazione associa record a evento audit | stessa organization e resource ID |
+| API/PostgreSQL | POST Protocollo riuscita | 1 AuditEvent con actor e correlation del server |
+| API/PostgreSQL | tentativi UPDATE/DELETE audit | trigger rifiuta la mutazione |
 | Frontend/E2E | menu per moduli | menu condizionale |
 | Frontend/E2E | accesso Reader | niente azione di creazione |
 

@@ -16,3 +16,7 @@
 - Priorità: **P0** sicurezza/fondazione bloccante; **P1** infrastruttura/admin; **P2** domini funzionali/integrations.
 - Non usare la chiusura per nascondere scope incompleto; separare lavoro distinto in nuove issue.
 - La definizione di Done include xUnit, PostgreSQL, Playwright quando applicabile, test CI, ADR/docs aggiornati e verifica delle API di sicurezza.
+
+## Sotto-issue
+
+Le epiche (#4 audit completo, #5 sicurezza, #10 Superadmin) restano aperte finché ogni criterio originario non è soddisfatto. Un sotto-incremento come #11 può essere chiuso solo dopo test CI riusciti; commentare l'epica padre senza chiuderla.
