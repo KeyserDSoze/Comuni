@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Only check the enabled flag. Do not fetch, print, or log tenant-proof-key value.
-if [[ $# -ne 1 || ! "$1" =~ ^[a-z][a-z0-9-]{2,23}$ ]]; then
-  echo "Expected a valid Azure Key Vault name." >&2
+# Inspect ONLY the enabled metadata of the exact approved version. Never use
+# latest/versionless: Container Apps may refresh latest and restart active replicas.
+# Never fetch, print or log the actual tenant signing key value.
+if [[ $# -ne 2 || ! "$1" =~ ^[a-z][a-z0-9-]{2,23}$ ||
+      ! "$2" =~ ^[a-fA-F0-9]{32}$ ]]; then
+  echo "Expected an Azure Key Vault name and an explicit 32-hex secret version." >&2
   exit 2
 fi
 
 vault_name="$1"
-# This secret is managed outside Terraform. A missing, inaccessible, or disabled
-# secret must prevent terraform plan/apply, rather than deploying a broken API.
-if ! enabled="$(az keyvault secret show \
-    --vault-name "$vault_name" \
-    --name tenant-proof-key \
-    --query attributes.enabled \
-    --output tsv 2>/dev/null)"; then
-  echo "Tenant proof signing secret metadata unavailable in Key Vault; deployment blocked." >&2
+secret_version="$2"
+secret_uri="https://${vault_name}.vault.azure.net/secrets/tenant-proof-key/${secret_version}"
+
+# The deploy identity needs permission to query metadata; no secret value in output.
+if ! enabled="$(az keyvault secret show --id "$secret_uri" --query attributes.enabled --output tsv 2>/dev/null)"; then
+  echo "Pinned tenant proof signing secret metadata unavailable; deployment blocked." >&2
   exit 1
 fi
 
-if [[ "$enabled" != "true" ]]; then
-  echo "Tenant proof signing secret is not enabled in Key Vault; deployment blocked." >&2
+if [[ "${enabled,,}" != "true" ]]; then
+  echo "Pinned tenant proof signing secret is not enabled; deployment blocked." >&2
   exit 1
 fi
 
-echo "External tenant proof secret exists and is enabled (metadata only)."
+echo "Pinned tenant proof signing secret exists and is enabled (metadata only)."

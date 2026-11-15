@@ -15,3 +15,7 @@ tags = {
 # Tenant HMAC signing material is NEVER a Terraform variable. Provision the
 # tenant-proof-key Key Vault secret through an approved external operation.
 # Set tenant_proof_key_id only after staging the matching key in PostgreSQL.
+
+# Set tenant_proof_secret_version to the exact 32-hex Key Vault version
+# (approved deployment metadata). It is not the signing key value.
+# In GitHub production Environment use TENANT_PROOF_SECRET_VERSION.

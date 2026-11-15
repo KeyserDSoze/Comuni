@@ -32,19 +32,19 @@ class TenantProofSecretBoundaryTests(unittest.TestCase):
                         DEPLOY.index("terraform -chdir=infra plan"))
         self.assertNotIn("az keyvault secret show --query value", DEPLOY)
 
-    def check_preflight(self, enabled="true", exit_status="0", vault="comuni-itn-001-kv"):
+    def check_preflight(self, enabled="true", exit_status="0", vault="comuni-itn-001-kv", version="a" * 32):
         with tempfile.TemporaryDirectory() as temp:
             fake_az = Path(temp) / "az"
             fake_az.write_text(
                 "#!/bin/sh\n"
                 'case " $* " in *" --query attributes.enabled "*) ;; *) exit 9;; esac\n'
-                'case " $* " in *" --name tenant-proof-key "*) ;; *) exit 8;; esac\n'
+                'case " $* " in *" --id https://comuni-itn-001-kv.vault.azure.net/secrets/tenant-proof-key/' + 'a' * 32 + ' "*) ;; *) exit 8;; esac\n'
                 f"printf '%s\\n' '{enabled}'\n"
                 f"exit {exit_status}\n"
             )
             fake_az.chmod(0o700)
             return subprocess.run(
-                ["bash", str(PREFLIGHT), vault],
+                ["bash", str(PREFLIGHT), vault, version],
                 env={**os.environ, "PATH": temp + os.pathsep + os.environ.get("PATH", "")},
                 text=True, capture_output=True, check=False
             )

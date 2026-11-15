@@ -31,6 +31,18 @@ variable "postgres_runtime_password" {
   sensitive   = true
 }
 
+# Metadata only: key bytes are not passed to Terraform.
+# A versioned URI avoids uncoordinated latest-version restarts across app revisions.
+variable "tenant_proof_secret_version" {
+  description = "Required 32-hex Key Vault version of tenant-proof-key installed externally and paired with tenant_proof_key_id."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[a-fA-F0-9]{32}$", var.tenant_proof_secret_version))
+    error_message = "tenant_proof_secret_version must be the explicit 32-character hexadecimal Azure Key Vault secret version."
+  }
+}
+
 variable "tenant_proof_key_id" {
   description = "Version of the HMAC tenant proof signer; empty means legacy compatibility. Provision and authorize this ID in PostgreSQL BEFORE switching API replicas."
   type        = string

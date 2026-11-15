@@ -20,6 +20,7 @@ jobs:
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       TF_VAR_tenant_proof_key_id: ${{ vars.TENANT_PROOF_KEY_ID }}
+      TF_VAR_tenant_proof_secret_version: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
       TF_VAR_authentication_authority: ${{ vars.OIDC_AUTHORITY }}
       TF_VAR_authentication_audience: ${{ vars.OIDC_AUDIENCE }}
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}
@@ -43,7 +44,7 @@ jobs:
       # The HMAC key is provisioned externally by the approved operator, never by
       # Terraform or through a TF_VAR_* environment variable.
       - name: Fail closed if external tenant proof key is missing or disabled
-        run: bash scripts/azure/check-tenant-proof-secret.sh "${{ vars.AZURE_PREFIX }}-kv"
+        run: bash scripts/azure/check-tenant-proof-secret.sh "${{ vars.AZURE_PREFIX }}-kv" "${{ vars.TENANT_PROOF_SECRET_VERSION }}"
       - name: Build and push immutable image
         run: |
           az acr login --name "${{ vars.ACR_NAME }}"

@@ -219,7 +219,7 @@ resource "azurerm_container_app" "main" {
   secret {
     name                = "tenant-proof-key"
     identity            = azurerm_user_assigned_identity.app.id
-    key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key"
+    key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key/${var.tenant_proof_secret_version}"
   }
 
   template {
