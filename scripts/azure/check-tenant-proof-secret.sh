@@ -16,7 +16,7 @@ secret_uri="https://${vault_name}.vault.azure.net/secrets/tenant-proof-key/${sec
 
 # The deploy identity needs permission to query metadata; no secret value in output.
 # list-versions uses the metadata-only Key Vault endpoint (secrets/list permission).
-# In contrast, secret show retrieves a secret object that also contains its value.
+# Unlike the object-retrieval endpoint, this operation does not return key values.
 # The exact full URI is matched; do not allow a later/latest version as fallback.
 query="[?id=='${secret_uri}'].attributes.enabled | [0]"
 if ! enabled="$(az keyvault secret list-versions --vault-name "$vault_name" --name tenant-proof-key --query "$query" --output tsv 2>/dev/null)"; then
