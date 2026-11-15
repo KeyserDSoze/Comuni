@@ -227,7 +227,7 @@ resource "azurerm_container_app" "main" {
   # A new name for each immutable version prevents changes to the stable revision's
   # app-scoped secret. Keep previous candidate secret names while referenced.
   secret {
-    name                = "tenant-proof-key-v${var.tenant_proof_secret_version}"
+    name                = "tp-${substr(var.tenant_proof_secret_version, 0, 16)}"
     identity            = azurerm_user_assigned_identity.app.id
     key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key/${var.tenant_proof_secret_version}"
   }
@@ -266,7 +266,7 @@ resource "azurerm_container_app" "main" {
       }
       env {
         name        = "Security__TenantProofKey"
-        secret_name = "tenant-proof-key-v${var.tenant_proof_secret_version}"
+        secret_name = "tp-${substr(var.tenant_proof_secret_version, 0, 16)}"
       }
       env {
         name  = "Security__TenantProofKeyId"

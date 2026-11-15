@@ -131,7 +131,7 @@ def validate(plan, args):
         require(existing.get("key_vault_secret_id") == current.get("key_vault_secret_id"),
                 "staging may not change or remove an existing app-scoped secret")
 
-    candidate_name = "tenant-proof-key-v" + args.candidate_secret_version
+    candidate_name = "tp-" + args.candidate_secret_version[:16]
     candidate_secret = named(after_secrets, candidate_name)
     require(secret_version_uri(candidate_secret.get("key_vault_secret_id"),
                                args.candidate_secret_version),

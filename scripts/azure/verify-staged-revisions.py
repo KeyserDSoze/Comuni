@@ -107,7 +107,7 @@ def candidate_metadata(revision, args):
     )
     required(
         secret.get("secretRef")
-        == "tenant-proof-key-v" + args.candidate_secret_version
+        == "tp-" + args.candidate_secret_version[:16]
         and not secret.get("value"),
         "Candidate RLS secret reference mismatch",
     )
