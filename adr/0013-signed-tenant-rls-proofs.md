@@ -15,6 +15,18 @@ Manteniamo una sola API, un solo React e un unico PostgreSQL con un login SQL ru
 
 La migration `202611150006_SignedTenantRlsProof` installa `pgcrypto`, una tabella `platform.tenant_proof_secret` leggibile solo dall'owner, e una funzione `platform.verified_tenant_id()` `SECURITY DEFINER`, search_path fissato su schemi fidati, che calcola HMAC e verifica scadenza prima di ritornare UUID. Le policy `USING`/`WITH CHECK` delle 5 tabelle tenant-owned confrontano il proprio tenant con **questo UUID verificato**, non con la GUC vecchia. Un `GRANT EXECUTE` esplicito abilita il verifier al solo `comuni_app_runtime`; nessuna funzione di signing SQL è esposta, nessun SELECT/UPDATE alla tabella della chiave. Secret dell'API e DB sono installati da due percorsi con credenziali separate, e DEV seed è soltanto per demo.
 
+## Alternative valutate
+
+| Approccio | Protezione contro SQL arbitrario nel login runtime | Costo / decisione |
+| --- | --- | --- |
+| GUC unsigned `comuni.organization_id` (#17) | **No**: `set_config` permette di scegliere qualunque Comune | Eliminata dalle policy in questa ADR |
+| Un ruolo/login DB **distinto per ogni Comune** con RLS su `current_user` | Più forte: un singolo login tenant non può assumere ruoli altrui senza credenziali/GRANT | Complessità di provisioning, credenziali e pool Npgsql per centinaia/migliaia di Comuni; da riesaminare come possibile ulteriore isolamento |
+| `SET ROLE` da login condiviso | **No**, se il login deve poter assumere tutti i ruoli tenant, anche un'iniezione SQL potrebbe farlo | Scartato |
+| JWT OIDC verificato direttamente nel DB con chiavi pubbliche | Può resistere a cambi di variabile se issuer/audience/firma sono davvero verificati nel DB | Validatore JWT/JWKS, key rotation e scadenza nel database richiedono dipendenze e aggiornamenti non ancora autorizzati; non implementato |
+| **HMAC applicativo + verifier DB `SECURITY DEFINER`** | Protegge il **tenant alternativo non autorizzato** finché la chiave e le prove altrui restano segrete | Scelto come incremento compatibile con singola API e PostgreSQL; richiede Key Vault, provisioning privato, threat modeling e gestione rotazione (#19) |
+
+Il modello distingue esplicitamente **SQL arbitrario sotto il solo ruolo database runtime** (protezione a un tenant alternativo con proof falsa) da accesso a configurazione, memoria, logging e chiavi del processo API: la seconda capacità bypassa la garanzia crittografica. Qualunque meccanismo di federazione/superadmin deve emettere prove soltanto dopo autorizzazione tenant e audit verificato, mai sulla base di un `organization_id` client-supplied.
+
 ## Conseguenze e rischi
 
 **Beneficio misurabile:** impostare arbitrariamente una GUC SQL unsigned, presentare MAC fasulli o scegliere UUID di un altro Comune in query non permette più a SQL sotto l'account runtime di leggere righe cross-tenant, in assenza di una proof valida per quel tenant. Niente stato dopo commit/rollback/pool. Previsti test reali in CI su PostgreSQL 17 con login non owner.
