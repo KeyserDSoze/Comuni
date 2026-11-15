@@ -67,7 +67,7 @@ public sealed class MembershipAdministrationTests
         await Assert.ThrowsAsync<ArgumentException>(() =>
             service.SetActiveAsync(Guid.NewGuid(), "  ", "Reader", true, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            service.SetActiveAsync(Guid.NewGuid(), "contains\\nnewline", "Officer", true, CancellationToken.None));
+            service.SetActiveAsync(Guid.NewGuid(), "contains\nnewline", "Officer", true, CancellationToken.None));
         Assert.Equal(0, store.Changes);
     }
 }
