@@ -148,6 +148,12 @@ def validate(plan, args):
     require(candidate[0].get("percentage") == 0 and
             not candidate[0].get("revision_suffix"),
             "candidate must retain zero percent public traffic")
+    # The direct canary label must route to the current latest (0%-weight)
+    # only, never to stable or a different revision.
+    require(candidate[0].get("label") == args.candidate_revision,
+            "candidate label must be pinned to the approved immutable suffix")
+    require(stable[0].get("label") != args.candidate_revision,
+            "candidate label must not select the stable revision")
 
 
 def main():

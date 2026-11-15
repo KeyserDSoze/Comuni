@@ -113,7 +113,7 @@ def candidate_metadata(revision, args):
     )
 
 
-def verify_traffic(traffic, stable_name):
+def verify_traffic(traffic, stable_name, candidate_label):
     required(isinstance(traffic, list) and len(traffic) == 2,
              "Unexpected ingress traffic targets")
     stable = [
@@ -130,8 +130,10 @@ def verify_traffic(traffic, stable_name):
         stable[0].get("weight") == 100
         and stable[0].get("latestRevision") in (False, None)
         and latest[0].get("weight") == 0
-        and latest[0].get("revisionName") in (None, ""),
-        "Traffic drift: stable must remain at 100 percent and latest at zero",
+        and latest[0].get("revisionName") in (None, "")
+        and latest[0].get("label") == candidate_label
+        and stable[0].get("label") != candidate_label,
+        "Traffic drift: stable must remain at 100 percent and latest at zero, with candidate label",
     )
 
 
@@ -158,7 +160,7 @@ def check(args):
     ready(stable)
     ready(candidate)
     candidate_metadata(candidate, args)
-    verify_traffic(traffic, stable_name)
+    verify_traffic(traffic, stable_name, args.candidate_revision)
 
 
 def parse_args():

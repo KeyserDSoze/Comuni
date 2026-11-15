@@ -300,9 +300,12 @@ resource "azurerm_container_app" "main" {
       latest_revision = false
       revision_suffix = var.stable_revision_suffix
     }
+    # A unique label exposes the candidate's own FQDN for authorized smoke
+    # requests without transferring normal application traffic from the stable.
     traffic_weight {
       percentage      = 0
       latest_revision = true
+      label           = var.candidate_revision_suffix
     }
   }
 
