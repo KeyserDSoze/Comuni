@@ -93,11 +93,37 @@ public sealed class ApiProtectionFactory : WebApplicationFactory<Program>
     }
 }
 
+/// <summary>
+/// Minimal-hosting reads configuration before WebApplicationFactory's config callbacks.
+/// The test-only override must be scoped and restored so unrelated tests keep their limits.
+/// xUnit parallelization is disabled for the API integration assembly.
+/// </summary>
+internal sealed class ScopedApiLimit : IDisposable
+{
+    private const string PermitName = "Security__ApiRateLimit__PermitLimit";
+    private const string WindowName = "Security__ApiRateLimit__WindowSeconds";
+    private readonly string? _priorPermit = Environment.GetEnvironmentVariable(PermitName);
+    private readonly string? _priorWindow = Environment.GetEnvironmentVariable(WindowName);
+
+    public ScopedApiLimit()
+    {
+        Environment.SetEnvironmentVariable(PermitName, "3");
+        Environment.SetEnvironmentVariable(WindowName, "60");
+    }
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable(PermitName, _priorPermit);
+        Environment.SetEnvironmentVariable(WindowName, _priorWindow);
+    }
+}
+
 public sealed class ApiProtectionIntegrationTests
 {
     [Fact]
     public async Task Anonymous_api_requests_are_throttled_and_return_retry_after()
     {
+        using var limiter = new ScopedApiLimit();
         using var factory = new ApiProtectionFactory();
         using var client = factory.CreateClient();
         for (var i = 0; i < 3; i++)
@@ -115,6 +141,7 @@ public sealed class ApiProtectionIntegrationTests
     [Fact]
     public async Task Spoofing_forwarded_for_does_not_bypass_quota()
     {
+        using var limiter = new ScopedApiLimit();
         using var factory = new ApiProtectionFactory();
         using var client = factory.CreateClient();
         for (var i = 0; i < 3; i++)
@@ -133,6 +160,7 @@ public sealed class ApiProtectionIntegrationTests
     [Fact]
     public async Task Health_is_not_rate_limited_and_security_headers_apply_to_all_responses()
     {
+        using var limiter = new ScopedApiLimit();
         using var factory = new ApiProtectionFactory();
         using var client = factory.CreateClient();
         for (var i = 0; i < 6; i++)
