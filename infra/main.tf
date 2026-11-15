@@ -145,12 +145,6 @@ resource "azurerm_key_vault" "main" {
   tags                       = var.tags
 }
 
-resource "azurerm_key_vault_secret" "jwt_key" {
-  name         = "jwt-signing-key"
-  value        = var.jwt_signing_key
-  key_vault_id = azurerm_key_vault.main.id
-}
-
 resource "azurerm_key_vault_secret" "postgres_connection" {
   name = "postgres-connection"
   value = format(
@@ -199,12 +193,6 @@ resource "azurerm_container_app" "main" {
   }
 
   secret {
-    name                = "jwt-key"
-    identity            = azurerm_user_assigned_identity.app.id
-    key_vault_secret_id = azurerm_key_vault_secret.jwt_key.versionless_id
-  }
-
-  secret {
     name                = "postgres-connection"
     identity            = azurerm_user_assigned_identity.app.id
     key_vault_secret_id = azurerm_key_vault_secret.postgres_connection.versionless_id
@@ -229,16 +217,16 @@ resource "azurerm_container_app" "main" {
         secret_name = "postgres-connection"
       }
       env {
-        name        = "Jwt__SigningKey"
-        secret_name = "jwt-key"
+        name  = "Authentication__Mode"
+        value = "Oidc"
       }
       env {
-        name  = "Jwt__Issuer"
-        value = var.jwt_issuer
+        name  = "Authentication__Authority"
+        value = var.authentication_authority
       }
       env {
-        name  = "Jwt__Audience"
-        value = var.jwt_audience
+        name  = "Authentication__Audience"
+        value = var.authentication_audience
       }
       env {
         name  = "Storage__AccountName"

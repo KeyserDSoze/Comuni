@@ -18,7 +18,8 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
-      TF_VAR_jwt_signing_key: ${{ secrets.JWT_SIGNING_KEY }}
+      TF_VAR_authentication_authority: ${{ vars.OIDC_AUTHORITY }}
+      TF_VAR_authentication_audience: ${{ vars.OIDC_AUDIENCE }}
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}
       TF_VAR_location: ${{ vars.AZURE_LOCATION }}
     steps:

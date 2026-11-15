@@ -2,10 +2,12 @@
 subscription_id = "00000000-0000-0000-0000-000000000000"
 prefix          = "comuni-itn-001"
 location        = "italynorth"
-image           = "replace.azurecr.io/comuni:immutable-sha"
+image                    = "replace.azurecr.io/comuni:immutable-sha"
+authentication_authority = "https://replace-with-real-issuer.example/"
+authentication_audience  = "Comuni.Api"
 tags = {
   project     = "Comuni"
   managed_by  = "Terraform"
   environment = "development"
 }
-# postgres_admin_password and jwt_signing_key must be passed as secrets.
+# postgres_admin_password must be passed as a secret. OIDC authority is not a secret.

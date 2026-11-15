@@ -29,6 +29,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var connection = Environment.GetEnvironmentVariable("TEST_DATABASE_CONNECTION")
             ?? throw new InvalidOperationException("TEST_DATABASE_CONNECTION must be set.");
         Environment.SetEnvironmentVariable("ConnectionStrings__Default", connection);
+        Environment.SetEnvironmentVariable("Authentication__Mode", "DevelopmentJwt");
         Environment.SetEnvironmentVariable("Jwt__SigningKey", SigningKey);
         Environment.SetEnvironmentVariable("Jwt__Issuer", "Comuni.Tests");
         Environment.SetEnvironmentVariable("Jwt__Audience", "Comuni.Api");
@@ -43,6 +44,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = connection,
+                ["Authentication:Mode"] = "DevelopmentJwt",
                 ["Jwt:SigningKey"] = SigningKey,
                 ["Jwt:Issuer"] = "Comuni.Tests",
                 ["Jwt:Audience"] = "Comuni.Api"

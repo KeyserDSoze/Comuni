@@ -25,20 +25,22 @@ variable "postgres_admin_password" {
   sensitive   = true
 }
 
-variable "jwt_signing_key" {
-  description = "Temporary HS256 signing key; replace JWT issuer with OIDC before real users."
+variable "authentication_authority" {
+  description = "Trusted OIDC issuer base URL (HTTPS) for JWT validation; must be provisioned separately."
   type        = string
-  sensitive   = true
+  validation {
+    condition     = startswith(var.authentication_authority, "https://")
+    error_message = "authentication_authority must be an HTTPS URL."
+  }
 }
 
-variable "jwt_issuer" {
-  type    = string
-  default = "Comuni.Production"
-}
-
-variable "jwt_audience" {
-  type    = string
-  default = "Comuni.Api"
+variable "authentication_audience" {
+  description = "API resource audience expected in trusted OIDC access tokens."
+  type        = string
+  validation {
+    condition     = length(trimspace(var.authentication_audience)) > 0
+    error_message = "authentication_audience must not be empty."
+  }
 }
 
 variable "image" {
