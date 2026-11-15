@@ -19,7 +19,7 @@ async function enterWithContext(page: import('@playwright/test').Page, roles: st
 test('nasconde il modulo non abilitato', async ({ page }) => {
   await enterWithContext(page, ['Admin'], []);
   await expect(page.getByRole('navigation').getByText('Protocollo')).toHaveCount(0);
-  await expect(page.getByText('Comune Aurora')).toBeVisible();
+  await expect(page.locator('header').getByText('Comune Aurora')).toBeVisible();
 });
 
 test('un Reader non vede la creazione nel modulo attivo', async ({ page }) => {
