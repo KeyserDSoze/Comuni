@@ -353,3 +353,26 @@ Per lo staging con approvazione GitHub Environment `production`, aggiungere la *
 **Backout:** prima della promozione, **non promuovere** la candidata e lasciare 100% alla stable; revocare l'accesso IdP/sessioni secondo processo esterno e avviare un change di disattivazione/rotazione del ruolo, senza cancellare eventi audit. Le secret ACA sono *application-scoped*: il gate **rifiuta** un plan che rimuove o cambia una secret usata da revisioni precedenti. Dopo una promozione live, tornare semplicemente a `enable_platform_inventory=false` potrebbe proporne la rimozione ed essere bloccato; conservare la versione stable con una procedura/versione Terraform dedicata e change approvato prima della rotazione. La gestione di questo scenario e i test Azure live restano aperti; **non** dichiarare zero downtime.
 
 **Compatibilità naming ACA (#38/#39, ADR 0032–0033):** l'Azure CLI documenta massimo 20 caratteri per le chiavi secret. L'inventario usa `pi-<16hex>` (19 caratteri) e il signer RLS candidato usa `tp-<16hex>` (19 caratteri), mantenendo l'URI Key Vault **con versione esatta 32hex**. Eventuali collisioni dei prefissi vengono respinte dal plan gate senza sovrascrivere una secret application-scoped. Questo risolve il blocco di naming nel codice, **non** dimostra il successo di un deployment Azure reale né una rotazione HMAC senza interruzioni.
+
+
+## #40 — Smoke manuale Superadmin OIDC dell'inventario sulla candidata 0% (ADR 0034)
+
+Il tool `scripts/azure/smoke-candidate-platform.py` è **soltanto read-only** ed eseguibile da un operatore in runner privato, **non** dalla GitHub Action di `terraform apply`. Prima di invocarlo servono migrazioni/provisioning role owner approvati (#38), una Key Vault secret reference verificata, candidacy ACA `stable=100% / candidate=0%`, URL label e FQDN confrontati ai metadati Azure tramite `scripts/azure/verify-staged-revisions.py` e **tre** access token OIDC temporanei emessi da un IdP approvato: uno per Comune sintetico A, uno per Comune sintetico B e uno per una identità platform **senza organization claim**, già attiva nel roster Superadmin. **I token non si salvano nel repository, non si passano come argomenti o in issue/log e non vanno mantenuti come GitHub Secret permanente.** Devono essere iniettati da un runner privato autorizzato tramite `COMUNI_SMOKE_OIDC_TOKEN_A`, `COMUNI_SMOKE_OIDC_TOKEN_B` e `COMUNI_SMOKE_OIDC_TOKEN_PLATFORM`, con shell tracing disattivato.
+
+Con environment e token già predisposti in modo riservato e senza stampare valori:
+
+```bash
+python3 scripts/azure/smoke-candidate-platform.py \
+  --candidate-url "https://<approved-app>---<rcommitsha12>.<approved-env-domain>" \
+  --app "<approved-app>" \
+  --revision-label "<rcommitsha12>" \
+  --environment-domain "<approved-env-domain>.azurecontainerapps.io" \
+  --org-a "<uuid-comune-sintetico-a>" \
+  --org-b "<uuid-comune-sintetico-b>"
+```
+
+Il tool impone URL HTTPS canonico della **sola** label candidata, TLS CA, assenza redirect/proxy, tempo e risposta limitati. `GET /health/ready` deve essere pronto. `GET /api/v1/platform/session` deve restituire **401 anonimo, 403 ai due token comunali e 200 esattamente `{"role":"Superadmin"}`** all'operatore platform. Il token piattaforma deve ricevere **403** da `/api/v1/context`. L'inventario globale deve essere **401 anonimo, 403 per entrambi i Comuni e 200 per il solo token platform**. Il paging `limit=2` verifica esclusivamente i campi `id,name,isSuspended,protocolEnabled`, UUID ordinati senza ripetizioni, cursor coerente e la presenza dei due UUID di test. Si ferma dopo **20 pagine / 40 record al massimo**: è pensato per un **dataset sintetico controllato**, non per enumerare tutti i Comuni di produzione. Non stampa righe, nomi, token, UUID o errori di HTTP verbatim.
+
+La suite **separata** `smoke-candidate-oidc.py` (#25) con due marker Protocollo sintetici resta obbligatoria per testare la RLS tenant, mentre lo smoke #40 verifica la separazione Superadmin. Dopo un successo, un operatore deve **verificare autonomamente** nel DB owner-read-only che ogni pagina restituita abbia audit globale pseudonimo e che la revoca owner-only del soggetto **di test** comporti 403 alla richiesta successiva. Lo smoke non modifica DB né ripristina la membership e non può attestare autonomamente un processo di approvazione o MFA reale. Il cambio di stato/revoca deve avere ticket, seconda approvazione e ripristino documentato (ADR 0029).
+
+In caso di esito negativo **non** trasferire traffico alla candidata né riutilizzare token; verificare l'incidente e sospendere l'attivazione della #38. Non dichiarare lo staging Azure testato perché i test CI usano un opener HTTP simulato, non Key Vault o token veri.
