@@ -65,6 +65,18 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
               ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'protocol', TRUE),
               ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'protocol', FALSE)
             ON CONFLICT (organization_id, module_key) DO UPDATE SET enabled = EXCLUDED.enabled;
+            INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES
+              ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','test-admin','Admin',TRUE),
+              ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','test-officer','Officer',TRUE),
+              ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','test-reader','Reader',TRUE),
+              ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','only-a','Officer',TRUE),
+              ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','inactive-user','Admin',FALSE),
+              ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','test-admin','Admin',TRUE),
+              ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','test-officer','Officer',TRUE),
+              ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','test-reader','Reader',TRUE),
+              ('cccccccc-cccc-cccc-cccc-cccccccccccc','test-admin','Admin',TRUE),
+              ('cccccccc-cccc-cccc-cccc-cccccccccccc','test-reader','Reader',TRUE)
+            ON CONFLICT (organization_id, subject, role) DO UPDATE SET is_active = EXCLUDED.is_active;
             """);
     }
 
@@ -74,7 +86,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    internal HttpClient ClientFor(string organization, string role)
+    internal HttpClient ClientFor(string organization, string role, string? subject = null)
     {
         var client = CreateClient();
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -82,7 +94,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         var payload = Base64Url(JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["iss"] = "Comuni.Tests", ["aud"] = "Comuni.Api",
-            ["sub"] = "integration-test", ["iat"] = now, ["exp"] = now + 3600,
+            ["sub"] = subject ?? $"test-{role.ToLowerInvariant()}", ["iat"] = now, ["exp"] = now + 3600,
             ["organization_id"] = organization, ["role"] = role
         }));
         var data = $"{header}.{payload}";
@@ -149,4 +161,50 @@ public sealed class ApiSecurityTests(ApiFactory factory) : IClassFixture<ApiFact
             x => x.GetString() == "protocol");
         Assert.Empty(contextDisabled.RootElement.GetProperty("modules").EnumerateArray());
     }
+    [Fact]
+    public async Task Forged_Admin_JWT_cannot_upgrade_a_Reader_membership()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Admin", "test-reader");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.PostAsJsonAsync("/api/v1/protocol/records", new { subject = "Elevazione negata" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Context_roles_come_from_database_not_JWT()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Admin", "test-reader");
+        using var document = JsonDocument.Parse(await client.GetStringAsync("/api/v1/context"));
+        var roles = document.RootElement.GetProperty("roles").EnumerateArray().Select(x => x.GetString()).ToArray();
+        Assert.Equal(new[] { "Reader" }, roles);
+    }
+
+    [Fact]
+    public async Task JWT_for_unassigned_user_is_forbidden()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Admin", "unassigned");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Disabled_membership_is_forbidden_even_with_valid_JWT()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Admin", "inactive-user");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task User_assigned_only_to_A_cannot_enter_B()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgB, "Officer", "only-a");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/protocol/records")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Officer_membership_writes_despite_nonprivileged_JWT_role_claim()
+    {
+        using var client = factory.ClientFor(ApiFactory.OrgA, "Reader", "test-officer");
+        var response = await client.PostAsJsonAsync("/api/v1/protocol/records", new { subject = $"Officer-{Guid.NewGuid():N}" });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
 }
