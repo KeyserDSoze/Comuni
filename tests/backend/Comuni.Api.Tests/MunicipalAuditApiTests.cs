@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Comuni.Infrastructures.Persistence;
+using Comuni.Business.Organizations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -165,5 +166,42 @@ public sealed class MunicipalAuditApiTests(ApiFactory factory) : IClassFixture<A
         await using var probe = new NpgsqlCommand(
             "SELECT count(id) FROM platform.audit_events", db, transaction);
         Assert.Equal(0L, (long)(await probe.ExecuteScalarAsync())!);
+        await transaction.RollbackAsync();
+
+        // Positive path MUST use the restricted runtime SQL login, not the
+        // schema-owner used for fixtures. A signed tenant proof exposes only
+        // the events of the organization actually selected by the API.
+        var key = Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Signed RLS proof key required.");
+        var signer = new TenantProofSigner(key);
+        var opts = new DbContextOptionsBuilder<ComuniDbContext>()
+            .UseNpgsql(runtime).Options;
+
+        await using (var ownDb = new ComuniDbContext(opts, new TestOrganization(own)))
+        {
+            await using var signed = await TenantDatabaseTransaction.BeginAsync(
+                ownDb, signer, CancellationToken.None);
+            var listed = await new OrganizationAuditReader(ownDb)
+                .ListRecentAsync(own, CancellationToken.None);
+            Assert.Equal(2, listed.Count);
+            Assert.All(listed, item => Assert.Equal("platform.module.protocol.enabled", item.Action));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                new OrganizationAuditReader(ownDb).ListRecentAsync(Guid.NewGuid(), CancellationToken.None));
+        }
+
+        var second = await SeedAsync(1);
+        await using (var otherDb = new ComuniDbContext(opts, new TestOrganization(second)))
+        {
+            await using var signed = await TenantDatabaseTransaction.BeginAsync(
+                otherDb, signer, CancellationToken.None);
+            var listed = await new OrganizationAuditReader(otherDb)
+                .ListRecentAsync(second, CancellationToken.None);
+            Assert.Single(listed);
+        }
+    }
+
+    private sealed class TestOrganization(Guid id) : ICurrentOrganization
+    {
+        public Guid OrganizationId => id;
     }
 }
