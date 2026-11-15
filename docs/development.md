@@ -16,7 +16,7 @@ Il `sub` del JWT demo è `local-developer` (oppure `local-admin` per un Admin di
 I token sono JWT HS256 firmati localmente, validi un'ora e mantenuti **solo in memoria React**, non in localStorage. Questi token NON sono un sistema di login reale. `Authentication:Mode=DevelopmentJwt` è ammesso solo in Development/Testing; la produzione usa `Authentication:Mode=Oidc` con Authority HTTPS e Audience e **rifiuta** il segreto demo. Il frontend richiede ancora l'inserimento manuale del JWT: non esiste un login OIDC end-to-end. Vedere ADR 0007 e issue #2.
 
 ## Frontend per sviluppo con HMR
-Avviare l'API su `http://localhost:8080` con PostgreSQL disponibile e le stesse variabili d'ambiente; poi dalla root `npm install && npm run dev --workspace @comuni/frontend`, aprire `http://localhost:5173` (proxy API incluso). Per test browser: `npx playwright install chromium && npm run test:e2e --workspace @comuni/frontend`.
+Avviare l'API su `http://localhost:8080` con PostgreSQL disponibile e le stesse variabili d'ambiente; poi dalla root `npm ci && npm run dev --workspace @comuni/frontend`, aprire `http://localhost:5173` (proxy API incluso). Per test browser: `npx playwright install chromium && npm run test:e2e --workspace @comuni/frontend`.
 
 ## Backend e migrazioni
 Requisiti: .NET SDK 10, Node 22, Docker Compose. Aggiornare lo schema mediante `ConnectionStrings__Default="..." bash scripts/migrate.sh`. L'uso manuale delle migrazioni è obbligatorio prima dei deployment in produzione: il bootstrap automatico esiste solo in Development.
@@ -57,3 +57,9 @@ Procedura prevista per un futuro ambiente di test/non reale:
 4. L'Admin già collegato all'IdP può usare `PUT /api/v1/admin/memberships/Reader|Officer` per **nuove** assegnazioni, senza poter scegliere l'issuer. Se il subject/ruolo era presente con issuer differente, riceve 409 e deve richiedere una procedura owner con verifica del provider.
 
 Questo runbook è **una specifica per una futura procedura autorizzata**: nessun IdP reale, tenant live o owner provisioning è stato eseguito. La reale creazione e verifica di utenti/identità resta #2.
+
+## Installazioni npm riproducibili (ADR 0024 / #30)
+
+Dalla root usare sempre `npm ci` dopo il clone (Node.js 22 e npm 10). `npm ci` rifiuta manifest e lockfile incoerenti e non aggiorna il lockfile. Il file `package-lock.json` versionato nella root risolve anche il workspace `src/frontend`: **non** installare separatamente dentro la cartella frontend e non creare un secondo lockfile.
+
+Per aggiornare consapevolmente le dipendenze, modificare i manifest, eseguire dalla **root** `npm install --package-lock-only --ignore-scripts` con un registry affidabile, esaminare le differenze di lockfile incluse URL e integrity SHA-512, quindi verificare `npm ci`, build e Playwright prima di committare manifest e lock insieme. Non usare `npm audit fix` come aggiornamento non revisionato. La CI su `main` riesegue `npm ci` in frontend e Docker, oltre all'audit npm runtime.

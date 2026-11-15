@@ -28,7 +28,7 @@ L'accesso applicativo definitivo tramite un identity provider OIDC e SPID/CIE no
 
 ## Roadmap e limiti
 
-La vertical slice attuale è **dimostrativa, non pronta per dati comunali reali**. Consultare [mappa domini](docs/domains.md), [architettura](docs/architecture.md), [sicurezza](docs/security.md) e [deploy Azure](docs/deployment.md). Per il frontend usare npm workspace dalla root: `npm install && npm run build --workspace @comuni/frontend`.
+La vertical slice attuale è **dimostrativa, non pronta per dati comunali reali**. Consultare [mappa domini](docs/domains.md), [architettura](docs/architecture.md), [sicurezza](docs/security.md) e [deploy Azure](docs/deployment.md). Per il frontend usare npm workspace dalla root: `npm ci && npm run build --workspace @comuni/frontend`.
 
 ## Issue tracking
 

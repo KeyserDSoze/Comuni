@@ -33,7 +33,7 @@ Il bootstrap è sviluppato in due incrementi registrati su `main`: specifiche/te
 ## Esecuzione
 `dotnet test tests/backend/Comuni.UnitTests` per test rapidi.
 `TEST_DATABASE_CONNECTION="Host=localhost;Port=5432;Database=comuni_test;Username=comuni;Password=..." dotnet test tests/backend/Comuni.Api.Tests` per integration con PostgreSQL reale.
-`npm install && npx playwright install --with-deps chromium && npm run build --workspace @comuni/frontend && npm run test:e2e --workspace @comuni/frontend`.
+`npm ci && npx playwright install --with-deps chromium && npm run build --workspace @comuni/frontend && npm run test:e2e --workspace @comuni/frontend`.
 GitHub Actions ripete queste verifiche con PostgreSQL service.
 
 | Business/unit | modulazione Admin: modulo sconosciuto, tenant vuoto, audit, no-op | fail-closed / un evento al cambio |
@@ -113,3 +113,9 @@ Tutti i provider OIDC di CI sono **simulati con chiave RSA locale**: nessuna ide
 Il contratto statico `tests/infra/test_security_scanning.py` (RED prima dell'implementazione) è eseguito dal job Terraform insieme agli altri test infrastrutturali. `dependency-audit` esegue restore NuGet dei progetti di API/integration e unit/domain con metadati vulnerabilità diretti e transitivi e tratta `NU1900`, `NU1903`, `NU1904` come errori; per npm prepara l'albero dipendenze senza script di installazione e fallisce su advisory runtime high/critical. Il job CodeQL usa build C# reale e estrazione JS/TS e pubblica i risultati. Il job Docker ora dipende anche dai due gate di sicurezza. Un cron settimanale ri-esegue l'intera CI per rilevare nuove advisory dopo l'ultimo commit.
 
 **Attenzione:** il contratto offline non interroga NuGet/npm né rileva vulnerabilità del codice. L'effettiva verifica dei gate richiede l'ultima esecuzione CI verde; i CodeQL findings necessitano triage, non sono automaticamente un gate per il loro contenuto. La CI non prova penetration test, scansione della base image o sicurezza Azure live.
+
+## Dependency graph React riproducibile (#30 / ADR 0024)
+
+Il nuovo `tests/infra/test_reproducible_npm.py` verifica (RED → GREEN): lockfile npm v3 alla root, presenza del package workspace `src/frontend` e del link `node_modules/@comuni/frontend`, dipendenze dirette uguali al manifest, URL registry npm e integrity SHA-512 per le transitive, assenza di lockfile secondario e contratti `npm ci` in CI e Docker. `test_security_scanning.py` continua a verificare che l'audit runtime `npm audit --omit=dev --audit-level=high` sia bloccante e che durante lo scanning npm non esegua lifecycle script.
+
+La validazione reale è `npm ci` nel job React/Playwright e nel job SCA: se manifest e lock differiscono, il comando fallisce senza rigenerare il lock. Anche il container Docker parte dalla **root dello stesso workspace** e compila la SPA con `npm run build --workspace`. I gate preesistenti xUnit/PostgreSQL, Terraform, CodeQL e container restano obbligatori. Non garantisce tarball futuri non rimossi dal registry né build bit-per-bit identiche fra toolchain differenti.
