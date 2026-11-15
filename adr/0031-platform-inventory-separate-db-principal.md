@@ -1,0 +1,42 @@
+# ADR 0031 — Inventario Comuni Superadmin: principal PostgreSQL separato, vista minimizzata e audit letture
+
+- Stato: Accepted **come slice tecnica opt-in** (#37), non abilitazione Azure live
+- Data: 2026-11-15
+- Dipendenze: ADR 0011–0014, 0028–0030; issue #2/#3/#4/#5/#10/#37
+- Riferimenti: [PostgreSQL views and security_barrier](https://www.postgresql.org/docs/17/sql-createview.html), [PostgreSQL role privileges](https://www.postgresql.org/docs/17/sql-grant.html), [PostgreSQL row security](https://www.postgresql.org/docs/17/ddl-rowsecurity.html), [ASP.NET Core policy authorization](https://learn.microsoft.com/en-us/aspnet/core/security/authorization/policies)
+
+## Problema e modello delle minacce
+
+La stessa API serve operatori comunali e Superadmin, ma il ruolo SQL `comuni_app_runtime` è un login **condiviso fra tutti i Comuni**. Tutte le tabelle tenant hanno RLS con tenant proof HMAC firmata. Una query cross-organization con `IgnoreQueryFilters` o una funzione SECURITY DEFINER eseguibile dal runtime esporrebbe tutti gli enti in caso di SQL injection nel percorso comunale. Il solo JWT con `role=Superadmin` è manipolabile e il browser SPA non è un security boundary. Un'estensione dell'account SQL runtime è quindi **vietata**.
+
+| Minaccia | Controllo di questa slice | Rischio residuo |
+| --- | --- | --- |
+| JWT comunale / claim role falsificato | Middleware OIDC RS256 + policy `PlatformOperator`, verifica DB `iss+sub`, assenza `organization_id` | IdP reale non testato, token rubati e MFA esterna |
+| SQL injection nella normale API tenant | `comuni_app_runtime` non ha SELECT sulla vista inventory né EXECUTE sul resolver riservato; RLS firmata invariata | Compromissione del processo API può esfiltrare il secret della **seconda** connessione |
+| SQL injection nella nuova query platform | Query Npgsql parametrizzata, account SQL `comuni_platform_reader` con SELECT della **sola vista** e INSERT audit, nessun SELECT delle tabelle base/roster | Questo account, se rubato, può leggere i soli metadati dei Comuni e falsificare INSERT audit; non è un sandbox |
+| Query per liste infinite o enumerazione dettagliata | Keyset pagination UUID stabile, limite 1–25, nessun count, nessun filtro testo arbitrario | In caso di compromissione l'attaccante potrebbe comunque scorrere tutte le pagine |
+| Letture non tracciate | Audit `platform.platform_operator_audit_events` nella stessa transazione della SELECT (successo soltanto), actor random `operator_id`, correlation UUID, action | Il DB owner/superuser può manipolare gli oggetti; log esterno e retention sono futuri |
+| Revoca del ruolo platform | Predicato `is_active_platform_operator` nella policy API e verifica aggiuntiva sul secondo principal prima del SELECT, per ogni richiesta | Query già in volo e token presso IdP non vengono revocati |
+| Connessioni pooled / tenant proof riusata | Connessione dedicata e transazione locale, **senza** SET LOCAL tenant e senza condividere DbContext o sessione con `comuni_app_runtime` | Rischio di configurazione errata dei due connection string |
+| Dati personali/ente | Proiezione solo UUID, denominazione, `is_suspended`, `protocol_enabled`; niente documenti, utenti, anagrafe, membership | La denominazione del Comune è metadata amministrativa e deve essere protetta |
+
+## Decisione
+
+1. **Unico PostgreSQL, un'unica API e una sola PWA.** Creare con migrazione owner una vista `platform.platform_organization_inventory` con `security_barrier=true`, di default a privilegi owner, che seleziona soltanto `organizations.id,name,is_suspended` e il booleano `protocol` da `organization_modules`. La vista è deliberatamente globale e non fa parte del normale percorso RLS, ma è invisibile a `comuni_app_runtime` (GRANT espliciti **solo** al secondo principal). Nessun filtro EF `IgnoreQueryFilters` né bypass di policy tramite parametri.
+2. **Role SQL distinto** `comuni_platform_reader` con password fornita a un runner privato da vault, `NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`, nessuna membership, nessun ownership/CREATE/schema protocol, nessun SELECT sulle tabelle `organizations`, `organization_modules`, `platform_operators`, o su audit globali. Soltanto USAGE schema platform, SELECT vista, EXECUTE funzione limitata `platform.active_platform_operator_id(text,text)` e INSERT audit globale; nessun UPDATE/DELETE. Lo script owner `scripts/postgres/provision-platform-read-role.sql` è idempotente e verifica attributi/membership del ruolo.
+3. Il resolver `active_platform_operator_id` è SQL SECURITY DEFINER con `search_path=pg_catalog,platform`, pubblico revocato e invocabile **solo** dal principal platform. Restituisce UUID casuale e stabile dell'operatore `(iss,sub)` **solo** se attivo, NULL altrimenti. Non è una prova di identità da solo; la policy ASP.NET ha **già** validato il JWT, e la seconda verifica riduce le corse con la revoca.
+4. L'endpoint `GET /api/v1/platform/organizations?limit=...&after=...` ha `RequireAuthorization("PlatformOperator")`, con ulteriore controllo `Authentication:Mode=Oidc` e **feature opt-in** `PlatformInventory:Enabled` (default false). Se abilitata manca la connessione `ConnectionStrings:PlatformRead`, si usa lo stesso username di `Default`, o l'username non è `comuni_platform_reader`, l'avvio fallisce. Non accetta `organization_id` dal client; rifiuta `limit` fuori 1–25 / cursor UUID vuoto o malformato con 400, ordina per UUID e restituisce al massimo 25 elementi e `nextCursor` o NULL, senza conteggi.
+5. L'adapter Infrastructure usa **Npgsql diretto con il solo connection string PlatformRead** (nessun DbContext tenant condiviso): apre una transazione, verifica `active_platform_operator_id(iss,sub)`, seleziona la pagina dalla vista con parametri, quindi scrive `platform.platform_operator_audit_events` (`action=platform.organizations.listed`, `actor_subject=platform-operator`, `resource_type=platform.organization-inventory`, `resource_id=operator_id`, `correlation_id=inventory:<uuid>`, `occurred_at`). SELECT e INSERT audit sono atomici a livello di commit; in caso di errore rollback e nessuna pagina. Non loggare issuer/sub o token.
+6. UI nella **stessa** area Superadmin React (#36) che carica la prima pagina soltanto dopo login piattaforma autorizzato; pulsante `Carica altri`, stato loading/errore e cancellazione vista su revoca/401/403. Non mostra alcun dato su Admin comunali, fallback demo, 401, 403 o risposta payload inesperta. Nessuna mutazione o impersonificazione.
+7. Migrazione, provisioning SQL, gate di configurazione .NET, script CI con PostgreSQL 17 e Playwright con mock sono testati **prima** del codice secondo TDD. Senza flag/credenziale, la feature è non disponibile e **non** si presume che l'attuale Terraform Azure la deployi. Le credenziali live devono provenire da Key Vault, senza Terraform state in chiaro: prima dell'abilitazione di produzione occorre integrare il percorso Azure di provisioning/secret e testare isolamento e rete. #6 e #5 restano aperte.
+
+## Alternative rifiutate
+
+- Concedere `comuni_app_runtime` un SECURITY DEFINER `list_all_organizations()`: una SQL injection nel Protocollo potrebbe chiamarlo senza l'identità OIDC e bypassare RLS. **Vietato**.
+- Usare la connessione schema owner dell'API per fare il listing: bypass generale di RLS e maggiore blast radius. **Vietato**.
+- Esporre tutte le organizzazioni via query `IgnoreQueryFilters` su `ComuniDbContext`: RLS firmata e confini tenant non possono essere aggirati. **Vietato**.
+- Salvare username/password platform nel bundle React o in URL: **vietato**.
+
+## Limiti
+
+Il secondo ruolo ha deliberatamente accesso all'inventario di tutti gli enti: non è equivalente all'isolamento tenant. La risoluzione client dell'identità è tramite PKCE e JWT non persistito, ma non è ancora stato testato IdP production/MFA né valutata una modalità BFF. L'audit globale protegge contro UPDATE/DELETE/TRUNCATE SQL normali, non da DB owner/superuser o false INSERT del role SQL compromesso. Non sono implementate operazioni di modifica Comuni, impersonificazione, consultazione di dati personali/documenti, statistiche o verifica Azure live. Non utilizzare con dati reali senza revisione sicurezza/privacy, configurazione Key Vault per il secondo secret e piano di incident response.
