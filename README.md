@@ -53,3 +53,7 @@ Una migrazione EF abilita policy Row-Level Security sulle cinque tabelle tenant-
 ## Protezione del contesto tenant contro SQL diretto (#18)
 
 La RLS PostgreSQL ora verifica una **prova HMAC temporanea** generata dall'API: il ruolo runtime non può firmare un tenant alternativo soltanto impostando `comuni.organization_id`. Le prove richiedono una chiave condivisa tra API e verifier DB, memorizzata in Key Vault e tabella privata PostgreSQL. [ADR 0013](adr/0013-signed-tenant-rls-proofs.md). Per Development configurare `TENANT_PROOF_KEY` casuale in `docker/.env`. Non è ancora prova di sicurezza completa contro tutte le minacce o di deploy Azure.
+
+## Segreti RLS e Terraform (#21)
+
+Il secret HMAC `tenant-proof-key` deve essere installato **fuori da Terraform** in Azure Key Vault. Il deploy controlla solo che il secret esista e sia abilitato, senza recuperare il valore; lo stato Terraform nuovo non lo gestisce più. Vedere [ADR 0015](adr/0015-external-tenant-signing-secret.md) e [docs/deployment.md](docs/deployment.md). Gli snapshot storici Terraform possono contenere la vecchia chiave e devono essere gestiti/ruotati. Le issue #19 e #6 rimangono aperte; nessun rollout Azure è stato verificato.

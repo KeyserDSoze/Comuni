@@ -55,3 +55,7 @@ Il middleware API legge l'organization **soltanto** dal Principal JWT già valid
 ## Verifica RLS delle prove firmate (ADR 0013)
 
 Il ruolo applicativo condiviso non firma asserzioni tenant: la singola API .NET le firma con HMAC-SHA256, ottenendo la chiave dal Key Vault. La transazione salva solo la prova firmata in `comuni.tenant_assertion`. Le policy RLS chiamano la funzione PostgreSQL `platform.verified_tenant_id()` `SECURITY DEFINER`, la quale legge la chiave privata dalla tabella `tenant_proof_secret` (non accessibile a `comuni_app_runtime`), verifica HMAC e scadenza, poi restituisce UUID o NULL. Il solo cambio di `comuni.organization_id` non modifica più l'identità. Nessun nuovo servizio, database o frontend: migrazione 0006, bootstrap del segreto condiviso e policy SQL aggiornate. Rimangono i rischi di un processo API compromesso, riuso di assertion catturate, superuser e disponibilità durante la rotazione.
+
+## Boundary Key Vault / Terraform per la HMAC del tenant (ADR 0015)
+
+La chiave HMAC viene creata e ruotata esclusivamente mediante un workflow operativo esterno, approvato: **Terraform non legge né scrive il valore** e fornisce a Container Apps solo un riferimento versionless al secret. Il `removed` block con `destroy=false` tutela le installazioni che precedentemente avevano il secret nello state. La CI impedisce regressioni del contratto e verifica il preflight con metadata-only. L'ordine Key Vault → DB staging → nuova revisione API → verifica → revoca non è ancora orchestrato né collaudato in Azure. Vedere #19 e #6.
