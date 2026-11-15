@@ -72,5 +72,13 @@ TO comuni_app_runtime;
 
 GRANT UPDATE (enabled) ON TABLE platform.organization_modules TO comuni_app_runtime;
 
+-- Least-privilege membership administration for Reader/Officer (issue #27).
+-- RESTRICTIVE RLS policies in migration 0008 additionally prohibit runtime
+-- INSERT/UPDATE of Admin rows even with a valid signed tenant proof.
+GRANT INSERT (organization_id, subject, role, is_active)
+    ON TABLE platform.organization_memberships TO comuni_app_runtime;
+GRANT UPDATE (is_active)
+    ON TABLE platform.organization_memberships TO comuni_app_runtime;
+
 -- The verifier can be invoked in RLS; it never exposes or signs data using the DB secret.
 GRANT EXECUTE ON FUNCTION platform.verified_tenant_id() TO comuni_app_runtime;

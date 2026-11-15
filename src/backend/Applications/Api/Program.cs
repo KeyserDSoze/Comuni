@@ -37,6 +37,8 @@ builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
 builder.Services.AddScoped<ProtocolService>();
 builder.Services.AddScoped<IModuleAdministrationStore, ModuleAdministrationRepository>();
 builder.Services.AddScoped<ModuleAdministrationService>();
+builder.Services.AddScoped<IMembershipAdministrationStore, MembershipAdministrationRepository>();
+builder.Services.AddScoped<MembershipAdministrationService>();
 builder.Services.AddRateLimiter(options =>
 {
     // In-memory partition per replica, not a distributed denial-of-service defence.
@@ -241,6 +243,37 @@ app.MapPut("/api/v1/admin/modules/{moduleKey}", async (
         : Results.Ok(new ModuleState(moduleKey, request.Enabled.Value));
 }).WithName("SetOrganizationModule").RequireAuthorization("Admin");
 
+// The organization comes exclusively from the validated JWT (never from the body).
+// No Admin grants/revocations here: the first/last Admin is out of this scoped flow.
+app.MapGet("/api/v1/admin/memberships", async (
+    ICurrentOrganization current, MembershipAdministrationService service, CancellationToken ct) =>
+    Results.Ok(await service.ListAsync(current.OrganizationId, ct)))
+    .WithName("ListOrganizationMemberships").RequireAuthorization("Admin");
+
+app.MapPut("/api/v1/admin/memberships/{role}", async (
+    string role, SetMembershipActiveRequest request,
+    ICurrentOrganization current, MembershipAdministrationService service, CancellationToken ct) =>
+{
+    if (role is not ("Reader" or "Officer"))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["role"] = ["Only Reader or Officer can be managed by this endpoint."]
+        });
+    if (request.Enabled is null || string.IsNullOrWhiteSpace(request.Subject) ||
+        request.Subject.Length > 160 || request.Subject != request.Subject.Trim() ||
+        request.Subject.Any(char.IsControl))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["subject"] = ["A valid IdP subject and enabled boolean are required."]
+        });
+
+    var status = await service.SetActiveAsync(current.OrganizationId,
+        request.Subject, role, request.Enabled.Value, ct);
+    return status == MembershipUpdateStatus.NotFound
+        ? Results.NotFound()
+        : Results.Ok(new MembershipState(request.Subject, role, request.Enabled.Value));
+}).WithName("SetOrganizationMembership").RequireAuthorization("Admin");
+
 // A single backend image also serves the built React PWA in production.
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -252,6 +285,7 @@ static ProtocolRecordResponse ToResponse(ProtocolRecord record) =>
     new(record.Id, record.Subject, record.RegisteredAt);
 
 public sealed record SetModuleEnabledRequest(bool? Enabled);
+public sealed record SetMembershipActiveRequest(string? Subject, bool? Enabled);
 public sealed record CreateProtocolRecordRequest(string? Subject);
 public sealed record ProtocolRecordResponse(Guid Id, string Subject, DateTimeOffset RegisteredAt);
 public partial class Program { } // WebApplicationFactory entry point for integration tests.
