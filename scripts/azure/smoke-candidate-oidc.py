@@ -147,14 +147,18 @@ def run_smoke(*, url, app, label, environment_domain, org_a, org_b, marker_a, ma
             actual_tenant = str(uuid.UUID(context["organizationId"]))
         except (ValueError, TypeError, KeyError, AttributeError):
             raise SmokeRejected("Invalid authenticated tenant identifier")
+        roles = context.get("roles")
+        modules = context.get("modules")
         if (
             actual_tenant != tenant
             or not isinstance(context.get("organizationName"), str)
             or not context["organizationName"].strip()
-            or not isinstance(context.get("roles"), list)
-            or not set(context["roles"]).intersection({"Admin", "Officer", "Reader"})
-            or not isinstance(context.get("modules"), list)
-            or "protocol" not in context["modules"]
+            or not isinstance(roles, list)
+            or not all(isinstance(role, str) for role in roles)
+            or not set(roles).intersection({"Admin", "Officer", "Reader"})
+            or not isinstance(modules, list)
+            or not all(isinstance(module, str) for module in modules)
+            or "protocol" not in modules
         ):
             raise SmokeRejected("Authenticated tenant identity, membership or module mismatch")
         status, records = _get(origin, "/api/v1/protocol/records", token, opener)
