@@ -29,7 +29,7 @@ def fixture_plan():
         "key_vault_secret_id": VAULT_URI + "secrets/tenant-proof-key/" + STABLE_VERSION,
     }
     candidate_secret = {
-        "name": "tenant-proof-key-v" + CANDIDATE_VERSION,
+        "name": "tp-" + CANDIDATE_VERSION[:16],
         "key_vault_secret_id": VAULT_URI + "secrets/tenant-proof-key/" + CANDIDATE_VERSION,
     }
     before = {
@@ -82,9 +82,9 @@ class StagedRolloutTests(unittest.TestCase):
     def test_stable_secret_retained_and_candidate_uses_distinct_versioned_name(self):
         self.assertIn("var.stable_tenant_proof_secret_version", TERRAFORM)
         self.assertIn('name                = "tenant-proof-key"', TERRAFORM)
-        self.assertIn("tenant-proof-key-v", TERRAFORM)
+        self.assertIn("tp-${substr(var.tenant_proof_secret_version, 0, 16)}", TERRAFORM)
         self.assertIn("var.tenant_proof_secret_version", TERRAFORM)
-        self.assertRegex(TERRAFORM, r'secret_name\s*=\s*"tenant-proof-key-v')
+        self.assertRegex(TERRAFORM, r'secret_name\s*=\s*"tp-')
         self.assertNotRegex(TERRAFORM, r'name\s*=\s*"Security__TenantProofKey"\s+secret_name\s*=\s*"tenant-proof-key"')
 
     def test_deployment_requires_explicit_stable_revision_and_stable_key_version(self):
@@ -108,11 +108,30 @@ class StagedRolloutTests(unittest.TestCase):
             input=json.dumps(plan), capture_output=True, text=True, check=False,
         )
 
+    def test_aca_candidate_secret_name_max_twenty_and_full_pinned_uri(self):
+        fixture = fixture_plan()
+        secret = fixture["resource_changes"][0]["change"]["after"]["secret"][1]
+        self.assertLessEqual(len(secret["name"]), 20)
+        self.assertEqual("tp-" + CANDIDATE_VERSION[:16], secret["name"])
+        self.assertIn("secrets/tenant-proof-key/" + CANDIDATE_VERSION,
+                      secret["key_vault_secret_id"])
+        self.assertIn("substr(var.tenant_proof_secret_version, 0, 16)", TERRAFORM)
+
+    def test_aca_candidate_prefix_collision_cannot_replace_stable_secret(self):
+        plan = fixture_plan()
+        change = plan["resource_changes"][0]["change"]
+        old_version = CANDIDATE_VERSION[:16] + "d" * 16
+        change["before"]["secret"].append({
+            "name": "tp-" + CANDIDATE_VERSION[:16],
+            "key_vault_secret_id": VAULT_URI + "secrets/tenant-proof-key/" + old_version,
+        })
+        self.assertNotEqual(0, self.gate(plan).returncode)
+
     def test_valid_update_to_0_percent_candidate_is_accepted(self):
         response = self.gate(fixture_plan())
         self.assertEqual(0, response.returncode, response.stderr)
         self.assertNotIn("signing_key", response.stdout)
-        self.assertNotIn("tenant-proof-key-v" + CANDIDATE_VERSION, response.stdout)
+        self.assertNotIn("tp-" + CANDIDATE_VERSION[:16], response.stdout)
 
     def test_missing_previous_revision_or_replacing_container_app_is_rejected(self):
         for plan in [

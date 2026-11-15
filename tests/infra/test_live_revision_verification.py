@@ -46,7 +46,7 @@ def valid_revisions():
         revision(STABLE, image="comuni.azurecr.io/comuni:" + ("0" * 40)),
         revision(
             CANDIDATE, image=IMAGE, key_id=KEY_ID,
-            secret="tenant-proof-key-v" + VERSION,
+            secret="tp-" + VERSION[:16],
         ),
     ]
 
@@ -246,7 +246,7 @@ class LiveRevisionVerificationTests(unittest.TestCase):
             self.assertNotIn("update", call)
             self.assertNotIn("deactivate", call)
             self.assertNotIn("activate", call)
-        self.assertNotIn("tenant-proof-key-v" + VERSION, result.stdout + result.stderr)
+        self.assertNotIn("tp-" + VERSION[:16], result.stdout + result.stderr)
         self.assertNotIn("AZ_REVISIONS", result.stdout + result.stderr)
 
 
