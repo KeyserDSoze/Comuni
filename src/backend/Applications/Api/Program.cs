@@ -19,6 +19,7 @@ var authentication = AuthenticationConfiguration.Read(
 var connection = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 var protection = ApiProtectionSettings.Read(builder.Configuration);
+var browserOidc = BrowserOidcSettings.Read(builder.Configuration, authentication.Mode, builder.Environment.EnvironmentName);
 var tenantProofKey = builder.Configuration["Security:TenantProofKey"];
 var tenantProofSigner = new TenantProofSigner(tenantProofKey ?? string.Empty, builder.Configuration["Security:TenantProofKeyId"]);
 
@@ -150,6 +151,10 @@ app.Use(async (context, next) =>
         await tenantTransaction.CommitAsync(context.RequestAborted);
 });
 app.UseAuthorization();
+
+// This is public OAuth CLIENT METADATA only, never an access-token minting endpoint.
+app.MapGet("/api/v1/auth/browser", () => Results.Ok(browserOidc))
+    .WithName("GetBrowserOidcConfiguration").AllowAnonymous();
 
 app.MapOpenApi();
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))

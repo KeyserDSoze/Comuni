@@ -76,11 +76,15 @@ public sealed class BrowserOidcSettingsTests
     }
 
     [Fact]
-    public void Public_endpoint_is_anonymous_and_disabled_during_demo_mode()
+    public async Task Public_endpoint_is_anonymous_and_disabled_during_demo_mode()
     {
-        // In the frontend demo only the local HS256 form is allowed;
-        // the OIDC settings must not be mistaken for an identity provider.
-        var settings = BrowserOidcSettings.Read(Config(("Authentication:Mode", "DevelopmentJwt")), "DevelopmentJwt", "Testing");
-        Assert.False(settings.Enabled);
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/api/v1/auth/browser");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        var data = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("DevelopmentJwt", data.GetProperty("mode").GetString());
+        Assert.False(data.GetProperty("enabled").GetBoolean());
+        Assert.True(data.GetProperty("clientId").ValueKind is System.Text.Json.JsonValueKind.Null);
     }
 }
