@@ -96,18 +96,21 @@ class FakeOpener:
 
 
 def run(opener=None, **kw):
-    return smoke.run_smoke(
-        url=URL, app=APP, label=LABEL,
-        org_a=A, org_b=B,
-        marker_a=MARK_A, marker_b=MARK_B,
-        token_a=TOKEN_A, token_b=TOKEN_B,
-        opener=opener or FakeOpener(), **kw
-    )
+    params = {
+        "url": URL, "app": APP, "label": LABEL,
+        "environment_domain": "lovely-12345.westeurope.azurecontainerapps.io",
+        "org_a": A, "org_b": B,
+        "marker_a": MARK_A, "marker_b": MARK_B,
+        "token_a": TOKEN_A, "token_b": TOKEN_B,
+        "opener": opener or FakeOpener(),
+    }
+    params.update(kw)
+    return smoke.run_smoke(**params)
 
 
 class CandidateSmokeTests(unittest.TestCase):
     def test_candidate_url_is_https_exact_label_without_redirect_or_external_host(self):
-        self.assertEqual(URL, smoke.validate_candidate_url(URL, APP, LABEL))
+        self.assertEqual(URL, smoke.validate_candidate_url(URL, APP, LABEL, "lovely-12345.westeurope.azurecontainerapps.io"))
         for url in [
             "http://" + HOST,
             "https://evil.example.com/",
@@ -120,7 +123,15 @@ class CandidateSmokeTests(unittest.TestCase):
             "https://" + HOST + ":8443",
         ]:
             with self.assertRaises(smoke.SmokeRejected):
-                smoke.validate_candidate_url(url, APP, LABEL)
+                smoke.validate_candidate_url(url, APP, LABEL, "lovely-12345.westeurope.azurecontainerapps.io")
+
+    def test_rejects_an_unapproved_azure_environment_domain(self):
+        with self.assertRaises(smoke.SmokeRejected):
+            smoke.validate_candidate_url(
+                URL, APP, LABEL, "attacker-55555.westeurope.azurecontainerapps.io"
+            )
+        with self.assertRaises(smoke.SmokeRejected):
+            run(environment_domain="attacker-55555.westeurope.azurecontainerapps.io")
 
     def test_two_tenant_read_only_smoke_succeeds_and_never_uses_token_in_url(self):
         opener = FakeOpener()
