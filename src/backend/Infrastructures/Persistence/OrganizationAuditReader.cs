@@ -1,4 +1,5 @@
 using Comuni.Business.Audit;
+using Comuni.Domains.Audit;
 using Microsoft.EntityFrameworkCore;
 
 namespace Comuni.Infrastructures.Persistence;
@@ -25,5 +26,34 @@ public sealed class OrganizationAuditReader(ComuniDbContext db) : IOrganizationA
             .Select(x => new MunicipalAuditEntry(
                 x.Id, x.Action, x.ResourceType, x.OccurredAt))
             .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Requires an existing verified tenant SQL transaction, established by the
+    /// API middleware. No implicit unscoped transaction, owner fallback or
+    /// reader response without a durable audit append is permitted.
+    /// </summary>
+    public async Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAndRecordAsync(
+        Guid organizationId, AuditEvent consultation, CancellationToken cancellationToken)
+    {
+        if (organizationId == Guid.Empty ||
+            db.CurrentOrganizationId != organizationId ||
+            consultation.OrganizationId != organizationId ||
+            consultation.ResourceId != organizationId ||
+            consultation.Action != "platform.audit.consulted" ||
+            consultation.ResourceType != "platform.audit")
+            throw new UnauthorizedAccessException("Municipal audit scope mismatch.");
+
+        if (db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Signed tenant audit transaction is required.");
+
+        // Capture the response BEFORE appending this consultation. The request
+        // never reports its own event; the next authorized read may see it.
+        var entries = await ListRecentAsync(organizationId, cancellationToken);
+        await db.AuditEvents.AddAsync(consultation, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        // The tenant middleware commits only successful HTTP requests. If
+        // response processing fails, disposal rolls back both operations.
+        return entries;
     }
 }
