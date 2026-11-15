@@ -26,13 +26,19 @@ TOKEN_B = "tenant-beta-test-access-token"
 TOKEN_PLATFORM = "platform-operator-test-access-token"
 
 
+_LOADED_SMOKE = None
+
 def module():
+    global _LOADED_SMOKE
+    if _LOADED_SMOKE is not None:
+        return _LOADED_SMOKE
     if not SCRIPT.is_file():
         raise AssertionError("RED: missing dedicated platform candidate smoke script")
     spec = importlib.util.spec_from_file_location("platform_candidate_smoke", SCRIPT)
     result = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = result
     spec.loader.exec_module(result)
+    _LOADED_SMOKE = result
     return result
 
 
@@ -170,9 +176,10 @@ class PlatformCandidateTests(unittest.TestCase):
         self.assertTrue(all(t not in u for u in urls
                             for t in (TOKEN_A, TOKEN_B, TOKEN_PLATFORM)))
         self.assertTrue(all(x.get_method() == "GET" for x in reqs))
-        self.assertEqual(2, len([u for u in urls if "/api/v1/platform/organizations?limit=2" in u
-                                 and opener.requests[urls.index(u)].get_header("Authorization") ==
-                                 "Bearer " + TOKEN_PLATFORM]))
+        self.assertEqual(2, sum(
+            1 for req in reqs
+            if "/api/v1/platform/organizations?limit=2" in req.full_url
+            and req.get_header("Authorization") == "Bearer " + TOKEN_PLATFORM))
         self.assertTrue(any("after=" + B in u for u in urls))
         self.assertTrue(all(x.get_header("Authorization") is None
                             for x in reqs if urlsplit(x.full_url).path == "/health/ready"))
