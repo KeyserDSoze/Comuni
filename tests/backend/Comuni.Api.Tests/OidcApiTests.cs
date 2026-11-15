@@ -94,7 +94,7 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
 
     internal string Token(string issuer = Issuer, string audience = Audience,
         string subject = "oidc-user", string organizationId = OrganizationId,
-        bool symmetric = false, bool expired = false)
+        bool symmetric = false, bool expired = false, string? assertedRole = null)
     {
         SigningCredentials credentials = symmetric
             ? new SigningCredentials(
@@ -102,13 +102,13 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
                 SecurityAlgorithms.HmacSha256)
             : new SigningCredentials(new RsaSecurityKey(_rsa) { KeyId = KeyId },
                 SecurityAlgorithms.RsaSha256);
+        var claims = new List<Claim> { new("sub", subject) };
+        if (!string.IsNullOrEmpty(organizationId))
+            claims.Add(new Claim("organization_id", organizationId));
+        if (assertedRole is not null)
+            claims.Add(new Claim("role", assertedRole));
         var token = new JwtSecurityToken(
-            issuer: issuer, audience: audience,
-            claims:
-            [
-                new Claim("sub", subject),
-                new Claim("organization_id", organizationId)
-            ],
+            issuer: issuer, audience: audience, claims: claims,
             notBefore: expired ? DateTime.UtcNow.AddHours(-2) : DateTime.UtcNow.AddMinutes(-1),
             expires: expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(10),
             signingCredentials: credentials);
