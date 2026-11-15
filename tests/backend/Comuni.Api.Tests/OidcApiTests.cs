@@ -1,0 +1,176 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Comuni.Infrastructures.Persistence;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
+using Xunit;
+
+namespace Comuni.Api.Tests;
+
+/// <summary>
+/// Local OIDC discovery/JWKS configuration; no external network or production identity provider.
+/// </summary>
+public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
+{
+    public const string Issuer = "https://issuer.comuni.test/";
+    public const string Audience = "Comuni.Api";
+    public const string OrganizationId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    private readonly RSA _rsa = RSA.Create(2048);
+    private const string KeyId = "test-oidc-rsa-key";
+
+    public OidcApiFactory()
+    {
+        var connection = Environment.GetEnvironmentVariable("TEST_DATABASE_CONNECTION")
+            ?? throw new InvalidOperationException("TEST_DATABASE_CONNECTION required.");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default", connection);
+        Environment.SetEnvironmentVariable("Authentication__Mode", "Oidc");
+        Environment.SetEnvironmentVariable("Authentication__Authority", Issuer);
+        Environment.SetEnvironmentVariable("Authentication__Audience", Audience);
+        Environment.SetEnvironmentVariable("Jwt__SigningKey", null);
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+        builder.ConfigureAppConfiguration((_, config) =>
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Authentication:Mode"] = "Oidc",
+                ["Authentication:Authority"] = Issuer,
+                ["Authentication:Audience"] = Audience
+            }));
+        builder.ConfigureTestServices(services =>
+            services.PostConfigure<JwtBearerOptions>(
+                JwtBearerDefaults.AuthenticationScheme, options =>
+                {
+                    var metadata = new OpenIdConnectConfiguration { Issuer = Issuer };
+                    metadata.SigningKeys.Add(new RsaSecurityKey(_rsa.ExportParameters(false)) { KeyId = KeyId });
+                    options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(metadata);
+                }));
+    }
+
+    public async Task InitializeAsync()
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        await db.Database.MigrateAsync();
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO platform.organizations (id, name) VALUES
+              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'OIDC Test Municipality')
+            ON CONFLICT (id) DO NOTHING;
+            INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES
+              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'oidc-user', 'Reader', TRUE)
+            ON CONFLICT (organization_id, subject, role) DO UPDATE SET is_active = TRUE;
+            """);
+    }
+
+    public new Task DisposeAsync()
+    {
+        base.Dispose();
+        _rsa.Dispose();
+        Environment.SetEnvironmentVariable("Authentication__Mode", null);
+        Environment.SetEnvironmentVariable("Authentication__Authority", null);
+        Environment.SetEnvironmentVariable("Authentication__Audience", null);
+        return Task.CompletedTask;
+    }
+
+    internal string Token(string issuer = Issuer, string audience = Audience,
+        string subject = "oidc-user", string organizationId = OrganizationId,
+        bool symmetric = false, bool expired = false)
+    {
+        SigningCredentials credentials = symmetric
+            ? new SigningCredentials(
+                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(ApiFactory.SigningKey)),
+                SecurityAlgorithms.HmacSha256)
+            : new SigningCredentials(new RsaSecurityKey(_rsa) { KeyId = KeyId },
+                SecurityAlgorithms.RsaSha256);
+        var token = new JwtSecurityToken(
+            issuer: issuer, audience: audience,
+            claims:
+            [
+                new Claim("sub", subject),
+                new Claim("organization_id", organizationId)
+            ],
+            notBefore: expired ? DateTime.UtcNow.AddHours(-2) : DateTime.UtcNow.AddMinutes(-1),
+            expires: expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(10),
+            signingCredentials: credentials);
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    internal HttpClient Authenticated(string token)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return client;
+    }
+}
+
+public sealed class OidcApiTests(OidcApiFactory factory) : IClassFixture<OidcApiFactory>
+{
+    [Fact]
+    public async Task Trusted_RS256_token_with_active_membership_can_access_its_context()
+    {
+        using var client = factory.Authenticated(factory.Token());
+        var response = await client.GetAsync("/api/v1/context");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("OIDC Test Municipality", text);
+        Assert.Contains("Reader", text);
+    }
+
+    [Fact]
+    public async Task RS256_with_wrong_issuer_is_unauthorized()
+    {
+        using var client = factory.Authenticated(factory.Token(issuer: "https://evil.example.test/"));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task RS256_with_wrong_audience_is_unauthorized()
+    {
+        using var client = factory.Authenticated(factory.Token(audience: "Other.Api"));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task HS256_demo_token_is_never_accepted_in_OIDC_mode()
+    {
+        using var client = factory.Authenticated(factory.Token(symmetric: true));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Expired_RS256_token_is_unauthorized()
+    {
+        using var client = factory.Authenticated(factory.Token(expired: true));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task RS256_user_without_membership_is_forbidden()
+    {
+        using var client = factory.Authenticated(factory.Token(subject: "unassigned-oidc-user"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task RS256_user_with_Reader_membership_cannot_write()
+    {
+        using var client = factory.Authenticated(factory.Token());
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.PostAsJsonAsync("/api/v1/protocol/records", new { subject = "Non consentito" })).StatusCode);
+    }
+}
