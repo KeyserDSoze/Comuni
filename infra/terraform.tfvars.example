@@ -1,0 +1,11 @@
+# Copy to a local file (do not commit secrets). Prefer TF_VAR_* environment variables.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+prefix          = "comuni-itn-001"
+location        = "italynorth"
+image           = "replace.azurecr.io/comuni:immutable-sha"
+tags = {
+  project     = "Comuni"
+  managed_by  = "Terraform"
+  environment = "development"
+}
+# postgres_admin_password and jwt_signing_key must be passed as secrets.
