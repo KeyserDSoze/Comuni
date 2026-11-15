@@ -20,7 +20,7 @@ var connection = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 var protection = ApiProtectionSettings.Read(builder.Configuration);
 var tenantProofKey = builder.Configuration["Security:TenantProofKey"];
-var tenantProofSigner = new TenantProofSigner(tenantProofKey ?? string.Empty);
+var tenantProofSigner = new TenantProofSigner(tenantProofKey ?? string.Empty, builder.Configuration["Security:TenantProofKeyId"]);
 
 builder.Services.AddSingleton(tenantProofSigner);
 builder.Services.AddHttpContextAccessor();
@@ -91,8 +91,13 @@ if (app.Environment.IsDevelopment())
     await db.Database.ExecuteSqlInterpolatedAsync($"""
         INSERT INTO platform.tenant_proof_secret (id, signing_key)
         VALUES (1, {tenantProofKey})
-        ON CONFLICT (id) DO UPDATE SET signing_key = EXCLUDED.signing_key
+        ON CONFLICT (id) DO UPDATE SET signing_key = EXCLUDED.signing_key;
+        INSERT INTO platform.tenant_proof_keys (key_id, signing_key)
+        VALUES ('legacy', {tenantProofKey})
+        ON CONFLICT (key_id) DO UPDATE SET signing_key = EXCLUDED.signing_key,
+            revoked_at = NULL, not_before = '-infinity', valid_until = 'infinity';
         """);
+
     await db.Database.ExecuteSqlRawAsync("""
         INSERT INTO platform.organizations (id, name) VALUES
           ('11111111-1111-1111-1111-111111111111', 'Comune Aurora'),
