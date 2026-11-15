@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using Comuni.Api.Security;
+using Comuni.Business.Audit;
 using Comuni.Business.Organizations;
 using Comuni.Business.Protocol;
 using Comuni.Domains.Protocol;
@@ -26,6 +27,7 @@ var connection = builder.Configuration.GetConnectionString("Default")
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentOrganization, HttpCurrentOrganization>();
+builder.Services.AddScoped<ICurrentActorContext, HttpCurrentActorContext>();
 builder.Services.AddDbContext<ComuniDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddScoped<OrganizationDirectory>();
 builder.Services.AddScoped<IOrganizationDirectory>(s => s.GetRequiredService<OrganizationDirectory>());

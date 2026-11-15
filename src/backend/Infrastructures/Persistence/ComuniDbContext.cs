@@ -1,4 +1,5 @@
 using Comuni.Business.Organizations;
+using Comuni.Domains.Audit;
 using Comuni.Domains.Organizations;
 using Comuni.Domains.Protocol;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,7 @@ public sealed class ComuniDbContext(
     public DbSet<OrganizationModule> OrganizationModules => Set<OrganizationModule>();
     public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
     public DbSet<ProtocolRecord> ProtocolRecords => Set<ProtocolRecord>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +51,25 @@ public sealed class ComuniDbContext(
             b.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
             b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)
                 .OnDelete(DeleteBehavior.Cascade);
+            b.HasQueryFilter(x => x.OrganizationId == CurrentOrganizationId);
+        });
+
+        modelBuilder.Entity<AuditEvent>(b =>
+        {
+            b.ToTable("audit_events", "platform");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id");
+            b.Property(x => x.OrganizationId).HasColumnName("organization_id");
+            b.Property(x => x.ActorSubject).HasColumnName("actor_subject").HasMaxLength(160).IsRequired();
+            b.Property(x => x.Action).HasColumnName("action").HasMaxLength(120).IsRequired();
+            b.Property(x => x.ResourceType).HasColumnName("resource_type").HasMaxLength(100).IsRequired();
+            b.Property(x => x.ResourceId).HasColumnName("resource_id").IsRequired();
+            b.Property(x => x.CorrelationId).HasColumnName("correlation_id").HasMaxLength(128).IsRequired();
+            b.Property(x => x.OccurredAt).HasColumnName("occurred_at").HasColumnType("timestamp with time zone");
+            b.HasIndex(x => new { x.OrganizationId, x.OccurredAt });
+            b.HasIndex(x => new { x.OrganizationId, x.ResourceId });
+            b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
             b.HasQueryFilter(x => x.OrganizationId == CurrentOrganizationId);
         });
 
@@ -89,6 +110,15 @@ public sealed class ComuniDbContext(
             if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
                 (organizationId == Guid.Empty || entry.Entity.OrganizationId != organizationId))
                 throw new UnauthorizedAccessException("Cannot change memberships outside the current organization.");
+        }
+
+        foreach (var entry in ChangeTracker.Entries<AuditEvent>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("Audit history cannot be changed.");
+            if (entry.State == EntityState.Added &&
+                (organizationId == Guid.Empty || entry.Entity.OrganizationId != organizationId))
+                throw new UnauthorizedAccessException("Cannot append audit outside the current organization.");
         }
 
         return base.SaveChangesAsync(cancellationToken);

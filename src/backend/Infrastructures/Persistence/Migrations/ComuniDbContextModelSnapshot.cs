@@ -2,6 +2,7 @@ using System;
 using Comuni.Infrastructures.Persistence;
 using Comuni.Domains.Organizations;
 using Comuni.Domains.Protocol;
+using Comuni.Domains.Audit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
@@ -45,6 +46,24 @@ public sealed class ComuniDbContextModelSnapshot : ModelSnapshot
             b.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
             b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuditEvent>(b =>
+        {
+            b.ToTable("audit_events", "platform");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id");
+            b.Property(x => x.OrganizationId).HasColumnName("organization_id");
+            b.Property(x => x.ActorSubject).HasColumnName("actor_subject").HasMaxLength(160).IsRequired();
+            b.Property(x => x.Action).HasColumnName("action").HasMaxLength(120).IsRequired();
+            b.Property(x => x.ResourceType).HasColumnName("resource_type").HasMaxLength(100).IsRequired();
+            b.Property(x => x.ResourceId).HasColumnName("resource_id").IsRequired();
+            b.Property(x => x.CorrelationId).HasColumnName("correlation_id").HasMaxLength(128).IsRequired();
+            b.Property(x => x.OccurredAt).HasColumnName("occurred_at").HasColumnType("timestamp with time zone");
+            b.HasIndex(x => new { x.OrganizationId, x.OccurredAt });
+            b.HasIndex(x => new { x.OrganizationId, x.ResourceId });
+            b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ProtocolRecord>(b =>
