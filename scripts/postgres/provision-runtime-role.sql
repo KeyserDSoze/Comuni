@@ -82,3 +82,8 @@ GRANT UPDATE (is_active)
 
 -- The verifier can be invoked in RLS; it never exposes or signs data using the DB secret.
 GRANT EXECUTE ON FUNCTION platform.verified_tenant_id() TO comuni_app_runtime;
+
+-- Read-only platform identity predicate (#34). NEVER grant SELECT/INSERT/UPDATE
+-- on platform.platform_operators: a SQL injection cannot list operator roster.
+GRANT EXECUTE ON FUNCTION platform.is_active_platform_operator(text, text)
+    TO comuni_app_runtime;

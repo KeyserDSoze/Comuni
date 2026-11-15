@@ -80,7 +80,7 @@ public sealed class PlatformOperatorApiTests(OidcApiFactory factory) : IClassFix
             (await withTenant.GetAsync(Endpoint)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,
             (await withTenant.GetAsync("/api/v1/context")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound,
+        Assert.Equal(HttpStatusCode.MethodNotAllowed,
             (await client.PutAsJsonAsync(Endpoint, new { role = "Superadmin" })).StatusCode);
     }
 
@@ -108,7 +108,7 @@ public sealed class PlatformOperatorApiTests(OidcApiFactory factory) : IClassFix
     [Fact]
     public async Task Demo_JWT_cannot_access_platform_endpoint_even_with_superadmin_role_claim()
     {
-        await using var demo = new ApiFactory();
+        using var demo = new ApiFactory();
         await demo.InitializeAsync();
         using var token = demo.ClientFor(ApiFactory.OrgA, "Superadmin", "test-admin");
         Assert.Equal(HttpStatusCode.Forbidden,

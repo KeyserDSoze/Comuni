@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using Comuni.Api.Security;
 using Comuni.Business.Audit;
 using Comuni.Business.Organizations;
+using Comuni.Business.Platform;
 using Comuni.Business.Protocol;
 using Comuni.Domains.Protocol;
 using Comuni.Infrastructures.Persistence;
@@ -33,7 +34,9 @@ builder.Services.AddScoped<IOrganizationDirectory>(s => s.GetRequiredService<Org
 builder.Services.AddScoped<IOrganizationModuleStore>(s => s.GetRequiredService<OrganizationDirectory>());
 builder.Services.AddSingleton(new MembershipIssuerPolicy(authentication.Mode == "Oidc"));
 builder.Services.AddScoped<IOrganizationMembershipStore, OrganizationMembershipStore>();
+builder.Services.AddScoped<IPlatformOperatorStore, PlatformOperatorStore>();
 builder.Services.AddScoped<IAuthorizationHandler, OrganizationRoleHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, PlatformOperatorHandler>();
 builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
 builder.Services.AddScoped<ProtocolService>();
 builder.Services.AddScoped<IModuleAdministrationStore, ModuleAdministrationRepository>();
@@ -81,6 +84,9 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Admin", policy => policy
         .RequireAuthenticatedUser()
         .AddRequirements(new OrganizationRoleRequirement("Admin")));
+    options.AddPolicy("PlatformOperator", policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformOperatorRequirement()));
 });
 
 var app = builder.Build();
@@ -158,6 +164,11 @@ app.UseAuthorization();
 // This is public OAuth CLIENT METADATA only, never an access-token minting endpoint.
 app.MapGet("/api/v1/auth/browser", () => Results.Ok(browserOidc))
     .WithName("GetBrowserOidcConfiguration").AllowAnonymous();
+
+// No organization IDs or sensitive roster details on this minimal read-only
+// platform identity endpoint. It does NOT grant cross-organization data access.
+app.MapGet("/api/v1/platform/session", () => Results.Ok(new { role = "Superadmin" }))
+    .WithName("GetPlatformSession").RequireAuthorization("PlatformOperator");
 
 app.MapOpenApi();
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))
