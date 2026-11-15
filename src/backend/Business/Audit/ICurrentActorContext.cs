@@ -8,4 +8,8 @@ public interface ICurrentActorContext
 {
     string ActorSubject { get; }
     string CorrelationId { get; }
+
+    // Only the verified JWT principal supplies this value in production.
+    // Default null keeps isolated Business unit fakes independent of an HTTP host.
+    string? IdentityIssuer => null;
 }

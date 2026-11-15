@@ -6,5 +6,6 @@ namespace Comuni.Business.Organizations;
 /// </summary>
 public interface IOrganizationMembershipStore
 {
-    Task<IReadOnlyList<string>> ActiveRolesAsync(Guid organizationId, string subject, CancellationToken cancellationToken);
+    Task<IReadOnlyList<string>> ActiveRolesAsync(Guid organizationId, string subject,
+        string? validatedIssuer, CancellationToken cancellationToken);
 }

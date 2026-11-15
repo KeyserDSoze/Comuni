@@ -6,14 +6,14 @@ using Comuni.Domains.Organizations;
 
 namespace Comuni.Business.Organizations;
 
-public sealed record MembershipState(string Subject, string Role, bool Enabled);
-public enum MembershipUpdateStatus { NotFound, Unchanged, Updated }
+public sealed record MembershipState(string Subject, string Role, bool Enabled, string? Issuer = null);
+public enum MembershipUpdateStatus { NotFound, Unchanged, Updated, IssuerConflict }
 
 public interface IMembershipAdministrationStore
 {
     Task<IReadOnlyList<MembershipState>> ListAsync(Guid organizationId, CancellationToken ct);
     Task<MembershipUpdateStatus> SetActiveAsync(Guid organizationId, string subject,
-        string role, bool enabled, AuditEvent audit, CancellationToken ct);
+        string role, bool enabled, string? validatedIssuer, AuditEvent audit, CancellationToken ct);
 }
 
 /// <summary>
@@ -51,11 +51,11 @@ public sealed class MembershipAdministrationService(
         // membership without storing the external subject in the audit payload.
         // This is a deterministic identifier, NOT an anonymization guarantee.
         var hashed = SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"{organizationId:D}|{role}|{subject}"));
+            $"{organizationId:D}|{role}|{subject}|{actor.IdentityIssuer ?? ""}"));
         var resourceId = new Guid(hashed.AsSpan(0, 16));
         var audit = AuditEvent.Create(organizationId, actor.ActorSubject,
             $"platform.membership.{role.ToLowerInvariant()}.{(enabled ? "activated" : "deactivated")}",
             "platform.membership", resourceId, actor.CorrelationId);
-        return store.SetActiveAsync(organizationId, subject, role, enabled, audit, ct);
+        return store.SetActiveAsync(organizationId, subject, role, enabled, actor.IdentityIssuer, audit, ct);
     }
 }

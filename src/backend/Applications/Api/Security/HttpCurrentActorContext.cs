@@ -15,6 +15,10 @@ public sealed class HttpCurrentActorContext(IHttpContextAccessor accessor) : ICu
         }
     }
 
+    public string? IdentityIssuer =>
+        accessor.HttpContext?.User.Identity?.IsAuthenticated == true
+            ? accessor.HttpContext.User.FindFirst("iss")?.Value : null;
+
     // ASP.NET Core allocates TraceIdentifier for the server request; do not trust X-Correlation-Id.
     public string CorrelationId => accessor.HttpContext?.TraceIdentifier ?? string.Empty;
 }

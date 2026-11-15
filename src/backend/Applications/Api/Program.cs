@@ -31,6 +31,7 @@ builder.Services.AddDbContext<ComuniDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<OrganizationDirectory>();
 builder.Services.AddScoped<IOrganizationDirectory>(s => s.GetRequiredService<OrganizationDirectory>());
 builder.Services.AddScoped<IOrganizationModuleStore>(s => s.GetRequiredService<OrganizationDirectory>());
+builder.Services.AddSingleton(new MembershipIssuerPolicy(authentication.Mode == "Oidc"));
 builder.Services.AddScoped<IOrganizationMembershipStore, OrganizationMembershipStore>();
 builder.Services.AddScoped<IAuthorizationHandler, OrganizationRoleHandler>();
 builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
@@ -175,7 +176,7 @@ app.MapGet("/api/v1/context", async (
     if (organization is null) return Results.NotFound();
     var enabledModules = await organizations.EnabledModulesAsync(current.OrganizationId, ct);
     var subject = user.FindFirst("sub")?.Value ?? string.Empty;
-    var roles = await memberships.ActiveRolesAsync(current.OrganizationId, subject, ct);
+    var roles = await memberships.ActiveRolesAsync(current.OrganizationId, subject, user.FindFirst("iss")?.Value, ct);
     return Results.Ok(new
     {
         organizationId = organization.Id,
@@ -269,9 +270,16 @@ app.MapPut("/api/v1/admin/memberships/{role}", async (
 
     var status = await service.SetActiveAsync(current.OrganizationId,
         request.Subject, role, request.Enabled.Value, ct);
-    return status == MembershipUpdateStatus.NotFound
-        ? Results.NotFound()
-        : Results.Ok(new MembershipState(request.Subject, role, request.Enabled.Value));
+    return status switch
+    {
+        MembershipUpdateStatus.NotFound => Results.NotFound(),
+        MembershipUpdateStatus.IssuerConflict => Results.Conflict(new
+        {
+            code = "identity_issuer_mismatch",
+            message = "This membership is bound to another issuer or requires verified migration."
+        }),
+        _ => Results.Ok(new MembershipState(request.Subject, role, request.Enabled.Value))
+    };
 }).WithName("SetOrganizationMembership").RequireAuthorization("Admin");
 
 // A single backend image also serves the built React PWA in production.

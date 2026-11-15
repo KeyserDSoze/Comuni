@@ -43,6 +43,7 @@ public sealed class ComuniDbContextModelSnapshot : ModelSnapshot
             b.HasKey(x => new { x.OrganizationId, x.Subject, x.Role });
             b.Property(x => x.OrganizationId).HasColumnName("organization_id");
             b.Property(x => x.Subject).HasColumnName("subject").HasMaxLength(160).IsRequired();
+            b.Property(x => x.IdentityIssuer).HasColumnName("identity_issuer").HasMaxLength(512);
             b.Property(x => x.Role).HasColumnName("role").HasMaxLength(16).IsRequired();
             b.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
             b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)

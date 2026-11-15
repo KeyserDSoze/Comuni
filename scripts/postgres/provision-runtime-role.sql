@@ -75,7 +75,7 @@ GRANT UPDATE (enabled) ON TABLE platform.organization_modules TO comuni_app_runt
 -- Least-privilege membership administration for Reader/Officer (issue #27).
 -- RESTRICTIVE RLS policies in migration 0008 additionally prohibit runtime
 -- INSERT/UPDATE of Admin rows even with a valid signed tenant proof.
-GRANT INSERT (organization_id, subject, role, is_active)
+GRANT INSERT (organization_id, subject, role, is_active, identity_issuer)
     ON TABLE platform.organization_memberships TO comuni_app_runtime;
 GRANT UPDATE (is_active)
     ON TABLE platform.organization_memberships TO comuni_app_runtime;

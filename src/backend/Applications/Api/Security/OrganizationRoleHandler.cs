@@ -23,7 +23,7 @@ public sealed class OrganizationRoleHandler(IOrganizationMembershipStore members
         if (!await organizations.IsOperationalAsync(organizationId, CancellationToken.None))
             return;
 
-        var roles = await memberships.ActiveRolesAsync(organizationId, subject, CancellationToken.None);
+        var roles = await memberships.ActiveRolesAsync(organizationId, subject, principal.FindFirst("iss")?.Value, CancellationToken.None);
         if (roles.Any(role => requirement.AllowedRoles.Contains(role, StringComparer.Ordinal)))
             context.Succeed(requirement);
     }
