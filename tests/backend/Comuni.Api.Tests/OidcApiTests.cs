@@ -227,6 +227,37 @@ public sealed class OidcApiTests(OidcApiFactory factory) : IClassFixture<OidcApi
     }
 
     [Fact]
+    public async Task Concurrent_OIDC_Reader_grants_are_idempotent_and_audited_only_once()
+    {
+        var subject = "oidc-concurrent-" + Guid.NewGuid().ToString("N");
+        using var first = factory.Authenticated(factory.Token(subject: "oidc-admin"));
+        using var second = factory.Authenticated(factory.Token(subject: "oidc-admin"));
+        var path = "/api/v1/admin/memberships/Reader";
+        var responses = await Task.WhenAll(
+            first.PutAsJsonAsync(path, new { subject, enabled = true }),
+            second.PutAsJsonAsync(path, new { subject, enabled = true }));
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+
+        var org = Guid.Parse(OidcApiFactory.OrganizationId);
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"{org:D}|Reader|{subject}|{OidcApiFactory.Issuer}"));
+        var resourceId = new Guid(digest.AsSpan(0, 16));
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        var audits = await db.AuditEvents.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.OrganizationId == org &&
+                x.ResourceId == resourceId &&
+                x.Action == "platform.membership.reader.activated")
+            .ToArrayAsync();
+        var audit = Assert.Single(audits);
+        Assert.Equal("oidc-admin", audit.ActorSubject);
+        Assert.Equal("platform.membership", audit.ResourceType);
+        Assert.Equal(1, await db.OrganizationMemberships.IgnoreQueryFilters().CountAsync(
+            x => x.OrganizationId == org && x.Subject == subject &&
+                x.Role == "Reader" && x.IdentityIssuer == OidcApiFactory.Issuer && x.IsActive));
+    }
+
+    [Fact]
     public async Task RS256_user_with_Reader_membership_cannot_write()
     {
         using var client = factory.Authenticated(factory.Token());
