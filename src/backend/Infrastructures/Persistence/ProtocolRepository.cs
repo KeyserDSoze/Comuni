@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Comuni.Infrastructures.Persistence;
 
-public sealed class ProtocolRepository(ComuniDbContext db) : IProtocolRepository
+public sealed class ProtocolRepository(ComuniDbContext db, TenantProofSigner signer) : IProtocolRepository
 {
     public async Task<IReadOnlyList<ProtocolRecord>> ListAsync(Guid organizationId, CancellationToken cancellationToken)
     {
@@ -26,7 +26,7 @@ public sealed class ProtocolRepository(ComuniDbContext db) : IProtocolRepository
         // creates an equivalent scope instead of attempting a nested transaction.
         var ownsTransaction = db.Database.CurrentTransaction is null;
         await using var tx = ownsTransaction
-            ? await TenantDatabaseTransaction.BeginAsync(db, cancellationToken)
+            ? await TenantDatabaseTransaction.BeginAsync(db, signer, cancellationToken)
             : null;
         await db.ProtocolRecords.AddAsync(record, cancellationToken);
         await db.AuditEvents.AddAsync(audit, cancellationToken);

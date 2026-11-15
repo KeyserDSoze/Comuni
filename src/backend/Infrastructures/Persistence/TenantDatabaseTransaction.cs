@@ -11,7 +11,7 @@ namespace Comuni.Infrastructures.Persistence;
 public static class TenantDatabaseTransaction
 {
     public static async Task<IDbContextTransaction> BeginAsync(
-        ComuniDbContext db, CancellationToken cancellationToken)
+        ComuniDbContext db, TenantProofSigner signer, CancellationToken cancellationToken)
     {
         var organizationId = db.CurrentOrganizationId;
         if (organizationId == Guid.Empty)
@@ -25,8 +25,11 @@ public static class TenantDatabaseTransaction
         {
             // The third argument makes this SET LOCAL, automatically cleared on commit/rollback.
             // Interpolated SQL is parameterized; the organization comes from the JWT principal.
+            // The HMAC proof is signed in the API process, not by the SQL runtime role.
+            // A SQL injection cannot forge an assertion for a different organization
+            // without access to the private signing key.
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"SELECT set_config('comuni.organization_id', {organizationId.ToString("D")}, true)",
+                $"SELECT set_config('comuni.tenant_assertion', {signer.Create(organizationId)}, true)",
                 cancellationToken);
             return transaction;
         }

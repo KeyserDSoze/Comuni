@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Comuni.Infrastructures.Persistence;
 
-public sealed class ModuleAdministrationRepository(ComuniDbContext db) : IModuleAdministrationStore
+public sealed class ModuleAdministrationRepository(ComuniDbContext db, TenantProofSigner signer) : IModuleAdministrationStore
 {
     public async Task<IReadOnlyList<ModuleState>> ListAsync(Guid organizationId, CancellationToken cancellationToken) =>
         await db.OrganizationModules.AsNoTracking()
@@ -22,7 +22,7 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db) : IModule
 
         var ownsTransaction = db.Database.CurrentTransaction is null;
         await using var transaction = ownsTransaction
-            ? await TenantDatabaseTransaction.BeginAsync(db, cancellationToken)
+            ? await TenantDatabaseTransaction.BeginAsync(db, signer, cancellationToken)
             : null;
         var module = await db.OrganizationModules.SingleOrDefaultAsync(
             m => m.OrganizationId == organizationId && m.ModuleKey == moduleKey, cancellationToken);

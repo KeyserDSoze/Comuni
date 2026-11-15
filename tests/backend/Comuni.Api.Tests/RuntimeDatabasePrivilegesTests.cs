@@ -76,7 +76,11 @@ public sealed class RuntimeDatabasePrivilegesTests
         var options = new DbContextOptionsBuilder<ComuniDbContext>()
             .UseNpgsql(RuntimeConnection).Options;
         await using var db = new ComuniDbContext(options, new CurrentTestOrganization(org));
-        await using var tenant = await TenantDatabaseTransaction.BeginAsync(db, CancellationToken.None);
+        var signer = new TenantProofSigner(
+            Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Tenant proof key is needed for restricted runtime tests."));
+        await using var tenant = await TenantDatabaseTransaction.BeginAsync(
+            db, signer, CancellationToken.None);
 
         Assert.True(await db.Organizations.AsNoTracking().AnyAsync(x => x.Id == org));
         Assert.True(await db.OrganizationMemberships.AsNoTracking()
@@ -87,9 +91,9 @@ public sealed class RuntimeDatabasePrivilegesTests
         var record = ProtocolRecord.Register(org, "Runtime least-privilege test");
         var audit = AuditEvent.Create(org, "runtime-test-admin", "protocol.record.created",
             "protocol.record", record.Id, "runtime-record-test");
-        await new ProtocolRepository(db).AddAsync(record, audit, CancellationToken.None);
+        await new ProtocolRepository(db, signer).AddAsync(record, audit, CancellationToken.None);
 
-        var service = new ModuleAdministrationRepository(db);
+        var service = new ModuleAdministrationRepository(db, signer);
         var moduleAudit = AuditEvent.Create(org, "runtime-test-admin",
             "platform.module.protocol.disabled", "platform.module", org, "runtime-module-test");
         Assert.Equal(ModuleUpdateStatus.Updated,

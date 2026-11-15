@@ -19,7 +19,10 @@ var authentication = AuthenticationConfiguration.Read(
 var connection = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 var protection = ApiProtectionSettings.Read(builder.Configuration);
+var tenantProofKey = builder.Configuration["Security:TenantProofKey"];
+var tenantProofSigner = new TenantProofSigner(tenantProofKey ?? string.Empty);
 
+builder.Services.AddSingleton(tenantProofSigner);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentOrganization, HttpCurrentOrganization>();
 builder.Services.AddScoped<ICurrentActorContext, HttpCurrentActorContext>();
@@ -84,6 +87,12 @@ if (app.Environment.IsDevelopment())
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
     await db.Database.MigrateAsync();
+    // Development-only owner migration bootstrap; production uses a private provisioning runner.
+    await db.Database.ExecuteSqlInterpolatedAsync($"""
+        INSERT INTO platform.tenant_proof_secret (id, signing_key)
+        VALUES (1, {tenantProofKey})
+        ON CONFLICT (id) DO UPDATE SET signing_key = EXCLUDED.signing_key
+        """);
     await db.Database.ExecuteSqlRawAsync("""
         INSERT INTO platform.organizations (id, name) VALUES
           ('11111111-1111-1111-1111-111111111111', 'Comune Aurora'),
@@ -127,7 +136,9 @@ app.Use(async (context, next) =>
     }
 
     var db = context.RequestServices.GetRequiredService<ComuniDbContext>();
-    await using var tenantTransaction = await TenantDatabaseTransaction.BeginAsync(db, context.RequestAborted);
+    var signer = context.RequestServices.GetRequiredService<TenantProofSigner>();
+    await using var tenantTransaction = await TenantDatabaseTransaction.BeginAsync(
+        db, signer, context.RequestAborted);
     await next(context);
     // Denied and invalid requests must not commit even if a future handler writes before failing.
     if (context.Response.StatusCode < 400)
