@@ -247,14 +247,14 @@ app.MapPut("/api/v1/admin/modules/{moduleKey}", async (
 // The organization comes exclusively from the validated JWT (never from the body).
 // No Admin grants/revocations here: the first/last Admin is out of this scoped flow.
 app.MapGet("/api/v1/admin/memberships", async (
-    ICurrentOrganization current, MembershipAdministrationService service,
-    ICurrentActorContext actor, MembershipIssuerPolicy issuerPolicy, CancellationToken ct) =>
+    ICurrentOrganization current, MembershipAdministrationService service, CancellationToken ct) =>
     Results.Ok(await service.ListAsync(current.OrganizationId, ct)))
     .WithName("ListOrganizationMemberships").RequireAuthorization("Admin");
 
 app.MapPut("/api/v1/admin/memberships/{role}", async (
     string role, SetMembershipActiveRequest request,
-    ICurrentOrganization current, MembershipAdministrationService service, CancellationToken ct) =>
+    ICurrentOrganization current, MembershipAdministrationService service,
+    ICurrentActorContext actor, MembershipIssuerPolicy issuerPolicy, CancellationToken ct) =>
 {
     if (role is not ("Reader" or "Officer"))
         return Results.ValidationProblem(new Dictionary<string, string[]>
