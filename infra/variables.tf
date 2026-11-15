@@ -33,6 +33,36 @@ variable "postgres_runtime_password" {
 
 # Metadata only: key bytes are not passed to Terraform.
 # A versioned URI avoids uncoordinated latest-version restarts across app revisions.
+variable "stable_tenant_proof_secret_version" {
+  description = "Existing immutable Key Vault secret version used by the stable 100-percent revision. Cannot be changed during candidate staging."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[a-fA-F0-9]{32}$", var.stable_tenant_proof_secret_version))
+    error_message = "stable_tenant_proof_secret_version must be a 32-character hexadecimal version."
+  }
+}
+
+variable "stable_revision_suffix" {
+  description = "Existing active production Container App revision suffix that must retain 100 percent of traffic during staging."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$", var.stable_revision_suffix)) && !strcontains(var.stable_revision_suffix, "--")
+    error_message = "stable_revision_suffix must be a valid existing ACA revision suffix (2-32 lowercase alphanumeric/hyphen chars)."
+  }
+}
+
+variable "candidate_revision_suffix" {
+  description = "Unique suffix of the new 0-percent traffic revision; supplied from the immutable Git commit."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^r[a-z0-9]{12}$", var.candidate_revision_suffix)) && var.candidate_revision_suffix != var.stable_revision_suffix
+    error_message = "candidate_revision_suffix must be r followed by 12 lowercase alphanumeric chars and differ from stable_revision_suffix."
+  }
+}
+
 variable "tenant_proof_secret_version" {
   description = "Required 32-hex Key Vault version of tenant-proof-key installed externally and paired with tenant_proof_key_id."
   type        = string

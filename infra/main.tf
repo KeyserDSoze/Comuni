@@ -197,7 +197,7 @@ resource "azurerm_container_app" "main" {
   name                         = "${var.prefix}-app"
   resource_group_name          = azurerm_resource_group.main.name
   container_app_environment_id = azurerm_container_app_environment.main.id
-  revision_mode                = "Single"
+  revision_mode                = "Multiple"
   tags                         = var.tags
 
   identity {
@@ -216,14 +216,26 @@ resource "azurerm_container_app" "main" {
     key_vault_secret_id = azurerm_key_vault_secret.postgres_connection.versionless_id
   }
 
+  # Existing revision keeps using tenant-proof-key with its approved stable version.
+  # This application-scoped secret MUST NOT be rotated in place during a stage.
   secret {
     name                = "tenant-proof-key"
+    identity            = azurerm_user_assigned_identity.app.id
+    key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key/${var.stable_tenant_proof_secret_version}"
+  }
+
+  # A new name for each immutable version prevents changes to the stable revision's
+  # app-scoped secret. Keep previous candidate secret names while referenced.
+  secret {
+    name                = "tenant-proof-key-v${var.tenant_proof_secret_version}"
     identity            = azurerm_user_assigned_identity.app.id
     key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key/${var.tenant_proof_secret_version}"
   }
 
   template {
-    min_replicas = 0
+    revision_suffix = var.candidate_revision_suffix
+    # Candidate is kept warm for operator smoke tests even at 0% public traffic.
+    min_replicas = 1
     max_replicas = 2
 
     container {
@@ -242,7 +254,7 @@ resource "azurerm_container_app" "main" {
       }
       env {
         name        = "Security__TenantProofKey"
-        secret_name = "tenant-proof-key"
+        secret_name = "tenant-proof-key-v${var.tenant_proof_secret_version}"
       }
       env {
         name  = "Security__TenantProofKeyId"
@@ -282,8 +294,14 @@ resource "azurerm_container_app" "main" {
     external_enabled = true
     target_port       = 8080
     transport         = "auto"
+    # New revision is NOT promoted automatically when it becomes ready.
     traffic_weight {
       percentage      = 100
+      latest_revision = false
+      revision_suffix = var.stable_revision_suffix
+    }
+    traffic_weight {
+      percentage      = 0
       latest_revision = true
     }
   }

@@ -21,6 +21,8 @@ jobs:
       TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       TF_VAR_tenant_proof_key_id: ${{ vars.TENANT_PROOF_KEY_ID }}
       TF_VAR_tenant_proof_secret_version: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
+      TF_VAR_stable_revision_suffix: ${{ vars.STABLE_REVISION_SUFFIX }}
+      TF_VAR_stable_tenant_proof_secret_version: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
       TF_VAR_authentication_authority: ${{ vars.OIDC_AUTHORITY }}
       TF_VAR_authentication_audience: ${{ vars.OIDC_AUDIENCE }}
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}
@@ -48,6 +50,14 @@ jobs:
           AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
           TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
         run: bash scripts/azure/check-tenant-proof-secret.sh "${AZURE_PREFIX}-kv" "$TENANT_PROOF_SECRET_VERSION"
+      - name: Fail closed if the stable signing secret version is missing or disabled
+        env:
+          AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
+          STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
+        run: bash scripts/azure/check-tenant-proof-secret.sh "${AZURE_PREFIX}-kv" "$STABLE_TENANT_PROOF_SECRET_VERSION"
+      # Candidate revisions must get a unique suffix for each immutable commit.
+      - name: Pin candidate revision suffix to source commit
+        run: echo "TF_VAR_candidate_revision_suffix=r${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
       - name: Build and push immutable image
         run: |
           az acr login --name "${{ vars.ACR_NAME }}"
@@ -55,7 +65,19 @@ jobs:
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
           echo "TF_VAR_image=$IMAGE" >> "$GITHUB_ENV"
-      - name: Plan and deploy
+      - name: Plan and stage candidate at zero traffic (no automatic promotion)
+        env:
+          STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
+          STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
+          CANDIDATE_TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
+          CANDIDATE_TENANT_PROOF_KEY_ID: ${{ vars.TENANT_PROOF_KEY_ID }}
         run: |
           terraform -chdir=infra plan -input=false -out=deploy.tfplan
+          # The plan JSON may include DB credentials. Stream it to the gate, never log it.
+          terraform -chdir=infra show -json deploy.tfplan | python3 scripts/azure/check-staged-rollout-plan.py \
+            --stable-revision "$STABLE_REVISION_SUFFIX" \
+            --candidate-revision "$TF_VAR_candidate_revision_suffix" \
+            --stable-secret-version "$STABLE_TENANT_PROOF_SECRET_VERSION" \
+            --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
+            --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID"
           terraform -chdir=infra apply -input=false -auto-approve deploy.tfplan

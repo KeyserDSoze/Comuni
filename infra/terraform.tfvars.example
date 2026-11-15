@@ -19,3 +19,9 @@ tags = {
 # Set tenant_proof_secret_version to the exact 32-hex Key Vault version
 # (approved deployment metadata). It is not the signing key value.
 # In GitHub production Environment use TENANT_PROOF_SECRET_VERSION.
+
+# Staged ACA rollout requires an *existing* production revision and a pinned
+# stable Key Vault version. Configure GitHub Environment variables:
+# STABLE_REVISION_SUFFIX and STABLE_TENANT_PROOF_SECRET_VERSION.
+# Candidate is staged at 0% traffic; no automatic traffic promotion.
+# First-ever environment bootstrap needs a separate approved process (#6).
