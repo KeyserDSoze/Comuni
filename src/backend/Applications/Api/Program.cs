@@ -48,6 +48,7 @@ builder.Services.AddScoped<IModuleAdministrationStore, ModuleAdministrationRepos
 builder.Services.AddScoped<ModuleAdministrationService>();
 builder.Services.AddScoped<IMembershipAdministrationStore, MembershipAdministrationRepository>();
 builder.Services.AddScoped<MembershipAdministrationService>();
+builder.Services.AddScoped<IOrganizationAuditReader, OrganizationAuditReader>();
 builder.Services.AddRateLimiter(options =>
 {
     // In-memory partition per replica, not a distributed denial-of-service defence.
@@ -305,6 +306,19 @@ app.MapPut("/api/v1/admin/modules/{moduleKey}", async (
         ? Results.NotFound()
         : Results.Ok(new ModuleState(moduleKey, request.Enabled.Value));
 }).WithName("SetOrganizationModule").RequireAuthorization("Admin");
+
+// The audit is an organization-scoped, READ-ONLY projection. No client-supplied
+// tenant, role, filter, query or pagination can expand this sensitive view.
+// Role and suspension checks run server-side under signed PostgreSQL RLS.
+app.MapGet("/api/v1/admin/audit", async (
+    HttpContext context, ICurrentOrganization current,
+    IOrganizationAuditReader reader, CancellationToken ct) =>
+{
+    if (context.Request.Query.Count > 0)
+        return Results.BadRequest(new { code = "invalid_audit_query" });
+
+    return Results.Ok(await reader.ListRecentAsync(current.OrganizationId, ct));
+}).WithName("ListRecentMunicipalAudit").RequireAuthorization("Admin");
 
 // The organization comes exclusively from the validated JWT (never from the body).
 // No Admin grants/revocations here: the first/last Admin is out of this scoped flow.

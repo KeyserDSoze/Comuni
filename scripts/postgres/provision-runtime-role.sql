@@ -70,6 +70,13 @@ GRANT INSERT ON TABLE
     platform.audit_events
 TO comuni_app_runtime;
 
+-- Only the data needed for the Admin's fixed-size tenant-scoped summary is
+-- readable. Never grant table-wide SELECT or identity-bearing columns such as
+-- actor_subject, resource_id, correlation_id. Existing signed RLS still guards
+-- the SELECT, and only the API's Admin policy exposes this summary over HTTP.
+GRANT SELECT (id, organization_id, action, resource_type, occurred_at)
+    ON TABLE platform.audit_events TO comuni_app_runtime;
+
 GRANT UPDATE (enabled) ON TABLE platform.organization_modules TO comuni_app_runtime;
 
 -- Least-privilege membership administration for Reader/Officer (issue #27).

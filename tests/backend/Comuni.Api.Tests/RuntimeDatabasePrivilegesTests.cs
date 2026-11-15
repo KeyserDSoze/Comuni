@@ -134,7 +134,9 @@ public sealed class RuntimeDatabasePrivilegesTests
             "ALTER TABLE platform.organizations ADD COLUMN runtime_forbidden integer",
             $"UPDATE platform.organizations SET name = 'forged' WHERE id = '{org}'",
             $"INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES ('{org}', 'forged', 'Admin', true)",
-            "SELECT count(*) FROM platform.audit_events",
+            "SELECT actor_subject FROM platform.audit_events",
+            "SELECT correlation_id FROM platform.audit_events",
+            "SELECT resource_id FROM platform.audit_events",
             $"DELETE FROM protocol.records WHERE organization_id = '{org}'",
             "SELECT count(*) FROM public.\"__EFMigrationsHistory\""
         };
