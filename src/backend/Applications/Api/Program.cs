@@ -6,6 +6,7 @@ using Comuni.Business.Protocol;
 using Comuni.Domains.Protocol;
 using Comuni.Infrastructures.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -29,6 +30,8 @@ builder.Services.AddDbContext<ComuniDbContext>(options => options.UseNpgsql(conn
 builder.Services.AddScoped<OrganizationDirectory>();
 builder.Services.AddScoped<IOrganizationDirectory>(s => s.GetRequiredService<OrganizationDirectory>());
 builder.Services.AddScoped<IOrganizationModuleStore>(s => s.GetRequiredService<OrganizationDirectory>());
+builder.Services.AddScoped<IOrganizationMembershipStore, OrganizationMembershipStore>();
+builder.Services.AddScoped<IAuthorizationHandler, OrganizationRoleHandler>();
 builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
 builder.Services.AddScoped<ProtocolService>();
 builder.Services.AddOpenApi();
@@ -59,12 +62,10 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Read", policy => policy
         .RequireAuthenticatedUser()
-        .RequireRole("Admin", "Officer", "Reader")
-        .RequireAssertion(ctx => ValidOrganization(ctx.User)));
+        .AddRequirements(new OrganizationRoleRequirement("Admin", "Officer", "Reader")));
     options.AddPolicy("Write", policy => policy
         .RequireAuthenticatedUser()
-        .RequireRole("Admin", "Officer")
-        .RequireAssertion(ctx => ValidOrganization(ctx.User)));
+        .AddRequirements(new OrganizationRoleRequirement("Admin", "Officer")));
 });
 
 var app = builder.Build();
@@ -84,6 +85,10 @@ if (app.Environment.IsDevelopment())
           ('11111111-1111-1111-1111-111111111111', 'protocol', TRUE),
           ('22222222-2222-2222-2222-222222222222', 'protocol', FALSE)
         ON CONFLICT (organization_id, module_key) DO NOTHING;
+        INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES
+          ('11111111-1111-1111-1111-111111111111', 'local-developer', 'Officer', TRUE),
+          ('22222222-2222-2222-2222-222222222222', 'local-developer', 'Reader', TRUE)
+        ON CONFLICT (organization_id, subject, role) DO NOTHING;
         """);
 }
 
@@ -101,12 +106,13 @@ app.MapGet("/health/ready", async (ComuniDbContext db, CancellationToken ct) =>
 
 app.MapGet("/api/v1/context", async (
     ICurrentOrganization current, IOrganizationDirectory organizations,
-    ClaimsPrincipal user, CancellationToken ct) =>
+    IOrganizationMembershipStore memberships, ClaimsPrincipal user, CancellationToken ct) =>
 {
     var organization = await organizations.FindAsync(current.OrganizationId, ct);
     if (organization is null) return Results.NotFound();
     var enabledModules = await organizations.EnabledModulesAsync(current.OrganizationId, ct);
-    var roles = user.FindAll("role").Select(c => c.Value).Distinct().ToArray();
+    var subject = user.FindFirst("sub")?.Value ?? string.Empty;
+    var roles = await memberships.ActiveRolesAsync(current.OrganizationId, subject, ct);
     return Results.Ok(new
     {
         organizationId = organization.Id,
@@ -155,9 +161,6 @@ app.UseStaticFiles();
 app.MapFallbackToFile("index.html");
 
 app.Run();
-
-static bool ValidOrganization(ClaimsPrincipal user) =>
-    Guid.TryParse(user.FindFirst("organization_id")?.Value, out var id) && id != Guid.Empty;
 
 static ProtocolRecordResponse ToResponse(ProtocolRecord record) =>
     new(record.Id, record.Subject, record.RegisteredAt);

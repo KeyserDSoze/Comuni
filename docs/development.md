@@ -5,9 +5,11 @@
 2. `docker compose -f docker/compose.yml up --build`.
 3. Aprire `http://localhost:8080`. L'app ASP.NET distribuisce la SPA compilata e applica/inizializza la migrazione **solo in Development**.
 4. Emettere un token dimostrativo, da usare nel form di accesso tecnico:
-   `node --env-file=docker/.env scripts/create-dev-token.mjs 11111111-1111-1111-1111-111111111111 Officer`.
+   `node --env-file=docker/.env scripts/create-dev-token.mjs 11111111-1111-1111-1111-111111111111 local-developer`.
 5. Provare il Comune senza Protocollo con:
-   `node --env-file=docker/.env scripts/create-dev-token.mjs 22222222-2222-2222-2222-222222222222 Reader`.
+   `node --env-file=docker/.env scripts/create-dev-token.mjs 22222222-2222-2222-2222-222222222222 local-developer`.
+
+Il `sub` del JWT demo è `local-developer`; i ruoli effettivi (Officer in Aurora, Reader in Borgo) derivano da `platform.organization_memberships`. Il claim `role` non è fonte di autorizzazione. Il seed delle membership esiste **solo in Development**, non nel deploy Azure.
 
 I token sono JWT HS256 firmati localmente, validi un'ora e mantenuti **solo in memoria React**, non in localStorage. Questi token NON sono un sistema di login reale. Non abilitare secret o issuer demo in produzione. Per la fase OIDC vedere ADR 0004.
 

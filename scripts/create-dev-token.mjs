@@ -7,10 +7,10 @@ if (!signingKey || Buffer.byteLength(signingKey, 'utf8') < 32) {
 }
 
 const organization = process.argv[2] ?? '11111111-1111-1111-1111-111111111111';
-const role = process.argv[3] ?? 'Officer';
+const subject = process.argv[3] ?? 'local-developer';
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(organization) ||
-    !['Admin', 'Officer', 'Reader'].includes(role)) {
-  console.error('Uso: node scripts/create-dev-token.mjs <organization-guid> [Admin|Officer|Reader]');
+    !subject.trim() || subject.length > 160) {
+  console.error('Uso: node scripts/create-dev-token.mjs <organization-guid> [subject]');
   process.exit(1);
 }
 
@@ -21,8 +21,8 @@ const data = [
   encode({
     iss: process.env.JWT_ISSUER ?? 'Comuni.Development',
     aud: process.env.JWT_AUDIENCE ?? 'Comuni.Api',
-    sub: 'local-developer', organization_id: organization,
-    role, iat: now, exp: now + 3600
+    sub: subject, organization_id: organization,
+    iat: now, exp: now + 3600
   })
 ].join('.');
 const signature = createHmac('sha256', signingKey).update(data).digest('base64url');

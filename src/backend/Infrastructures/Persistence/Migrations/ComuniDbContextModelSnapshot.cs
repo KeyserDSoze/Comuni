@@ -34,6 +34,19 @@ public sealed class ComuniDbContextModelSnapshot : ModelSnapshot
             b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<OrganizationMembership>(b =>
+        {
+            b.ToTable("organization_memberships", "platform", t =>
+                t.HasCheckConstraint("ck_organization_memberships_role", "role IN ('Admin','Officer','Reader')"));
+            b.HasKey(x => new { x.OrganizationId, x.Subject, x.Role });
+            b.Property(x => x.OrganizationId).HasColumnName("organization_id");
+            b.Property(x => x.Subject).HasColumnName("subject").HasMaxLength(160).IsRequired();
+            b.Property(x => x.Role).HasColumnName("role").HasMaxLength(16).IsRequired();
+            b.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<ProtocolRecord>(b =>
         {
             b.ToTable("records", "protocol");

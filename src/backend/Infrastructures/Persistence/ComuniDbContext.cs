@@ -14,6 +14,7 @@ public sealed class ComuniDbContext(
 
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationModule> OrganizationModules => Set<OrganizationModule>();
+    public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
     public DbSet<ProtocolRecord> ProtocolRecords => Set<ProtocolRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -34,6 +35,20 @@ public sealed class ComuniDbContext(
             b.Property(x => x.ModuleKey).HasColumnName("module_key").HasMaxLength(80).IsRequired();
             b.Property(x => x.Enabled).HasColumnName("enabled").IsRequired();
             b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            b.HasQueryFilter(x => x.OrganizationId == CurrentOrganizationId);
+        });
+
+        modelBuilder.Entity<OrganizationMembership>(b =>
+        {
+            b.ToTable("organization_memberships", "platform", t =>
+                t.HasCheckConstraint("ck_organization_memberships_role", "role IN ('Admin','Officer','Reader')"));
+            b.HasKey(x => new { x.OrganizationId, x.Subject, x.Role });
+            b.Property(x => x.OrganizationId).HasColumnName("organization_id");
+            b.Property(x => x.Subject).HasColumnName("subject").HasMaxLength(160).IsRequired();
+            b.Property(x => x.Role).HasColumnName("role").HasMaxLength(16).IsRequired();
+            b.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
             b.HasQueryFilter(x => x.OrganizationId == CurrentOrganizationId);
         });
 
@@ -67,6 +82,13 @@ public sealed class ComuniDbContext(
             if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
                 (organizationId == Guid.Empty || entry.Entity.OrganizationId != organizationId))
                 throw new UnauthorizedAccessException("Cannot change module settings outside the current organization.");
+        }
+
+        foreach (var entry in ChangeTracker.Entries<OrganizationMembership>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
+                (organizationId == Guid.Empty || entry.Entity.OrganizationId != organizationId))
+                throw new UnauthorizedAccessException("Cannot change memberships outside the current organization.");
         }
 
         return base.SaveChangesAsync(cancellationToken);
