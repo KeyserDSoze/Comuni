@@ -22,3 +22,7 @@ Con URI `https://vault.vault.azure.net/secrets/tenant-proof-key` Azure Container
 Un'ulteriore versione Key Vault non modifica in automatico la versione pin applicativa: l'operatore deve aggiornare deliberatamente la coppia **(key ID, secret version)** ed eseguire un rilascio. Questo mitiga la race da refresh latest, ma non garantisce pairing crittografico: il preflight non può usare o conoscere la chiave per confrontarla col DB. Occorre smoke test sull'API, autorizzazioni e logging prudenti prima e dopo la distribuzione.
 
 La Container App esistente usa **`revision_mode = "Single"`**, quindi non si deve promettere una rotazione zero-downtime o rollout con due revisioni/traffic shifting. Anche la propagazione dei riferimenti ai segreti e il bootstrap Azure in VNet non sono stati verificati. #19/#6 restano aperte per multi-revision staged rollout/rollback, validazione key ID/key material, key rotation/secret storage e test Azure live. Le vecchie copie Terraform State possono ancora esporre segreti e devono essere gestite separatamente.
+
+## Evoluzione — ADR 0017
+
+L'ADR 0017 aggiunge la conservazione del **nome e della versione della secret stable** durante lo staging di una nuova revisione 0% con **secret app-scoped distinta**, perché l'aggiornamento di una secret esistente sarebbe visibile anche alle revisioni precedenti. L'ADR 0016 descrive il pinning versione della singola secret prima di questa evoluzione.

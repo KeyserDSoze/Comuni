@@ -61,3 +61,7 @@ Il secret HMAC `tenant-proof-key` deve essere installato **fuori da Terraform** 
 ## Key Vault secret versionate per RLS (#22)
 
 Il deployment API su Azure usa `TENANT_PROOF_SECRET_VERSION` (versione esatta della Key Vault secret `tenant-proof-key`, 32 hex), non più la latest automatica. La versione è metadata, la chiave HMAC **non** è inserita in Terraform. Un preflight metadata-only usa `az keyvault secret list-versions` e fallisce se la versione prevista non è abilitata. [ADR 0016](adr/0016-pinned-tenant-proof-secret-version.md). La rotazione multi-replica e il deploy Azure reale restano aperti nella #19/#6.
+
+## Staging revisioni Azure in sicurezza (#23)
+
+Il workflow di deploy predispone una revisione candidata in Azure Container Apps con **0% di traffico pubblico** e mantiene **100%** sulla revisione stabile preesistente. Ogni candidata usa un riferimento Key Vault con nome/versione distincti, senza mutare la secret della stable. Un controllo su piano Terraform blocca promozioni automatiche e cambi distruttivi. Leggere [ADR 0017](adr/0017-zero-traffic-aca-staging.md) e [runbook](docs/deployment.md): **non** è un workflow di bootstrap o promozione e non è stato testato su Azure reale; #19/#6 rimangono aperte.

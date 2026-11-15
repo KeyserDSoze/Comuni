@@ -63,3 +63,7 @@ La chiave HMAC viene creata e ruotata esclusivamente mediante un workflow operat
 ## Pinning del secret HMAC RLS in Container Apps — ADR 0016
 
 Il deploy usa una **versioned Key Vault URI** nella secret reference di Azure Container Apps, senza esporre la chiave nella configurazione Terraform. La coppia `tenant_proof_key_id` (ID logico nel verifier PostgreSQL) e `tenant_proof_secret_version` (versione immutabile della risorsa Key Vault) appartiene al piano di rilascio. Prima di plan/apply un controllo `az keyvault secret list-versions` verifica solo enabled per quella versione; il valore è risolto esclusivamente dalla managed identity applicativa. La CI non testa un deployment live e `revision_mode Single` non supporta una fase di validazione parallela delle nuove repliche: vedere #19 e #6.
+
+## Canary staging di revisioni Container Apps (ADR 0017)
+
+La stessa singola Container App API/React passa alla modalità `Multiple` con revision suffix immutabile per commit e **nessun inoltro automatico del traffico pubblico alla latest**. Lo stable revision suffix è input esplicito e la secret HMAC precedente conserva il proprio nome/Key Vault version; la candidata usa un nome nuovo di app-scoped secret e una versione pin distinta. Un gate Python su Terraform plan JSON controlla le modifiche ammesse prima di apply, per evitare che Terraform alteri la stable o altre risorse critiche. La parte di *promotion* e relativi smoke test non è implementata: #19/#6.
