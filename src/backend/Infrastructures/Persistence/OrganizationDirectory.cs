@@ -9,6 +9,10 @@ public sealed class OrganizationDirectory(ComuniDbContext db) : IOrganizationDir
     public Task<Organization?> FindAsync(Guid organizationId, CancellationToken cancellationToken) =>
         db.Organizations.AsNoTracking().SingleOrDefaultAsync(x => x.Id == organizationId, cancellationToken);
 
+    public Task<bool> IsOperationalAsync(Guid organizationId, CancellationToken cancellationToken) =>
+        db.Organizations.AsNoTracking()
+            .AnyAsync(o => o.Id == organizationId && !o.IsSuspended, cancellationToken);
+
     public async Task<IReadOnlyList<string>> EnabledModulesAsync(Guid organizationId, CancellationToken cancellationToken)
     {
         return await db.OrganizationModules.AsNoTracking()
