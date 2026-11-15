@@ -25,6 +25,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       TEST_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni;Password=integration-only-password
+      TEST_RUNTIME_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni_app_runtime;Password=ci-test-runtime-only-password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -32,6 +33,17 @@ jobs:
           dotnet-version: 10.0.x
       - name: Domain and business tests
         run: dotnet test tests/backend/Comuni.UnitTests/Comuni.UnitTests.csproj --configuration Release
+      - name: Run EF migrations with schema-owner credentials
+        run: ConnectionStrings__Default="$TEST_DATABASE_CONNECTION" bash scripts/migrate.sh
+      - name: Provision restricted PostgreSQL runtime user (twice for idempotence)
+        env:
+          PGPASSWORD: integration-only-password
+          RUNTIME_DB_PASSWORD: ci-test-runtime-only-password
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-runtime-role.sql
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-runtime-role.sql
       - name: API integration and isolation tests
         run: dotnet test tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj --configuration Release
 

@@ -60,7 +60,7 @@ public sealed class RuntimeDatabasePrivilegesTests
                 has_table_privilege(current_user, 'platform.audit_events', 'SELECT'),
                 has_table_privilege(current_user, 'platform.audit_events', 'UPDATE'),
                 has_table_privilege(current_user, 'platform.audit_events', 'DELETE'),
-                has_table_privilege(current_user, 'public.__EFMigrationsHistory', 'SELECT')
+                has_table_privilege(current_user, 'public."__EFMigrationsHistory"', 'SELECT')
             """, connection);
         await using var permissions = await rights.ExecuteReaderAsync();
         Assert.True(await permissions.ReadAsync());
