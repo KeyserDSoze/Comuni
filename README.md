@@ -9,7 +9,7 @@ Piattaforma cloud-native multi-organization per i Comuni italiani: **Modular Mon
 - Si lavora **direttamente su `main`**, senza branch di lavoro o pull request obbligatorie.
 - DDD e dipendenze controllate: `Applications` → `Business` → `Domains`; `Infrastructures` implementa i contratti applicativi.
 - Un'unica API REST .NET 10, un solo PostgreSQL, un unico frontend React + Vite, senza microservizi.
-- Ogni dato applicativo è isolato per `organization_id`; l'identità del Comune proviene esclusivamente dal JWT validato, **mai** da header arbitrari o dal body.
+- Ogni dato applicativo è isolato per `organization_id`; l'identità del Comune proviene esclusivamente dal JWT validato, **mai** da header arbitrari o dal body. I ruoli autorizzativi derivano da membership attive in PostgreSQL, non dai claim di ruolo.
 - Moduli, autorizzazioni e interfaccia sono configurati per organization.
 - **TDD: Red → Green → Refactor.** Prima test, poi codice. Nessuna feature completa senza suite verde.
 - ADR e documentazione devono evolvere insieme al codice. Terraform è la fonte di verità per l'infrastruttura Azure.
@@ -29,3 +29,7 @@ L'accesso applicativo definitivo tramite un identity provider OIDC e SPID/CIE no
 ## Roadmap e limiti
 
 La vertical slice attuale è **dimostrativa, non pronta per dati comunali reali**. Consultare [mappa domini](docs/domains.md), [architettura](docs/architecture.md), [sicurezza](docs/security.md) e [deploy Azure](docs/deployment.md). Per il frontend usare npm workspace dalla root: `npm install && npm run build --workspace @comuni/frontend`.
+
+## Issue tracking
+
+Le [GitHub Issues](https://github.com/KeyserDSoze/Comuni/issues) sono la fonte di verità per roadmap, stato, dipendenze e criteri di accettazione. Prima di ogni sessione verificare issue e CI di `main`. Vedere [convenzioni di issue](docs/issues.md).

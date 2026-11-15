@@ -13,6 +13,11 @@ Il bootstrap è sviluppato in due incrementi registrati su `main`: specifiche/te
 | API/PostgreSQL | Reader scrive | 403 |
 | API/PostgreSQL | isolamento tra tenant | nessuna lettura incrociata |
 | API/PostgreSQL | feature flag disabilitato | 403 |
+| Domain | membership valida/invalida e disattivazione | invarianti rispettati |
+| API/PostgreSQL | JWT Admin con membership Reader | scrittura 403, context ruolo Reader |
+| API/PostgreSQL | membership assente o disattivata | 403 |
+| API/PostgreSQL | subject solo nel tenant A usa token per tenant B | 403 |
+| API/PostgreSQL | JWT Reader ma membership Officer | scrittura consentita dal ruolo DB |
 | Frontend/E2E | menu per moduli | menu condizionale |
 | Frontend/E2E | accesso Reader | niente azione di creazione |
 

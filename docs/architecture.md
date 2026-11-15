@@ -20,10 +20,10 @@ flowchart LR
 
 ## Flusso sicurezza
 1. Middleware valida firma HS256, issuer, audience e lifetime.
-2. Policy `Read` / `Write` controlla ruolo e GUID `organization_id`.
-3. `HttpCurrentOrganization` estrae organization solo dal Principal autenticato.
+2. Policy `Read` / `Write` verifica `organization_id` valido, `sub` e **membership attiva/ruolo nel database**. Il claim JWT `role` non viene utilizzato per i permessi.
+3. `HttpCurrentOrganization` estrae organization solo dal Principal autenticato; `OrganizationRoleHandler` controlla `platform.organization_memberships`.
 4. `ProtocolService` verifica `organization_modules` nel DB.
 5. Repository esprime `organizationId` nella query e EF impone query filter; SaveChanges rifiuta mismatch tenant.
 6. Frontend riceve il contesto `/api/v1/context` e mostra solo i moduli abilitati (non è un confine di sicurezza).
 
-Il database è condiviso con schemi `platform` e `protocol`. Il bootstrap migra e semina due organization solo in ambiente Development. In produzione non c'è seed automatico. Le operazioni admin/gestione organization richiederanno accessi separati e audit dedicato.
+Il database è condiviso con schemi `platform` e `protocol`, incluse membership tenant-scoped (GUID, subject, role, is_active). Il bootstrap migra e semina due organization solo in ambiente Development. In produzione non c'è seed automatico. Le operazioni admin/gestione organization richiederanno accessi separati e audit dedicato.

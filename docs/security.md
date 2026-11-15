@@ -2,14 +2,14 @@
 
 ## Baseline presente
 - Token JWT con firma, issuer, audience e scadenza validati.
-- Claim `organization_id` esclusivamente dal token validato; ruoli `Admin`, `Officer`, `Reader`.
+- Claim `organization_id` e `sub` esclusivamente dal token validato; autorizzazione contro membership attive **persistite in PostgreSQL** con ruoli `Admin`, `Officer`, `Reader`, indipendentemente dal claim `role` JWT.
 - Policy API e controlli feature flag server side; isolamento tenant EF (query filter + guardia SaveChanges).
-- Token demo nel browser solo in RAM, nessuna persistenza in localStorage.
+- Token demo nel browser solo in RAM, nessuna persistenza in localStorage. Seed utenti/membership solo in ambiente Development.
 - Azure: database su subnet privata, Key Vault, RBAC, Managed Identity, ACR con admin disabilitato.
 - CI: unit test DDD e test API con PostgreSQL reale per cross-organization; E2E Playwright per autorizzazioni UI.
 
 ## Non ancora implementato — blocchi per produzione reale
-- Federazione OIDC e flussi SPID/CIE, provisioning utenti e memberships autorizzate per Comune, revoche e MFA.
+- Federazione OIDC e flussi SPID/CIE, onboarding/provisioning sicuro di utenti e memberships per Comune, flussi di modifica ruoli, revoche delle sessioni e MFA. La revoca di membership **blocca nuove autorizzazioni** ma non revoca di per sé JWT esterni.
 - Audit di eventi amministrativi e consultazioni sensibili; log privacy-safe e tamper evidence ove necessario.
 - Rate limiting, security headers, threat modeling, OWASP ASVS, scansioni SAST/SCA e gestione vulnerabilità continuativa.
 - Test end-to-end completi su Azure, segreti/chiavi ruotati, backup/restore verificati, monitoraggio e alerting.

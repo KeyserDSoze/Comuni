@@ -4,7 +4,7 @@ L'immagine di riferimento mostra aree gestionali comunali, ma non costituisce sp
 
 | Bounded Context proposto | Modulo | Stato | Note |
 | --- | --- | --- | --- |
-| Organizations & Access | `platform` | Fondazione | Organization, ruoli JWT, moduli abilitati; OIDC e provisioning utenti da progettare |
+| Organizations & Access | `platform` | Fondazione | Organization, membership e ruoli da PostgreSQL, moduli abilitati; OIDC e provisioning amministrativo utenti da progettare |
 | Protocollo | `protocol` | Demo minima | Elenco/registrazione metadati; nessuna protocollazione legale |
 | Archivio documentale | `documents` | Pianificato | Blob, versionamento, metadata, retention, audit, conservazione |
 | Amministrativi | `administration` | Pianificato | Delibere, determine, ordinanze, contratti |
