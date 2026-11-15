@@ -29,6 +29,7 @@ services:
       Jwt__SigningKey: "${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in docker/.env}"
       Jwt__Issuer: Comuni.Development
       Jwt__Audience: Comuni.Api
+      Security__TenantProofKey: "${TENANT_PROOF_KEY:?Set TENANT_PROOF_KEY in docker/.env}"
     ports:
       - "127.0.0.1:8080:8080"
 volumes:

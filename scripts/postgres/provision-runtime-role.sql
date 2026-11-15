@@ -71,3 +71,6 @@ GRANT INSERT ON TABLE
 TO comuni_app_runtime;
 
 GRANT UPDATE (enabled) ON TABLE platform.organization_modules TO comuni_app_runtime;
+
+-- The verifier can be invoked in RLS; it never exposes or signs data using the DB secret.
+GRANT EXECUTE ON FUNCTION platform.verified_tenant_id() TO comuni_app_runtime;

@@ -26,6 +26,7 @@ jobs:
     env:
       TEST_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni;Password=integration-only-password
       TEST_RUNTIME_DATABASE_CONNECTION: Host=127.0.0.1;Port=5432;Database=comuni_test;Username=comuni_app_runtime;Password=ci-test-runtime-only-password
+      Security__TenantProofKey: ci-test-only-hmac-key-for-comuni-rls-2026-11
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -44,6 +45,11 @@ jobs:
           sudo apt-get install -y -qq postgresql-client
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-runtime-role.sql
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-runtime-role.sql
+      - name: Install signed tenant verification material (test-only secret)
+        env:
+          PGPASSWORD: integration-only-password
+          TENANT_PROOF_KEY: ci-test-only-hmac-key-for-comuni-rls-2026-11
+        run: psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-tenant-proof.sql
       - name: API integration and isolation tests
         run: dotnet test tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj --configuration Release
 
