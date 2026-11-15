@@ -140,3 +140,29 @@ variable "tags" {
     environment = "development"
   }
 }
+
+
+// Platform inventory is opt-in and disabled on both API and Terraform by
+// default. This is VERSION METADATA ONLY; never give a connection string or
+// password to Terraform, the state, tfvars or GitHub workflows.
+variable "platform_inventory_enabled" {
+  description = "Explicitly stage the read-only global Superadmin inventory on the 0%-traffic candidate. Requires separate DB role and a pinned Key Vault connection secret."
+  type        = bool
+  default     = false
+  nullable    = false
+  validation {
+    condition     = !var.platform_inventory_enabled || can(regex("^[0-9a-fA-F]{32}$", var.platform_inventory_secret_version))
+    error_message = "Enabling platform inventory requires an approved 32-hex Key Vault secret version."
+  }
+}
+
+variable "platform_inventory_secret_version" {
+  description = "Optional explicit version metadata for Key Vault secret platform-inventory-connection, provisioned outside Terraform. Empty when inventory is disabled."
+  type        = string
+  default     = ""
+  nullable    = false
+  validation {
+    condition     = var.platform_inventory_secret_version == "" || can(regex("^[0-9a-fA-F]{32}$", var.platform_inventory_secret_version))
+    error_message = "platform_inventory_secret_version must be empty or a 32-hex pinned Key Vault version."
+  }
+}

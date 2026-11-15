@@ -1,6 +1,12 @@
 name: Deploy to Azure
 on:
   workflow_dispatch:
+    inputs:
+      enable_platform_inventory:
+        description: "Stage read-only Superadmin inventory on the 0%-traffic candidate (external SQL role + pinned Key Vault secret required)"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +26,10 @@ jobs:
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       TF_VAR_tenant_proof_key_id: ${{ vars.TENANT_PROOF_KEY_ID }}
+      # Only opt-in metadata. No platform-reader password or connection URI is
+      # passed to Terraform; Key Vault resolves the pinned value in the API.
+      TF_VAR_platform_inventory_enabled: ${{ inputs.enable_platform_inventory }}
+      TF_VAR_platform_inventory_secret_version: ${{ vars.PLATFORM_INVENTORY_SECRET_VERSION }}
       TF_VAR_tenant_proof_secret_version: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
       TF_VAR_stable_revision_suffix: ${{ vars.STABLE_REVISION_SUFFIX }}
       TF_VAR_stable_tenant_proof_secret_version: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
@@ -59,6 +69,15 @@ jobs:
           AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
           STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
         run: bash scripts/azure/check-tenant-proof-secret.sh "${AZURE_PREFIX}-kv" "$STABLE_TENANT_PROOF_SECRET_VERSION"
+      - name: Validate approved platform inventory Key Vault version (metadata only)
+        env:
+          AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
+          PLATFORM_INVENTORY_ENABLED: ${{ inputs.enable_platform_inventory }}
+          PLATFORM_INVENTORY_SECRET_VERSION: ${{ vars.PLATFORM_INVENTORY_SECRET_VERSION }}
+        run: |
+          if [[ "$PLATFORM_INVENTORY_ENABLED" == "true" ]]; then
+            bash scripts/azure/check-platform-inventory-secret.sh "${AZURE_PREFIX}-kv" "$PLATFORM_INVENTORY_SECRET_VERSION"
+          fi
       # Candidate revisions must get a unique suffix for each immutable commit.
       - name: Pin candidate revision suffix to source commit
         run: echo "TF_VAR_candidate_revision_suffix=r${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
@@ -75,6 +94,8 @@ jobs:
           STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
           CANDIDATE_TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
           CANDIDATE_TENANT_PROOF_KEY_ID: ${{ vars.TENANT_PROOF_KEY_ID }}
+          PLATFORM_INVENTORY_ENABLED: ${{ inputs.enable_platform_inventory }}
+          PLATFORM_INVENTORY_SECRET_VERSION: ${{ vars.PLATFORM_INVENTORY_SECRET_VERSION }}
         run: |
           terraform -chdir=infra plan -input=false -out=deploy.tfplan
           # The plan JSON may include DB credentials. Stream it to the gate, never log it.
@@ -83,7 +104,9 @@ jobs:
             --candidate-revision "$TF_VAR_candidate_revision_suffix" \
             --stable-secret-version "$STABLE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
-            --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID"
+            --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID" \
+            --inventory-enabled "$PLATFORM_INVENTORY_ENABLED" \
+            --inventory-secret-version "$PLATFORM_INVENTORY_SECRET_VERSION"
           terraform -chdir=infra apply -input=false -auto-approve deploy.tfplan
       - name: Verify healthy candidate and unchanged production traffic (read-only)
         env:

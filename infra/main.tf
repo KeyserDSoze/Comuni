@@ -232,6 +232,18 @@ resource "azurerm_container_app" "main" {
     key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key/${var.tenant_proof_secret_version}"
   }
 
+  # Inventory credentials are owned and rotated OUTSIDE Terraform. This
+  # is a pinned URI only, using a distinct ACA app-scoped secret name.
+  # Stable revision secrets remain unchanged when staging at 0% traffic.
+  dynamic "secret" {
+    for_each = var.platform_inventory_enabled ? [var.platform_inventory_secret_version] : []
+    content {
+      name                = "platform-read-v${secret.value}"
+      identity            = azurerm_user_assigned_identity.app.id
+      key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/platform-inventory-connection/${secret.value}"
+    }
+  }
+
   template {
     revision_suffix = var.candidate_revision_suffix
     # Candidate is kept warm for operator smoke tests even at 0% public traffic.
@@ -259,6 +271,19 @@ resource "azurerm_container_app" "main" {
       env {
         name  = "Security__TenantProofKeyId"
         value = var.tenant_proof_key_id
+      }
+      # Disabled unless explicitly selected in the approved manual stage.
+      # Never pass inventory DB credentials via TF_VAR or a plain env value.
+      env {
+        name  = "PlatformInventory__Enabled"
+        value = tostring(var.platform_inventory_enabled)
+      }
+      dynamic "env" {
+        for_each = var.platform_inventory_enabled ? [var.platform_inventory_secret_version] : []
+        content {
+          name        = "ConnectionStrings__PlatformRead"
+          secret_name = "platform-read-v${env.value}"
+        }
       }
       env {
         name  = "Authentication__Mode"
