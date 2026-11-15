@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text;
 using Comuni.Api.Security;
 using Comuni.Business.Audit;
 using Comuni.Business.Organizations;
@@ -9,19 +8,11 @@ using Comuni.Infrastructures.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var key = builder.Configuration["Jwt:SigningKey"]
-    ?? throw new InvalidOperationException("Jwt:SigningKey is required (use Key Vault in Azure).");
-if (Encoding.UTF8.GetByteCount(key) < 32)
-    throw new InvalidOperationException("Jwt:SigningKey must be at least 32 bytes long.");
-
-var issuer = builder.Configuration["Jwt:Issuer"]
-    ?? throw new InvalidOperationException("Jwt:Issuer is required.");
-var audience = builder.Configuration["Jwt:Audience"]
-    ?? throw new InvalidOperationException("Jwt:Audience is required.");
+var authentication = AuthenticationConfiguration.Read(
+    builder.Configuration, builder.Environment.EnvironmentName);
 var connection = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 
@@ -39,26 +30,7 @@ builder.Services.AddScoped<ProtocolService>();
 builder.Services.AddOpenApi();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.MapInboundClaims = false;
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = issuer,
-            ValidateAudience = true,
-            ValidAudience = audience,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
-            ValidateLifetime = true,
-            RequireSignedTokens = true,
-            RequireExpirationTime = true,
-            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
-            RoleClaimType = "role",
-            NameClaimType = "sub",
-            ClockSkew = TimeSpan.FromMinutes(1)
-        };
-    });
+    .AddJwtBearer(authentication.Apply);
 
 builder.Services.AddAuthorization(options =>
 {
