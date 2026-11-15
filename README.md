@@ -81,3 +81,7 @@ Il frontend ora include un **Authorization Code + PKCE S256** per client OIDC pu
 ## Gestione membership comunali (slice #27)
 
 Nell'area **Amministrazione** l'Admin della propria organization può elencare membership e gestire `Reader`/`Officer` (attivazione/disattivazione), con controlli lato API, audit atomico e policy RLS PostgreSQL che impedisce all'account runtime di scrivere ruoli `Admin` anche via SQL diretto. [ADR 0021](adr/0021-municipal-membership-administration.md), [API](docs/api.md). La gestione degli Admin e il binding reale con l'IdP restano da implementare (#2/#3/#10): **non è provisioning di identità** né rollout pronto per dati reali.
+
+## Identità OIDC: binding esplicito issuer + sub (#28)
+
+Le membership del Core PostgreSQL ora registrano opzionalmente l'issuer d'identità; in modalità **OIDC di produzione** il backend richiede corrispondenza di `organization_id + identity_issuer + sub` con un token valido. Le membership legacy senza issuer **non sono ammesse** e non vengono collegate automaticamente, né trasferite da un Admin comunale senza procedura verificata. [ADR 0022](adr/0022-oidc-issuer-sub-membership-binding.md) e [runbook](docs/development.md). Provider reale, identity provisioning e garanzie PA ancora non verificati (#2).

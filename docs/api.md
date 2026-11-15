@@ -62,3 +62,13 @@ Gli endpoint di gestione sono accessibili **solo** a una membership `Admin` **at
 Il `PUT` attiva/crea o disattiva la membership per il `sub` **esatto, case-sensitive** fornito dal gestore IdP. I cambiamenti sono idempotenti; disattivare una membership assente restituisce `404`, riattivare una esistente aggiorna lo stato. Input mancante/malformato e ruoli `Admin`, `Superadmin` o arbitrari restituiscono `400`; anonimo `401`, Reader/Officer senza Admin nel DB `403`. Il body non può scegliere `organization_id` o `actor`: anche se tali proprietà sono presenti, non cambiano il contesto derivato dal JWT. Subject 1–160 caratteri, senza controlli o spazi esterni.
 
 L'Admin **non può assegnare, disattivare o riattivare il ruolo Admin** tramite questi endpoint. La gestione del primo/ultimo amministratore è un workflow separato da progettare con elevazione, verifica IdP e audit (epiche #3/#10). Il comando assegna **solo una riga di membership**: non crea una persona nel provider esterno e **non verifica ancora l'esistenza del sub**; non usare per concedere privilegi a identità non verificate.
+
+## Associazione membership OIDC a issuer e sub (#28 / ADR 0022)
+
+In produzione `Authentication:Mode=Oidc` ogni operazione protetta richiede un JWT access valido con `iss` e `sub`, un Comune `organization_id` verificato e una membership DB `organization_id + subject + identity_issuer` **esattamente corrispondente**, attiva e autorizzata. Le righe legacy con `identity_issuer=NULL` non conferiscono diritti OIDC. In `DevelopmentJwt` le membership tecniche senza issuer restano utilizzabili per i test locali, senza introdurre una scorciatoia in produzione.
+
+- `GET /api/v1/admin/memberships` include ora il campo pubblico `issuer: string|null` per ciascun ruolo; l'Admin lo vede in sola lettura.
+- `PUT /api/v1/admin/memberships/{Reader|Officer}` conserva `{"subject":"...", "enabled":true|false}`. L'issuer **non** è ammesso come selettore utente: è ricavato dal claim `iss` del JWT **già verificato** dell'Admin. Proprietà extra nel JSON, incluso `issuer` o `identityIssuer`, non modificano il binding.
+- Se esiste già una riga `(organization_id, subject, role)` con issuer diverso o NULL in modalità OIDC, il PUT **rifiuta il riassociamento** con `409 Conflict` (code `identity_issuer_mismatch`); la procedura di verifica del provider/migrazione deve essere autorizzata separatamente. No-op con lo stesso issuer non aggiunge audit.
+
+La PK attuale non permette che un medesimo `subject` abbia la stessa membership `role` contemporaneamente presso due issuer nello stesso Comune. Il repository supporta **un solo provider fidato** per l'API; nessun alias/multi-provider o automatismo di trasferimento autorizzazioni è disponibile.

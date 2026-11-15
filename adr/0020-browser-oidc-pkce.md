@@ -24,3 +24,7 @@ Il React usa un **public browser client**, senza client secret, con `response_ty
 ## Rischi e follow-up
 
 Il client non dispone ancora di un IdP reale. Non sono stati verificati in Azure `issuer`/audience di token esterni, callback, CORS, onboarding, flussi per utenti cittadini, SPID/CIE, MFA, revoca, federation e provider policy. Qualunque flusso reale deve emettere `organization_id` e `sub` attendibili e già registrati nel DB per Admin/Officer/Reader, con protocolli autorizzativi separati per Comune. Implementare BFF/safe session se il threat model del trattamento dati lo richiede e valutare SAST/OWASP ASVS prima della produzione. L'issue #2 rimane APERTA. CI TDD su Playwright, xUnit, PostgreSQL, Terraform e Docker non equivale a provider live conformance.
+
+## Evoluzione ADR 0022
+
+La validazione del JWT OIDC da sola non basta per assegnare un utente a una membership storica: ADR 0022 richiede la corrispondenza esatta `iss + sub` sul database e impedisce fallback con issuer mancante in produzione. L'IdP reale e BFF/sessioni rimangono attività aperte.

@@ -23,3 +23,7 @@ Il database e le API convalidano membership Admin/Officer/Reader, ma non esistev
 - Il ruolo PostgreSQL runtime può ancora operare su Reader/Officer in caso di SQL injection/compromissione; la RLS evita il cross-tenant, non la compromissione del singolo tenant. Sicurezza generale, audit esterno, strumenti antivirus/log retention, backup e test Azure restano nella #5/#6.
 - Il resourceId audit è riproducibile dal soggetto: non trattarlo come anonimizzato GDPR e definire retention/disclosure nel processo complessivo.
 - Nessuna nuova applicazione, database o provider, niente SPID/CIE e nessuna garanzia di conformità PA o produzione pronta.
+
+## Evoluzione ADR 0022
+
+La gestione Reader/Officer da parte dell'Admin vincola ora le membership OIDC all'**issuer autenticato** dell'Admin. Il binding non è sovrascrivibile da body e non viene riassegnato automaticamente per righe con issuer NULL o diverso; un conflitto restituisce 409. Vedere ADR 0022 per runbook fail-closed di migrazione identità.
