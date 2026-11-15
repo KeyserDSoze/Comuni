@@ -40,6 +40,13 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
         Environment.SetEnvironmentVariable("Authentication__Authority", Issuer);
         Environment.SetEnvironmentVariable("Authentication__Audience", Audience);
         Environment.SetEnvironmentVariable("Jwt__SigningKey", null);
+        // WebApplication.CreateBuilder reads environment variables BEFORE some
+        // WebApplicationFactory host overrides are applied. Set this explicitly
+        // before the Program startup guard inspects PlatformInventory:Enabled.
+        var platformRead = Environment.GetEnvironmentVariable("TEST_PLATFORM_DATABASE_CONNECTION");
+        Environment.SetEnvironmentVariable("PlatformInventory__Enabled",
+            platformRead is null ? null : "true");
+        Environment.SetEnvironmentVariable("ConnectionStrings__PlatformRead", platformRead);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -96,6 +103,8 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
         Environment.SetEnvironmentVariable("Authentication__Mode", null);
         Environment.SetEnvironmentVariable("Authentication__Authority", null);
         Environment.SetEnvironmentVariable("Authentication__Audience", null);
+        Environment.SetEnvironmentVariable("PlatformInventory__Enabled", null);
+        Environment.SetEnvironmentVariable("ConnectionStrings__PlatformRead", null);
         return Task.CompletedTask;
     }
 
