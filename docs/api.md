@@ -81,3 +81,8 @@ Il primo Admin OIDC non è assegnabile da HTTP, né dal menu Amministrazione, n�
 ## Onboarding organization (nessun endpoint HTTP, #32)
 
 La creazione di una nuova organization **non è** accessibile agli Admin comunali né al browser. `scripts/postgres/provision-organization.sql` è un'operazione owner-only offline (ADR 0026) con UUID e nome approvati esternamente; inserisce `platform.organizations`, il flag `protocol` **disabled** e l'audit `platform.organization.created` atomicamente, senza creare membership. Un nuovo Comune resta 403 per tutte le route tenant protette finché non è predisposto un primo Admin OIDC tramite il diverso strumento owner (#31 / ADR 0025), e il Protocollo richiede successiva attivazione Admin. Nessun endpoint Superadmin o tenant override è stato aggiunto.
+
+
+## Stato sospensione Comune — effetto API (#33, ADR 0008/0027)
+
+Non è stato aggiunto alcun endpoint HTTP di sospensione o riattivazione: questa operazione è accessibile **solo** allo schema owner PostgreSQL tramite `scripts/postgres/set-organization-suspension.sql` con autorizzazione esterna, change ticket e audit transazionale. Ogni **nuova** richiesta tenant protetta a un Comune sospeso restituisce 403 (anche Admin/Protocollo e anche con un JWT firmato già valido), indipendentemente dai suoi moduli o membership. `/health/live` e `/health/ready` rimangono endpoint di monitoraggio non tenant. La riattivazione non modifica i moduli, i ruoli o i token: restituisce l'accesso soltanto alle membership ancora attive, sui moduli ancora abilitati. Non equivale a revoca OIDC o arresto di richieste in volo.

@@ -96,3 +96,8 @@ Quando non esiste ancora un Admin di Comune, non viene introdotta una scorciatoi
 ## Creazione isolata dei Comuni — bootstrap offline (ADR 0026 / #32)
 
 Il Core non espone ancora la creazione cross-tenant all'API: un comando `psql` eseguibile **solo con owner dello schema** crea una organization e un flag `protocol=FALSE` con un evento di audit in un'unica transazione, acquisendo un advisory lock per UUID. Le membership sono vuote; il contesto tenant e i permessi continuano a essere imposti da JWT verificato, membership PostgreSQL, RLS firmata e stato organization, non da un parametro client. Il bootstrap del primo Admin OIDC (ADR 0025) è **una operazione distinta** subordinata alla verifica esterna della persona. La console Superadmin, l'approvazione real-time e il lifecycle completo di Comuni rimangono #3/#10; una sola API .NET, un React e un PostgreSQL.
+
+
+## Lifecycle sicurezza Comune — stato sospeso (#33 / ADR 0027)
+
+Il Core dispone già di `is_suspended` e del controllo authorization server-side per richiesta (ADR 0008), ma l'operatore in possesso del change approvato deve applicare le transizioni **solo con un runner owner PostgreSQL offline**. Lo script gestisce un singolo tenant esistente e scrive `platform.organization.suspended` o `platform.organization.reactivated` atomico e una sola volta per cambio di stato, serializzando `SELECT FOR UPDATE`. Non introduce una seconda API, un frontend separato, tabelle nuove o un ruolo multi-tenant accessibile dalla SPA; l'Admin comunale non può gestire l'accesso degli altri Comuni. I flag moduli e le membership rimangono invariati. La console Superadmin e la gestione platform RBAC, revoca OIDC e audit regolamentare richiedono incrementi successivi nelle epiche #3/#4/#10.

@@ -248,3 +248,28 @@ psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode
 Le credenziali `PGPASSWORD` arrivano dal vault/runner protetto, non da GitHub o argomenti CLI. **Exit non zero = stop immediato**: non ritentare con UUID/nome diversi senza nuovo change. Un retry con **stesso UUID/nome** è no-op soltanto quando la riga ha audit di provisioning coerente e la feature `protocol` esiste; non riattiva un Comune sospeso, né cambia moduli o utenti già gestiti. Il lock advisory per UUID serializza chiamate concorrenti. In caso di UUID già usato con nome diverso o riga legacy senza audit, aprire un incident/change: non usare UPDATE correttivi automatici.
 
 **Verifica post-esecuzione (owner, read-only e senza esportare dati personali):** esattamente una organization con nome/ID attesi, nessuna membership, riga `protocol.enabled=FALSE`, evento unico `platform.organization.created` con `resource_id=organization_id` e correlation `bootstrap:<ticket>`; token sintetico privo di membership deve ricevere 403 su `/api/v1/context`. Completare separatamente ADR 0025 / #31 per il primo Admin con issuer+sub verificati dal provider; quindi attivare manualmente i moduli dall'Admin usando API già protette. Nessun deploy, utenti reali o approvazione sono stati effettuati in questa CI.
+
+
+## Lifecycle del Comune: sospensione e riattivazione owner-only (#33 / ADR 0027)
+
+Il Core già rifiuta **ogni nuova richiesta protetta** (Read/Write/Administration/Protocollo) quando `platform.organizations.is_suspended=TRUE`, anche con token JWT già emesso e membership Admin ancora attiva. Lo script `scripts/postgres/set-organization-suspension.sql` esegue `suspend` oppure `reactivate` solo per un Comune esistente: la transizione e l'audit sono atomici e idempotenti. Non elimina record, non cambia membership né i flag di modulo e **non** revoca sessioni OIDC dell'IdP o annulla richieste già in esecuzione.
+
+**Controlli operatore esterni, obbligatori:** accertare con un secondo responsabile autorizzato l'identità del Comune, l'effettiva titolarità dell'azione, una motivazione documentata e un change ticket approvato, con piano incident/rollback. Non lasciare che un Admin comunale sospenda altri tenant, né usare un endpoint API o un account SQL runtime. Connettersi da runner di gestione autorizzato nella rete privata PostgreSQL, con credenziali owner per `platform.organizations` e `platform.audit_events` (niente account `comuni_app_runtime`), TLS e secret store. Un'esecuzione non verifica automaticamente l'approvazione esterna.
+
+Preparare nel runner approvato, senza mostrare i valori su CLI/history/log, cinque variabili d'ambiente:
+- `COMUNI_LIFECYCLE_ORGANIZATION_ID`: UUID del Comune già presente.
+- `COMUNI_LIFECYCLE_ACTION`: esattamente `suspend` oppure `reactivate`.
+- `COMUNI_LIFECYCLE_CHANGE_TICKET`: identificativo di change sanitizzato senza dati personali.
+- `COMUNI_LIFECYCLE_APPROVER`: alias di un revisore indipendente (non è una prova firmata).
+- `COMUNI_LIFECYCLE_REASON_CODE`: codice di motivazione non personale come `security-incident`; la spiegazione e l'approvazione autentica restano nel change esterno.
+
+Con ambiente già preparato e password prelevata da vault, eseguire **senza** `set -x`, `psql -a` o `psql -e`:
+
+```bash
+psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+  -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/set-organization-suspension.sql
+```
+
+Un codice di uscita non zero blocca la procedura: non ignorare errori con `|| true`. Verificare in una sessione owner read-only lo stato atteso e **un solo evento** di tipo `platform.organization.suspended` oppure `platform.organization.reactivated` per una transizione effettiva, con `resource_id=organization_id`, `actor_subject=db-owner:<owner>` e `correlation_id=lifecycle:<ticket>`. Il retry nello stato raggiunto è no-op (non genera ulteriori eventi), e la row lock evita due modifiche concorrenti indistinguibili. Non scrivere informazioni personali, motivazioni dettagliate o password nei log. Verificare su test tenant che la sospensione dia 403 per context, Admin e Protocollo; un diverso Comune deve restare 200. Riattivare solo dopo nuovo change/approvazione e verifica di config, appartenenze, safety e dell'IdP: la riattivazione restituisce accesso **solo** alle membership già attive e ai moduli già abilitati.
+
+**Limiti:** lo script non contiene firma o controllo crittografico del change, non arresta automaticamente transazioni già iniziate e non disabilita access/refresh token del provider. Per incident response attivo occorre un piano infrastrutturale e identitario ulteriore. Nessun deploy Azure live o trattamento dati reali è stato eseguito in questa slice.

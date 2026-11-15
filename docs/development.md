@@ -72,3 +72,8 @@ Lo script `scripts/postgres/bootstrap-initial-admin.sql` è riservato all'owner 
 ## Provisioning tecnico di organizzazioni (ADR 0026 / #32)
 
 Per **nuove** organization con UUID verificato, il runner PostgreSQL owner può usare `scripts/postgres/provision-organization.sql` dopo aver valorizzato `COMUNI_PROVISION_ORGANIZATION_ID`, `COMUNI_PROVISION_ORGANIZATION_NAME`, `COMUNI_PROVISION_CHANGE_TICKET`, `COMUNI_PROVISION_APPROVER`. Richiede change e revisore approvati esternamente; nessun segreto, dato personale o password nel repository. Vedere `docs/deployment.md` per comando `psql`, TLS, guardie owner e verifiche post-esecuzione. Lo script non assegna ruoli: il primo Admin si crea in un passaggio **separato** (ADR 0025) solo dopo verifica issuer/sub IdP. La riga `protocol` nasce disabled e può essere attivata esclusivamente da un Admin autenticato via l'API già presente; tutti i test CI usano organizzazioni sintetiche.
+
+
+## Test lifecycle Comune (#33 / ADR 0027)
+
+`scripts/postgres/set-organization-suspension.sql` implementa soltanto transizioni approvate offline `suspend`/`reactivate` con `COMUNI_LIFECYCLE_ORGANIZATION_ID`, `COMUNI_LIFECYCLE_ACTION`, `COMUNI_LIFECYCLE_CHANGE_TICKET`, `COMUNI_LIFECYCLE_APPROVER` e `COMUNI_LIFECYCLE_REASON_CODE`. Non è un endpoint API o un bottone Admin, e non eseguirlo come `comuni_app_runtime`. In CI `OrganizationLifecycleTests` verifica PostgreSQL reale, psql e blocchi 403 su un Comune sintetico; la riattivazione non riabilita membership disattivate o moduli. Leggere il runbook `docs/deployment.md` e ADR 0027 prima di qualunque change; provider e autorizzazioni dell'operatore non sono presenti nel repository.
