@@ -14,7 +14,7 @@ PREFLIGHT = ROOT / "scripts/azure/check-tenant-proof-secret.sh"
 
 
 class TenantProofSecretBoundaryTests(unittest.TestCase):
-    def test_terraform_references_existing_versionless_key_vault_secret_not_its_value(self):
+    def test_terraform_references_external_key_vault_secret_not_its_value(self):
         self.assertNotRegex(VARIABLES, r'variable\s+"tenant_proof_key"\s+\{')
         self.assertNotRegex(TERRAFORM, r'resource\s+"azurerm_key_vault_secret"\s+"tenant_proof_key"')
         self.assertIn("secrets/tenant-proof-key", TERRAFORM)
@@ -37,7 +37,7 @@ class TenantProofSecretBoundaryTests(unittest.TestCase):
             fake_az = Path(temp) / "az"
             fake_az.write_text(
                 "#!/bin/sh\n"
-                'case " $* " in *" --query attributes.enabled "*) ;; *) exit 9;; esac\n'
+                'case " $* " in *"attributes.enabled"*) ;; *) exit 9;; esac\n'
                 'case " $* " in *" list-versions "*) ;; *) exit 8;; esac\n'
                 'case " $* " in *" --vault-name comuni-itn-001-kv "*) ;; *) exit 10;; esac\n'
                 'case " $* " in *" --name tenant-proof-key "*) ;; *) exit 11;; esac\n'

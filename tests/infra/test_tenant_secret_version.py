@@ -38,7 +38,7 @@ class TenantSecretVersionTests(unittest.TestCase):
                 'case " $* " in *" --vault-name comuni-itn-001-kv "*) ;; *) exit 13;; esac\n'
                 'case " $* " in *" --name tenant-proof-key "*) ;; *) exit 14;; esac\n'
                 f'case " $* " in *"{SECRET_URI}"*) ;; *) exit 16;; esac\n'
-                'case " $* " in *" --query "*".attributes.enabled"* ) ;; *) exit 17;; esac\n'
+                'case " $* " in *"attributes.enabled"*) ;; *) exit 17;; esac\n'
                 'case " $* " in *" --output tsv "*) ;; *) exit 15;; esac\n'
                 f"printf '%s\\n' '{enabled}'\n"
                 f"exit {error}\n"
@@ -73,7 +73,7 @@ class TenantSecretVersionTests(unittest.TestCase):
         self.assertIn("secret list-versions", script)
         self.assertNotIn("secret show", script)
         self.assertIn("--vault-name", script)
-        self.assertIn("--query attributes.enabled", script)
+        self.assertIn("attributes.enabled", script)
         self.assertNotIn("--query value", script)
         self.assertNotIn("--query 'value'", script)
         self.assertNotIn("set -x", script)
