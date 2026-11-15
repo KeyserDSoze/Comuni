@@ -24,3 +24,7 @@ Il workflow `Deploy to Azure` invoca il gate **dopo** `terraform apply`, con suf
 ## Limiti e rischi residui
 
 La CI usa `az` simulata e non verifica Azure live. CLI extension e payload metadata in subscription reale vanno verificati prima del go-live; i metadata possono essere temporaneamente non disponibili dopo il provisioning. Se il gate fallisce dopo apply, la nuova revisione è forse già stata creata ma deve rimanere a 0%; non eseguiamo teardown/rollback distruttivo. Il monitoraggio di rollback e dei pesi live, l'accesso sicuro a candidate URL, i JWT/OIDC reali, la dimostrazione che il secret Key Vault corrisponda al verifier PostgreSQL, migrazioni in VNet, app secrets and pool saturation sono ancora da realizzare/validare in #19/#6. Nessuna promessa zero-downtime, sicurezza PA/GDPR o produzione reale.
+
+## Evoluzione successiva — ADR 0019
+
+La candidata può avere una URL label unica anche a 0% di traffico; l'ADR 0019 vincola il binding nel plan/live gate e definisce uno smoke HTTP OIDC read-only a due tenant, da eseguire manualmente quando saranno disponibili IdP e token reali. La sola verifica dei metadati resta insufficiente a provare un isolamento RLS operativo.

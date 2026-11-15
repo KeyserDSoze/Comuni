@@ -166,3 +166,32 @@ python3 scripts/azure/verify-staged-revisions.py \
 ```
 
 **Gate NON sufficienti al go-live:** un esito verde del controllo metadati non equivale a smoke HTTP del backend, né certifica che la chiave HMAC sia uguale a quella nel database (la managed identity può avere un secret configurato ma errato); verificare tramite accesso controllato alla candidata (URL di revisione/label con policy adeguate), autenticazione OIDC e RLS reali su **almeno due Comuni**, auditing e errori/timeout. L'endpoint `/health/ready` controlla la readiness applicativa, non prova la firma RLS. La promozione del traffico e il rollback con approvazioni restano attività distinte e **non** sono implementate (#19/#6). Non dichiarare zero downtime: nessun deployment Azure reale o test di carico effettuato.
+
+## Etichetta immutabile e smoke OIDC/RLS su candidata (ADR 0019 / #25)
+
+Lo stage ACA mantiene **100% del traffico ordinario** sulla revisione stabile e **0% sulla candidata**. Ora la regola `ingress.traffic_weight` della *latest* a peso 0 assegna anche `label = candidate_revision_suffix` (ad esempio `r123456789abc`). Azure Container Apps rende l'etichetta raggiungibile a un **FQDN dedicato** senza modificare le percentuali della root app: `https://<app>---<rsha12>.<environment-default-domain>`. Il gate Terraform plan e il controllo live post-stage verificano che questa label sia associata *solo* alla candidata latest. Fonti ufficiali: [Azure revisions e label](https://learn.microsoft.com/en-us/azure/container-apps/revisions), [domini per label](https://learn.microsoft.com/en-us/azure/container-apps/connect-apps).
+
+**Attenzione:** una label con FQDN esterno è una nuova superficie di accesso, **non un endpoint privato** né un controllo di autorizzazione. La protezione della PWA/asset pubblici e degli endpoint health rimane da valutare, mentre le API tenant continuano a richiedere JWT OIDC valido e membership effettiva. Prima del collaudo con dati di qualunque tipo devono essere approvati ingress restrictions/WAF e misure di controllo dell'accesso. Per ora usare **soltanto due Comuni di test sintetici** e nessun dato personale reale.
+
+### Procedura del test manuale (quando un IdP reale sarà disponibile)
+
+1. Con operatore autorizzato, verificare tramite `scripts/azure/verify-staged-revisions.py` che la revisione candidata sia **Healthy**, etichettata col suffix immutabile e ancora a 0%, e che la stable sia al 100%. Verificare l'esatta coppia *app / revision label / environment default domain* in Azure, non dedurla da una URL proposta da un client.
+2. Preparare due organization sintetiche **A e B distinte**, protocollo abilitato per entrambe, membership `Reader` attiva per due identità test reali. Precaricare tramite procedimento autorizzato **un marker sintetico univoco in ciascun Comune** (subject di Protocollo in lista degli ultimi 100), senza nomi o dati personali. Il verificatore HTTP è **read-only**: non genera nuovi atti e non scrive dati né eventi audit.
+3. Ottenere dall'IdP approvato **due access token OIDC distinti e di breve vita** che riportino gli organization ID attesi, poi iniettarli **solo** nelle variabili ambiente protette `COMUNI_SMOKE_OIDC_TOKEN_A` e `COMUNI_SMOKE_OIDC_TOKEN_B` del runner dell'operatore. Non salvarli in repository, GitHub Actions secrets permanenti, shell history, artifact, file di log o argomenti CLI; non abilitare `set -x`. Al momento il progetto non implementa il login IdP frontend (#2), perciò questa fase **non è automatizzabile con sicurezza in CI**.
+4. Dal runner con DNS e connettività controllati verso l'endpoint ACA approvato, eseguire (tutti i parametri seguenti tranne i token sono **metadati non segreti**):
+
+```bash
+python3 scripts/azure/smoke-candidate-oidc.py \
+  --candidate-url "https://${APP_NAME}---${REVISION_SUFFIX}.${APP_ENV_DOMAIN}" \
+  --app "$APP_NAME" --revision-label "$REVISION_SUFFIX" \
+  --environment-domain "$APP_ENV_DOMAIN" \
+  --org-a "$TEST_ORG_A" --org-b "$TEST_ORG_B" \
+  --marker-a "$TEST_SENTINEL_A" --marker-b "$TEST_SENTINEL_B"
+```
+
+`APP_ENV_DOMAIN` è il *default domain* verificato dell'Environment ACA (ad esempio `envid.region.azurecontainerapps.io`) **approvato** dall'operatore; lo script richiede esattamente `<app>---<label>.<domain>`. I due token sono letti **soltanto dall'ambiente del processo**, non dalla CLI. Il client Python verifica TLS con la CA del sistema, rifiuta redirect, proxy, host diversi, porte non standard e richieste HTTP non HTTPS; usa un timeout per richiesta e non stampa contenuti ricevuti né token.
+
+5. Lo smoke esegue solo sei `GET`: `/health/ready` (200), `/api/v1/context` anonimo (401), e per ogni tenant A/B `/api/v1/context` (200 con organization ID corretto, ruolo DB attivo e modulo protocollo) e `/api/v1/protocol/records` (200 con **il proprio marker e senza quello dell'altro Comune**). Errori 401/403 inattesi, 429, dati incoerenti, fixture mancante o contenuti invalidi causano fallimento. Se il modulo è disabilitato o il marker è fuori dagli ultimi 100, **fallire è corretto**: correggere il test fixture, non disabilitare i controlli.
+6. Distruggere i token effimeri dal runner dopo il test, leggere i risultati sanitizzati e ripetere il controllo read-only di routing; non promuovere alcuna revisione automaticamente. Per la successiva fase di approvazione/promozione e rollback, aprire un incremento separato (#19/#6).
+
+**Limiti espliciti:** la CI simula trasporto HTTPS e CLI Azure, **non prova un URL Azure reale né l'ottenimento di access token OIDC reali**. Due sentinel visibili nel GET permettono di verificare **un caso concreto** di separazione per tenant, ma non esauriscono threat modeling RLS, audit, altri moduli, concorrenza o privati Azure. La label da sola non protegge l'accesso e non attesta la corrispondenza fisica del valore Key Vault con PostgreSQL: il test API autentico è necessario proprio per verificarne l'uso nella richiesta. Nessun deployment/protocollo ufficiale verificato.

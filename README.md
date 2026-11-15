@@ -69,3 +69,7 @@ Il workflow di deploy predispone una revisione candidata in Azure Container Apps
 ## Check revisioni Azure dopo lo staging (#24)
 
 La pipeline `Deploy to Azure` ora verifica **dopo Terraform apply** che la revisione stabile riceva ancora il 100% del traffico e che la nuova candidata (0%) sia attiva e sana, con immagine del commit e configurazione HMAC pin esatta. Il controllo è di sola lettura e non può promuovere/revocare una revisione. Vedere [ADR 0018](adr/0018-live-aca-staging-verification.md) e [docs/deployment.md](docs/deployment.md). La verifica è testata in CI con CLI Azure simulata, non ancora provata in una subscription reale.
+
+## Canary revision con smoke OIDC/RLS read-only (#25)
+
+La revisione candidata (0% traffico ordinario) riceve una **label immutabile** per commit e quindi un URL dedicato a test controllati. `scripts/azure/smoke-candidate-oidc.py` permette a un operatore di verificare contesti e isolamento Protocollo con due token OIDC reali e due Comuni **sintetici**, senza creare documenti e senza spostare traffico. [ADR 0019](adr/0019-immutable-canary-label-and-oidc-smoke.md), [runbook](docs/deployment.md). Non sono ancora stati effettuati smoke su Azure reale o login tramite IdP reale; label e token devono essere accessibili solo a operatori autorizzati.

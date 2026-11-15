@@ -71,3 +71,7 @@ La stessa singola Container App API/React passa alla modalità `Multiple` con re
 ## Gate metadata-only dopo lo staging ACA (ADR 0018)
 
 Il workflow approvato di release conserva il blocco anti-distruzione di Terraform e, dopo apply, verifica in Azure le revisioni reali senza alterare il 100%/0% del traffico. Il verificatore legge stato/routing/identità configurata con Azure CLI, mai valori Key Vault, e controlla immagine SHA + key ID/secret reference della candidata. La verifica è uno step obbligatorio prima di pianificare smoke HTTP/RLS e promozione, che restano fuori scope. Un fallimento non implica rollback automatico, dato che lo stage deve essere già a 0% di traffico.
+
+## Canary label e smoke read-only su candidata (ADR 0019)
+
+La regola ACA del template candidato pesa **0%** ma ottiene `label = candidate_revision_suffix`, esponendo un FQDN di revisione distinto dall'URL stabile dell'app. Il piano Terraform e il verifier live verificano il binding; la label non è un'API diversa né un nuovo servizio. Un tool di smoke read-only permette, quando un IdP reale sarà configurato, di interrogare **la stessa API** tramite la label con due token OIDC per due Comuni sintetici, verificando autorizzazione e accesso ai metadati Protocollo. Nessun token è incorporato nell'immagine o nella pipeline CI, e lo smoke non promuove la candidata. #19/#6 conservano il controllo di promozione, rollback e collaudo Azure.
