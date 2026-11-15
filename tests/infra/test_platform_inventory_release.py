@@ -22,7 +22,7 @@ DEPLOY = (ROOT / ".github/workflows/deploy.yml").read_text()
 GATE = ROOT / "scripts/azure/check-staged-rollout-plan.py"
 PREFLIGHT = ROOT / "scripts/azure/check-platform-inventory-secret.sh"
 VERSION = "c" * 32
-SECRET = "platform-read-v" + VERSION
+SECRET = "pi-" + VERSION[:16]
 URI = VAULT_URI + "secrets/platform-inventory-connection/" + VERSION
 
 
@@ -53,6 +53,11 @@ def check(plan, enabled=False, version=""):
 
 class PlatformInventoryReleaseTests(unittest.TestCase):
     def test_terraform_wires_opt_in_only_from_external_pinned_kv_uri(self):
+        # ACA secret keys are limited to 20 characters; keep the *full*
+        # immutable version only in the Key Vault URI.
+        self.assertLessEqual(len(SECRET), 20)
+        self.assertIn('substr(secret.value, 0, 16)', TF)
+        self.assertIn('substr(env.value, 0, 16)', TF)
         self.assertIn('variable "platform_inventory_enabled"', VARS)
         self.assertRegex(VARS, r'variable "platform_inventory_enabled"\s*\{[^}]*default\s*=\s*false')
         self.assertIn('variable "platform_inventory_secret_version"', VARS)
