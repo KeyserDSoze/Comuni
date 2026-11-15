@@ -1,0 +1,13 @@
+{
+  "name": "comuni-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "src/frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @comuni/frontend",
+    "build": "npm run build --workspace @comuni/frontend",
+    "test:e2e": "npm run test:e2e --workspace @comuni/frontend"
+  }
+}

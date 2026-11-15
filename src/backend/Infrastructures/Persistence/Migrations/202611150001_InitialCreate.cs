@@ -36,7 +36,7 @@ public sealed class InitialCreate : Migration
             constraints: table =>
             {
                 table.PrimaryKey("pk_organization_modules", x => new { x.organization_id, x.module_key });
-                table.ForeignKey("fk_modules_organizations", x => x.organization_id, "platform", "organizations", "id", onDelete: ReferentialAction.Cascade);
+                table.ForeignKey(name: "fk_modules_organizations", column: x => x.organization_id, principalSchema: "platform", principalTable: "organizations", principalColumn: "id", onDelete: ReferentialAction.Cascade);
             });
 
         migrationBuilder.CreateTable(
@@ -51,7 +51,7 @@ public sealed class InitialCreate : Migration
             constraints: table =>
             {
                 table.PrimaryKey("pk_records", x => x.id);
-                table.ForeignKey("fk_records_organizations", x => x.organization_id, "platform", "organizations", "id", onDelete: ReferentialAction.Restrict);
+                table.ForeignKey(name: "fk_records_organizations", column: x => x.organization_id, principalSchema: "platform", principalTable: "organizations", principalColumn: "id", onDelete: ReferentialAction.Restrict);
             });
 
         migrationBuilder.CreateIndex(
