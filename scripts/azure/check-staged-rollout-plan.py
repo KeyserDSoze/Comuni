@@ -65,6 +65,14 @@ def validate(plan, args):
 
     changes = plan.get("resource_changes", []) if isinstance(plan, dict) else []
     require(isinstance(changes, list), "missing Terraform changes")
+    # The plan gate is followed by unattended apply. Never permit a destructive
+    # change anywhere in the stack, even if the Container App stage itself is safe.
+    for item in changes:
+        require(isinstance(item, dict) and isinstance(item.get("change"), dict),
+                "unrecognized planned resource change")
+        actions = item["change"].get("actions", [])
+        require(isinstance(actions, list) and "delete" not in actions,
+                "destructive infrastructure changes require a separate approved procedure")
     app_changes = [item for item in changes
                    if isinstance(item, dict) and item.get("address") == APP_ADDRESS]
     require(len(app_changes) == 1, "a single existing container-app change is required")
