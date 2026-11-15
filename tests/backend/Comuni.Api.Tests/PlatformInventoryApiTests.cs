@@ -220,7 +220,7 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
               has_table_privilege(current_user, 'platform.organizations', 'SELECT'),
               has_table_privilege(current_user, 'platform.organization_modules', 'SELECT'),
               has_table_privilege(current_user, 'platform.organization_memberships', 'SELECT'),
-              has_table_privilege(current_user, 'protocol.records', 'SELECT'),
+              has_schema_privilege(current_user, 'protocol', 'USAGE'),
               has_table_privilege(current_user, 'platform.platform_operators', 'SELECT'),
               has_table_privilege(current_user, 'platform.platform_operator_audit_events', 'INSERT'),
               has_table_privilege(current_user, 'platform.platform_operator_audit_events', 'SELECT'),
