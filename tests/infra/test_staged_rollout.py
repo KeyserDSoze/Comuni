@@ -131,6 +131,17 @@ class StagedRolloutTests(unittest.TestCase):
         plan["resource_changes"][0]["change"]["actions"] = ["delete", "create"]
         self.assertNotEqual(0, self.gate(plan).returncode)
 
+    def test_destruction_of_any_other_infrastructure_resource_is_rejected(self):
+        plan = fixture_plan()
+        plan["resource_changes"].append({
+            "address": "azurerm_postgresql_flexible_server.main",
+            "type": "azurerm_postgresql_flexible_server",
+            "change": {"actions": ["delete"], "before": {"id": "pg-id"}, "after": None},
+        })
+        self.assertNotEqual(0, self.gate(plan).returncode)
+        plan["resource_changes"][-1]["change"]["actions"] = ["delete", "create"]
+        self.assertNotEqual(0, self.gate(plan).returncode)
+
     def test_secret_mutation_missing_or_wrong_candidate_version_is_rejected(self):
         cases = []
         p = fixture_plan()
