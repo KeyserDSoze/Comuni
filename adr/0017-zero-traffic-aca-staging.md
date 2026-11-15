@@ -13,7 +13,7 @@ La prima versione del deploy Terraform aveva `revision_mode=Single` e il traffic
 
 Passare la stessa **unica** Container App a `revision_mode=Multiple`. Il Terraform richiede `stable_revision_suffix` già esistente, `stable_tenant_proof_secret_version` pinned, `candidate_revision_suffix` univoco derivato dal commit, `tenant_proof_secret_version` pinned candidata e `tenant_proof_key_id`. La stable riceve 100% di traffico e la latest candidata 0%, senza trasferimento automatico. `min_replicas=1` per rendere la candidata disponibile per future verifiche, con costo da valutare.
 
-Le secret ACA sono distinte: `tenant-proof-key` rimane associata alla vecchia versione immutabile, `tenant-proof-key-v<versione>` viene creata per la candidata e il nuovo template usa solo quest'ultima. La configurazione HMAC stable rimane invariante. Non rimuovere la secret precedente durante la fase di stage.
+Le secret ACA sono distinte: `tenant-proof-key` rimane associata alla vecchia versione immutabile, `tp-<primi 16 caratteri hex della versione>` (**19 caratteri**, URI Key Vault pinned con full 32hex) viene creata per la candidata e il nuovo template usa solo quest'ultima. La configurazione HMAC stable rimane invariante. Non rimuovere la secret precedente durante la fase di stage.
 
 Il GitHub Environment contiene anche `STABLE_REVISION_SUFFIX` e `STABLE_TENANT_PROOF_SECRET_VERSION`; entrambe le versioni vengono verificate tramite preflight Key Vault metadata-only. Il workflow produce un piano Terraform, poi invia il risultato di `terraform show -json` **via pipe** al gate `scripts/azure/check-staged-rollout-plan.py`, che non mostra né conserva lo stato, ma confronta la secret stable prima/dopo, vincola il riferimento della nuova secret/ID e il routing a 100/0, rifiuta create/delete/replacement della Container App, impedisce mutazioni/rimozioni di secret application-scoped esistenti e blocca qualunque azione di distruzione di altre risorse. Soltanto dopo la verifica si procede all'apply.
 
@@ -32,3 +32,7 @@ Questo incremento **non** è un orchestratore blue-green completo. Lo stage non 
 ## Evoluzione successiva — ADR 0018
 
 L'ADR 0018 aggiunge una verifica **post-apply** live dei metadati e del traffico effettivo, da usare prima di qualunque smoke test e promozione. Non introduce una procedura di promozione/rollback né una prova di pairing crittografico tra Key Vault e PostgreSQL.
+
+## Evoluzione ADR 0033 — Nomi candidate compatibili con ACA
+
+Microsoft documenta il limite di **20 caratteri** per le chiavi secret ACA. L'originale `tenant-proof-key-v<32hex>` non è un nome distribuibile in modo affidabile; ADR 0033 e #39 lo sostituiscono nel Terraform, nel plan gate e nel verifier live con `tp-<16hex>` (19 caratteri). Il **full URI versionato** continua a usare esattamente 32hex, e la secret stable `tenant-proof-key` resta immutata. Collisioni del prefisso non provocano sovrascritture: il plan gate preserva l'URI preesistente e fallisce. Questa evoluzione è verificata offline, non con un deploy Azure reale.
