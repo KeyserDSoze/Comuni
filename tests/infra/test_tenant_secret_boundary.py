@@ -15,13 +15,13 @@ PREFLIGHT = ROOT / "scripts/azure/check-tenant-proof-secret.sh"
 
 class TenantProofSecretBoundaryTests(unittest.TestCase):
     def test_terraform_references_existing_versionless_key_vault_secret_not_its_value(self):
-        self.assertNotRegex(VARIABLES, r'variable\\s+"tenant_proof_key"\\s+\\{')
-        self.assertNotRegex(TERRAFORM, r'resource\\s+"azurerm_key_vault_secret"\\s+"tenant_proof_key"')
+        self.assertNotRegex(VARIABLES, r'variable\s+"tenant_proof_key"\s+\{')
+        self.assertNotRegex(TERRAFORM, r'resource\s+"azurerm_key_vault_secret"\s+"tenant_proof_key"')
         self.assertIn("secrets/tenant-proof-key", TERRAFORM)
         self.assertIn("key_vault_secret_id", TERRAFORM)
         self.assertNotIn("var.tenant_proof_key\n", TERRAFORM)
         # Non-destructive transition for any state that already tracks this secret.
-        self.assertRegex(TERRAFORM, r'removed\\s*\\{[\\s\\S]*?azurerm_key_vault_secret\\.tenant_proof_key[\\s\\S]*?destroy\\s*=\\s*false')
+        self.assertRegex(TERRAFORM, r'removed\s*\{[\s\S]*?azurerm_key_vault_secret\.tenant_proof_key[\s\S]*?destroy\s*=\s*false')
         self.assertNotIn("TF_VAR_tenant_proof_key:", DEPLOY)
         self.assertIn("TF_VAR_tenant_proof_key_id:", DEPLOY)
 

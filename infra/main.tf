@@ -165,10 +165,14 @@ resource "azurerm_key_vault_secret" "postgres_connection" {
   key_vault_id = azurerm_key_vault.main.id
 }
 
-resource "azurerm_key_vault_secret" "tenant_proof_key" {
-  name         = "tenant-proof-key"
-  value        = var.tenant_proof_key
-  key_vault_id = azurerm_key_vault.main.id
+# Preserve already-provisioned Key Vault secret when removing it from Terraform state.
+# Without destroy=false Terraform would DELETE production signing material on apply.
+# Historical state snapshots may still contain the key and must be secured/rotated.
+removed {
+  from = azurerm_key_vault_secret.tenant_proof_key
+  lifecycle {
+    destroy = false
+  }
 }
 
 resource "azurerm_role_assignment" "acr_pull" {
@@ -215,7 +219,7 @@ resource "azurerm_container_app" "main" {
   secret {
     name                = "tenant-proof-key"
     identity            = azurerm_user_assigned_identity.app.id
-    key_vault_secret_id = azurerm_key_vault_secret.tenant_proof_key.versionless_id
+    key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/tenant-proof-key"
   }
 
   template {

@@ -12,4 +12,6 @@ tags = {
 }
 # postgres_admin_password and postgres_runtime_password must be supplied separately as secrets. OIDC authority is not a secret.
 
-# tenant_proof_key must be supplied through a secret, never committed to tfvars.
+# Tenant HMAC signing material is NEVER a Terraform variable. Provision the
+# tenant-proof-key Key Vault secret through an approved external operation.
+# Set tenant_proof_key_id only after staging the matching key in PostgreSQL.

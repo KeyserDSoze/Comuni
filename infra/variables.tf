@@ -41,16 +41,6 @@ variable "tenant_proof_key_id" {
   }
 }
 
-variable "tenant_proof_key" {
-  description = "Random secret of 32+ UTF-8 bytes shared by the API signer and PostgreSQL verifier, provisioned after EF migration. Rotate together."
-  type        = string
-  sensitive   = true
-  validation {
-    condition     = length(var.tenant_proof_key) >= 32
-    error_message = "tenant_proof_key must be at least 32 characters."
-  }
-}
-
 variable "authentication_authority" {
   description = "Trusted OIDC issuer base URL (HTTPS) for JWT validation; must be provisioned separately."
   type        = string
