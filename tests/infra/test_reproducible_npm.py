@@ -41,12 +41,19 @@ class ReproducibleNpmWorkspaceTests(unittest.TestCase):
             "Lockfile should contain the resolved dependency graph, not a stub",
         )
 
+        self.assertFalse((ROOT / "src/frontend/package-lock.json").exists())
+        for name, package in lock["packages"].items():
+            if name.startswith("node_modules/") and not package.get("link", False):
+                self.assertTrue(package.get("resolved", "").startswith(
+                    "https://registry.npmjs.org/"))
+                self.assertTrue(package.get("integrity", "").startswith("sha512-"))
+
     def test_installers_fail_if_lockfile_and_manifests_disagree(self):
         ci = CI_FILE.read_text(encoding="utf-8")
         self.assertIn("npm ci --no-audit --no-fund", ci)
         self.assertIn("npm ci --ignore-scripts --no-audit --no-fund", ci)
         self.assertIn("npm audit --omit=dev --audit-level=high", ci)
-        self.assertNotRegex(ci, r"npm install(?:\\s|\\s*--)")
+        self.assertNotRegex(ci, r"\bnpm install(?:\s|$)")
         self.assertNotIn("npm audit fix", ci)
         self.assertNotIn("continue-on-error: true", ci)
         self.assertIn("npm ci --no-audit --no-fund", DOCKER_FILE.read_text(encoding="utf-8"))

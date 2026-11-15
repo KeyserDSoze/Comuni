@@ -27,7 +27,7 @@ class SecurityScanningContracts(unittest.TestCase):
         self.assertNotIn("NuGetAudit=false", CI)
 
     def test_npm_production_dependency_audit_is_a_failing_gate(self):
-        self.assertIn("npm install --ignore-scripts --no-audit --no-fund", CI)
+        self.assertIn("npm ci --ignore-scripts --no-audit --no-fund", CI)
         self.assertIn("npm audit --omit=dev --audit-level=high", CI)
         self.assertNotIn("npm audit fix", CI)
         self.assertNotRegex(CI, r"npm audit[^\n]*\|\| true")

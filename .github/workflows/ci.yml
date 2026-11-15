@@ -82,7 +82,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm run build --workspace @comuni/frontend
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e --workspace @comuni/frontend
@@ -124,7 +124,7 @@ jobs:
             -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high \
             -warnaserror:NU1900,NU1903,NU1904
       - name: Install frontend dependencies for advisory resolution only
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Audit npm runtime dependencies (high and critical)
         run: npm audit --omit=dev --audit-level=high
 
