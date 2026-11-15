@@ -1,0 +1,25 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+# Node/Vite/Playwright
+**/node_modules/
+**/dist/
+**/.vite/
+**/.tmp/
+**/test-results/
+**/playwright-report/
+# credentials and local state
+.env
+.env.*
+!.env.example
+docker/.env
+**/*.tfstate
+**/*.tfstate.*
+**/.terraform/
+**/*.tfplan
+*.secret
+# editors / OS
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,16 @@
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/.vite
+**/test-results
+**/playwright-report
+**/.terraform
+.git
+.github
+docs
+adr
+tests
+infra
+docker/.env
+*.tfstate*
