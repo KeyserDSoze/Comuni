@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const org = '11111111-1111-1111-1111-111111111111';
-type Member = { subject: string; role: string; enabled: boolean };
+type Member = { subject: string; role: string; enabled: boolean; issuer?: string | null };
 
 async function openAdministration(page: Page, admin: boolean) {
   const members: Member[] = [
     { subject: 'test-admin', role: 'Admin', enabled: true },
-    { subject: 'test-reader', role: 'Reader', enabled: true }
+    { subject: 'test-reader', role: 'Reader', enabled: true, issuer: 'https://issuer.comuni.test/' }
   ];
   let failUpdates = false;
   await page.route('**/api/v1/auth/browser', route => route.fulfill({
@@ -53,6 +53,8 @@ test('Admin assegna e disattiva un Officer senza poter gestire Admin', async ({ 
   await page.getByRole('navigation').getByText('Amministrazione').click();
   await expect(page.getByText('Membri del Comune')).toBeVisible();
   await expect(page.getByText('test-admin')).toBeVisible();
+  await expect(page.getByText('https://issuer.comuni.test/')).toBeVisible();
+  await expect(page.getByLabel('Issuer da modificare')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Disattiva Admin per test-admin' })).toHaveCount(0);
 
   await page.getByLabel('Identificativo soggetto IdP').fill('idp-new-officer');

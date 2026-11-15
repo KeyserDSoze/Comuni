@@ -62,12 +62,14 @@ public sealed class RuntimeDatabasePrivilegesTests
                 has_table_privilege(current_user, 'platform.audit_events', 'DELETE'),
                 has_table_privilege(current_user, 'public."__EFMigrationsHistory"', 'SELECT'),
                 has_column_privilege(current_user, 'platform.organization_memberships', 'is_active', 'UPDATE'),
-                has_column_privilege(current_user, 'platform.organization_memberships', 'role', 'UPDATE')
+                has_column_privilege(current_user, 'platform.organization_memberships', 'role', 'UPDATE'),
+                has_column_privilege(current_user, 'platform.organization_memberships', 'identity_issuer', 'INSERT'),
+                has_column_privilege(current_user, 'platform.organization_memberships', 'identity_issuer', 'UPDATE')
             """, connection);
         await using var permissions = await rights.ExecuteReaderAsync();
         Assert.True(await permissions.ReadAsync());
-        var allow = new[] { 0, 1, 3, 5, 6, 7, 8, 10, 11, 13, 18 };
-        for (var i = 0; i <= 19; i++)
+        var allow = new[] { 0, 1, 3, 5, 6, 7, 8, 10, 11, 13, 18, 20 };
+        for (var i = 0; i <= 21; i++)
             Assert.Equal(allow.Contains(i), permissions.GetBoolean(i));
     }
 
@@ -169,6 +171,25 @@ public sealed class RuntimeDatabasePrivilegesTests
             db.Database.ExecuteSqlInterpolatedAsync(
                 $"INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES ({org}, {"attacker"}, {"Admin"}, {true})"));
         Assert.Equal("42501", denied.SqlState);
+    }
+
+    [Fact]
+    public async Task Runtime_SQL_cannot_rebind_membership_issuer_even_with_valid_tenant_assertion()
+    {
+        var org = await SeedOrganizationAsync();
+        var options = new DbContextOptionsBuilder<ComuniDbContext>().UseNpgsql(RuntimeConnection).Options;
+        await using var db = new ComuniDbContext(options, new CurrentTestOrganization(org));
+        var signer = new TenantProofSigner(
+            Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Tenant proof key required."));
+        await using var tx = await TenantDatabaseTransaction.BeginAsync(db, signer, CancellationToken.None);
+        var failed = await Assert.ThrowsAsync<PostgresException>(() =>
+            db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE platform.organization_memberships
+                SET identity_issuer = {"https://attacker.example.test/"}
+                WHERE organization_id = {org} AND subject = {"runtime-test-admin"}
+                """));
+        Assert.Equal("42501", failed.SqlState);
     }
 
     [Fact]

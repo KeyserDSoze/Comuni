@@ -71,9 +71,14 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
             INSERT INTO platform.organizations (id, name) VALUES
               ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'OIDC Test Municipality')
             ON CONFLICT (id) DO NOTHING;
-            INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES
-              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'oidc-user', 'Reader', TRUE)
-            ON CONFLICT (organization_id, subject, role) DO UPDATE SET is_active = TRUE;
+            INSERT INTO platform.organization_memberships
+                (organization_id, subject, role, is_active, identity_issuer) VALUES
+              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'oidc-user', 'Reader', TRUE, 'https://issuer.comuni.test/'),
+              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'oidc-admin', 'Admin', TRUE, 'https://issuer.comuni.test/'),
+              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'oidc-legacy', 'Reader', TRUE, NULL),
+              ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'oidc-foreign', 'Reader', TRUE, 'https://other-issuer.example.test/')
+            ON CONFLICT (organization_id, subject, role)
+                DO UPDATE SET is_active = TRUE, identity_issuer = EXCLUDED.identity_issuer;
             """);
     }
 
@@ -164,6 +169,59 @@ public sealed class OidcApiTests(OidcApiFactory factory) : IClassFixture<OidcApi
     {
         using var client = factory.Authenticated(factory.Token(subject: "unassigned-oidc-user"));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("oidc-legacy")]
+    [InlineData("oidc-foreign")]
+    public async Task Valid_oidc_JWT_must_not_authorize_unbound_or_other_issuer_membership(string subject)
+    {
+        using var client = factory.Authenticated(factory.Token(subject: subject));
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Trusted_issuer_admin_provisions_new_member_with_issuer_from_validated_JWT()
+    {
+        var subject = "oidc-assignee-" + Guid.NewGuid().ToString("N");
+        using var admin = factory.Authenticated(factory.Token(subject: "oidc-admin"));
+        var response = await admin.PutAsJsonAsync("/api/v1/admin/memberships/Reader", new
+        {
+            subject, enabled = true,
+            identityIssuer = "https://evil-issuer.example.test/",
+            issuer = "https://evil-issuer.example.test/"
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        var row = await db.OrganizationMemberships.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(x => x.OrganizationId == Guid.Parse(OidcApiFactory.OrganizationId) &&
+                x.Subject == subject && x.Role == "Reader");
+        Assert.Equal(OidcApiFactory.Issuer, row.IdentityIssuer);
+        Assert.True(row.IsActive);
+        using var reader = factory.Authenticated(factory.Token(subject: subject));
+        Assert.Equal(HttpStatusCode.OK, (await reader.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Oidc_admin_cannot_silently_rebind_legacy_or_foreign_issuer_membership()
+    {
+        using var admin = factory.Authenticated(factory.Token(subject: "oidc-admin"));
+        foreach (var subject in new[] { "oidc-legacy", "oidc-foreign" })
+        {
+            Assert.Equal(HttpStatusCode.Conflict,
+                (await admin.PutAsJsonAsync("/api/v1/admin/memberships/Reader",
+                    new { subject, enabled = true })).StatusCode);
+        }
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        var rows = await db.OrganizationMemberships.IgnoreQueryFilters().AsNoTracking()
+            .Where(x => x.OrganizationId == Guid.Parse(OidcApiFactory.OrganizationId) &&
+                (x.Subject == "oidc-legacy" || x.Subject == "oidc-foreign"))
+            .ToDictionaryAsync(x => x.Subject);
+        Assert.Null(rows["oidc-legacy"].IdentityIssuer);
+        Assert.Equal("https://other-issuer.example.test/", rows["oidc-foreign"].IdentityIssuer);
     }
 
     [Fact]
