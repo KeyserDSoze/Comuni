@@ -21,6 +21,18 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     internal const string OrgB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
     internal const string OrgDisabled = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 
+    public ApiFactory()
+    {
+        // Minimal hosting reads configuration before ConfigureWebHost's callbacks.
+        // Set test-only environment variables before the Program entry point executes.
+        var connection = Environment.GetEnvironmentVariable("TEST_DATABASE_CONNECTION")
+            ?? throw new InvalidOperationException("TEST_DATABASE_CONNECTION must be set.");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default", connection);
+        Environment.SetEnvironmentVariable("Jwt__SigningKey", SigningKey);
+        Environment.SetEnvironmentVariable("Jwt__Issuer", "Comuni.Tests");
+        Environment.SetEnvironmentVariable("Jwt__Audience", "Comuni.Api");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         var connection = Environment.GetEnvironmentVariable("TEST_DATABASE_CONNECTION")
