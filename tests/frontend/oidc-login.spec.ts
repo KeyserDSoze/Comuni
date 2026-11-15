@@ -45,6 +45,15 @@ test('OIDC login usa authorization code PKCE S256 con state e il solo access tok
   expect(state.length).toBeGreaterThanOrEqual(40);
   expect(challenge.length).toBeGreaterThanOrEqual(40);
   let body: URLSearchParams | null = null;
+  let apiAuthorization: string | null = null;
+  await page.route('**/api/v1/context', route => {
+    apiAuthorization = route.request().headers()['authorization'] ?? null;
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ organizationId: org, organizationName: 'Comune Aurora',
+        roles: ['Reader'], modules: ['protocol'] })
+    });
+  });
   await page.route(provider + '/oauth2/v2.0/token', route => {
     body = new URLSearchParams(route.request().postData() || '');
     return route.fulfill({
@@ -58,6 +67,7 @@ test('OIDC login usa authorization code PKCE S256 con state e il solo access tok
   });
   await page.goto('/?code=mock-authorization-code&state=' + encodeURIComponent(state));
   await expect(page.locator('header').getByText('Comune Aurora')).toBeVisible();
+  expect(apiAuthorization).toBe('Bearer access-for-api');
   expect(body).not.toBeNull();
   const exchanged = body!;
   expect(exchanged.get('grant_type')).toBe('authorization_code');
@@ -89,6 +99,24 @@ test('callback state manomesso è rifiutato senza invocare token endpoint', asyn
   expect(page.url()).toBe(origin + '/');
   await page.reload();
   await expect(page.getByRole('button', { name: 'Accedi con identità digitale' })).toBeVisible();
+});
+
+test('un ID token senza API access token è rifiutato, senza aprire la dashboard', async ({ page }) => {
+  await setup(page);
+  await page.getByRole('button', { name: 'Accedi con identità digitale' }).click();
+  await page.waitForURL('**/oauth2/v2.0/authorize?**');
+  const state = new URL(page.url()).searchParams.get('state')!;
+  await page.route(provider + '/oauth2/v2.0/token', route => route.fulfill({
+    status: 200,
+    headers: { 'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Headers': 'content-type',
+      'Content-Type': 'application/json' },
+    body: JSON.stringify({ id_token: 'id-is-not-api-access', token_type: 'Bearer', expires_in: 300 })
+  }));
+  await page.goto('/?code=mock-authorization-code&state=' + encodeURIComponent(state));
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.locator('header').getByText('Comune Aurora')).toHaveCount(0);
+  expect(page.url()).toBe(origin + '/');
 });
 
 test('quando OIDC non è configurato la pagina non permette di incollare token', async ({ page }) => {
