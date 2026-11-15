@@ -6,7 +6,7 @@
 - Subscription, permessi Azure per Resource Groups, RBAC e creazione risorse; OIDC federato GitHub → Azure.
 - Storage Account e container per backend Terraform remoti **creati prima** del primo `terraform init`; accesso Blob Data Contributor per l'identità del deploy. Lo stato contiene segreti sensibili: RBAC e auditing obbligatori.
 - Nome ACR univoco e immagine già pubblicata prima del primo `terraform apply` completo. Inizializzare ACR come bootstrap separato oppure usare un'immagine validata preesistente.
-- GitHub Environment `production` con approval, secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `POSTGRES_ADMIN_PASSWORD` (solo owner/migrazioni) e `POSTGRES_RUNTIME_PASSWORD` (login `comuni_app_runtime`); vars `OIDC_AUTHORITY`, `OIDC_AUDIENCE`, `AZURE_PREFIX`, `AZURE_LOCATION`, `ACR_NAME`, `ACR_LOGIN_SERVER`, `TF_STATE_RESOURCE_GROUP`, `TF_STATE_STORAGE_ACCOUNT`, `TF_STATE_CONTAINER`, `TF_STATE_KEY`.
+- GitHub Environment `production` con approval, secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `POSTGRES_ADMIN_PASSWORD` (solo owner/migrazioni), `POSTGRES_RUNTIME_PASSWORD` (login `comuni_app_runtime`) e `TENANT_PROOF_KEY` (chiave HMAC DB+API); vars `OIDC_AUTHORITY`, `OIDC_AUDIENCE`, `AZURE_PREFIX`, `AZURE_LOCATION`, `ACR_NAME`, `ACR_LOGIN_SERVER`, `TF_STATE_RESOURCE_GROUP`, `TF_STATE_STORAGE_ACCOUNT`, `TF_STATE_CONTAINER`, `TF_STATE_KEY`.
 - Il principal deploy deve poter fare ACR push, gestire il Key Vault (Secrets Officer), e creare container Blob Storage.
 
 ## Iterazione
@@ -60,3 +60,14 @@ La CI su PostgreSQL 17 esegue lo stesso script **due volte** dopo le migrazioni,
 La migration `202611150005_TenantRowLevelSecurity` abilita RLS su cinque tabelle tenant-owned. Applicarla **con ruolo owner** prima di eseguire nuovamente `scripts/postgres/provision-runtime-role.sql` e prima di promuovere la nuova API. L'API in produzione deve usare **soltanto** `comuni_app_runtime` non owner: l'owner/superuser bypassa RLS. Testare con il login runtime e due organization distinte la lettura senza contesto (0), `SET LOCAL` transaction-local, rollback/commit con connessioni riusate e POST con audit. Le policy SQL non richiedono un nuovo database o servizio Azure.
 
 **Gate di go-live:** la RLS basata su custom GUC PostgreSQL non resiste a SQL arbitrario sotto lo stesso login: un attaccante che possa eseguire `set_config` potrebbe cambiare organization. Definire il threat model e il binding non falsificabile prima di dati reali; #5 resta aperta. Il job privato Azure per migrare/provisionare continua a mancare (#6). Test di connessioni pooled sotto carico e rollout blue/green da verificare in Azure.
+
+## Attivazione e rotazione delle prove tenant firmate (#18)
+
+L'API di produzione ora **fallisce all'avvio** se `Security:TenantProofKey` manca o ha meno di 32 byte UTF-8. Il segreto viene letto tramite una Key Vault secret reference in Container Apps, alimentata dal GitHub secret `TENANT_PROOF_KEY` (Terraform `tenant_proof_key` sensitive; attenzione allo **state Terraform**, che contiene il segreto). Questo valore deve corrispondere alla chiave memorizzata sotto ruolo owner in PostgreSQL.
+
+1. Prima di `CREATE EXTENSION pgcrypto`, Terraform deve abilitare l'estensione nel Flexible Server (`azure.extensions=PGCRYPTO`). Il workflow di deploy attuale non garantisce l'ordine di bootstrap della rete privata: #6 resta bloccante.
+2. Con ruolo owner in VNet privata, eseguire le migrazioni EF fino a `202611150006_SignedTenantRlsProof`.
+3. Sullo **stesso database**, con `TENANT_PROOF_KEY` popolato da secret store (non da comando stampato a video) eseguire `psql -v ON_ERROR_STOP=1 -f scripts/postgres/provision-tenant-proof.sql`; se manca la chiave, lo script rifiuta l'operazione. Eseguire nuovamente `scripts/postgres/provision-runtime-role.sql` per il GRANT EXECUTE della funzione al ruolo runtime.
+4. Attivare la versione dell'API che usa la medesima chiave e verificare in smoke test la lettura A/B, RLS senza proof, spoof con proof invalida, audit transazionale e riuso connessioni.
+
+**Rotazione:** scrivere una nuova chiave DB mentre è attiva la vecchia app provoca richieste non autorizzate; fare rolling update del segreto senza protocollo di doppia chiave non è zero-downtime. Richiede una procedura versionata e testata (issue #18/#6) prima del go-live. **Mai** distribuire la chiave in source, tfvars, browser o log; usare secret store e TLS. Prove attuali sono su PostgreSQL 17 in CI, non su Azure reale.

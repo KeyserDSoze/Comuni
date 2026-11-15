@@ -49,3 +49,7 @@ Il runtime su Azure usa la credenziale separata `comuni_app_runtime` e non quell
 ## RLS PostgreSQL — difesa in profondità (#17)
 
 Una migrazione EF abilita policy Row-Level Security sulle cinque tabelle tenant-owned e un middleware .NET 10 imposta il Comune con `SET LOCAL` nella transazione della richiesta, evitando che il contesto sopravviva nel pool delle connessioni. [ADR 0012](adr/0012-transaction-scoped-rls.md). **Attenzione:** il login runtime condiviso può falsificare la variabile PostgreSQL con SQL arbitrario; il sistema non è ancora adatto a dati personali reali. La #5 resta aperta per completare questo confine.
+
+## Protezione del contesto tenant contro SQL diretto (#18)
+
+La RLS PostgreSQL ora verifica una **prova HMAC temporanea** generata dall'API: il ruolo runtime non può firmare un tenant alternativo soltanto impostando `comuni.organization_id`. Le prove richiedono una chiave condivisa tra API e verifier DB, memorizzata in Key Vault e tabella privata PostgreSQL. [ADR 0013](adr/0013-signed-tenant-rls-proofs.md). Per Development configurare `TENANT_PROOF_KEY` casuale in `docker/.env`. Non è ancora prova di sicurezza completa contro tutte le minacce o di deploy Azure.

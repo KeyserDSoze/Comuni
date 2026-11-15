@@ -22,3 +22,7 @@ Owner/superuser PostgreSQL bypassano di norma RLS, e **non usiamo FORCE RLS** pe
 **Questa è una barriera contro query non contestualizzate o errori applicativi, NON contro SQL arbitrario eseguibile sotto il login condiviso**: PostgreSQL permette al ruolo runtime di invocare `set_config` per modificare una custom GUC; una SQL injection sufficientemente potente potrebbe cambiare `comuni.organization_id` e bypassare la policy. Prima del go-live occorre progettare binding trusted non falsificabile (o ruolo/connessione segregati per tenant), valutare l'impatto sul pooling Npgsql, valutare leak per foreign keys e constraint, effettuare threat modeling e pen-test. Non dichiarare isolamento rigoroso garantito per dati personali reali finché la #5 non chiude.
 
 La transazione per richiesta può trattenere la connessione per tutta la durata dell'endpoint: misurare pool saturation, timeout e latenza sotto carico. Tutte le nuove tabelle tenant-owned dovranno ottenere una policy esplicita e test RLS. Il deploy Azure e le migrazioni in VNet non sono ancora stati verificati (#6).
+
+## Evoluzione successiva — ADR 0013
+
+La GUC `comuni.organization_id` descritta sopra era manipolabile dal login runtime in SQL diretto. L'ADR 0013 la sostituisce nelle policy con un'asserzione HMAC firmata dall'API e verificata nel DB con segreto non leggibile dal login runtime. I rischi storici sono il motivo del cambiamento.
