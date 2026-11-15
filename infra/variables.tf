@@ -101,6 +101,32 @@ variable "authentication_audience" {
   }
 }
 
+# All four non-secret browser OAuth values must be configured together.
+# Leaving them empty DISABLES the browser login: never fall back to demo JWT in Production.
+variable "authentication_browser_client_id" {
+  description = "OIDC public SPA client identifier (not a secret); empty until provider registration."
+  type        = string
+  default     = ""
+}
+
+variable "authentication_browser_authorization_endpoint" {
+  description = "Trusted HTTPS OIDC authorization endpoint from provider metadata."
+  type        = string
+  default     = ""
+}
+
+variable "authentication_browser_token_endpoint" {
+  description = "Trusted HTTPS OIDC token endpoint allowing CORS for the SPA redirect origin."
+  type        = string
+  default     = ""
+}
+
+variable "authentication_browser_scope" {
+  description = "OIDC scope list: openid + a delegated API scope; no offline_access."
+  type        = string
+  default     = ""
+}
+
 variable "image" {
   description = "Fully qualified immutable container image, e.g. registry.azurecr.io/comuni:<commit-sha>"
   type        = string

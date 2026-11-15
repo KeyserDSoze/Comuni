@@ -272,6 +272,23 @@ resource "azurerm_container_app" "main" {
         name  = "Authentication__Audience"
         value = var.authentication_audience
       }
+      # Public OAuth client metadata only; no client secret or browser refresh token.
+      env {
+        name  = "Authentication__BrowserClientId"
+        value = var.authentication_browser_client_id
+      }
+      env {
+        name  = "Authentication__BrowserAuthorizationEndpoint"
+        value = var.authentication_browser_authorization_endpoint
+      }
+      env {
+        name  = "Authentication__BrowserTokenEndpoint"
+        value = var.authentication_browser_token_endpoint
+      }
+      env {
+        name  = "Authentication__BrowserScope"
+        value = var.authentication_browser_scope
+      }
       env {
         name  = "Storage__AccountName"
         value = azurerm_storage_account.documents.name

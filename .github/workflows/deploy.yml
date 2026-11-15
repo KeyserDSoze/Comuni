@@ -25,6 +25,10 @@ jobs:
       TF_VAR_stable_tenant_proof_secret_version: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
       TF_VAR_authentication_authority: ${{ vars.OIDC_AUTHORITY }}
       TF_VAR_authentication_audience: ${{ vars.OIDC_AUDIENCE }}
+      TF_VAR_authentication_browser_client_id: ${{ vars.OIDC_BROWSER_CLIENT_ID }}
+      TF_VAR_authentication_browser_authorization_endpoint: ${{ vars.OIDC_BROWSER_AUTHORIZATION_ENDPOINT }}
+      TF_VAR_authentication_browser_token_endpoint: ${{ vars.OIDC_BROWSER_TOKEN_ENDPOINT }}
+      TF_VAR_authentication_browser_scope: ${{ vars.OIDC_BROWSER_SCOPE }}
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}
       TF_VAR_location: ${{ vars.AZURE_LOCATION }}
     steps:

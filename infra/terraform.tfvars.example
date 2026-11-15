@@ -25,3 +25,12 @@ tags = {
 # STABLE_REVISION_SUFFIX and STABLE_TENANT_PROOF_SECRET_VERSION.
 # Candidate is staged at 0% traffic; no automatic traffic promotion.
 # First-ever environment bootstrap needs a separate approved process (#6).
+
+# Optional browser OIDC login (all four public settings together):
+# authentication_browser_client_id = "<SPA public client ID>"
+# authentication_browser_authorization_endpoint = "https://trusted-idp/.../authorize"
+# authentication_browser_token_endpoint = "https://trusted-idp/.../token"
+# authentication_browser_scope = "openid profile api://.../access_as_user"
+# Values must match Authentication.Authority's HTTPS hostname.
+# Configure GitHub Environment OIDC_BROWSER_* vars; no browser client secret.
+# Until a provider is registered, the UI DISABLES Production login.
