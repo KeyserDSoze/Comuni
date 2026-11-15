@@ -47,7 +47,7 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
-    options.OnRejected = context =>
+    options.OnRejected = (context, cancellationToken) =>
     {
         var retrySeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var duration)
             ? Math.Max(1, (int)Math.Ceiling(duration.TotalSeconds))
