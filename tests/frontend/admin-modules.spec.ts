@@ -16,6 +16,11 @@ async function openDashboard(page: import('@playwright/test').Page, roles: strin
       modules: enabled ? ['protocol'] : []
     }),
   }));
+  await page.route('**/api/v1/admin/memberships', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([
+      { subject: 'test-admin', role: 'Admin', enabled: true }
+    ])
+  }));
   await page.route('**/api/v1/admin/modules', route => route.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify([{ key: 'protocol', enabled }]),

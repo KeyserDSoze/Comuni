@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { getContext, getRecords, getAdminModules, setAdminModule, registerRecord, type OrganizationContext, type ProtocolRecord, type AdminModule } from './api';
+import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, registerRecord, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership } from './api';
 import { cn } from './lib/utils';
 import {
   beginOidcLogin, captureOidcCallback, clearPendingOidc,
@@ -51,6 +51,10 @@ export function App() {
   const [adminModules, setAdminModules] = useState<AdminModule[]>([]);
   const [loadingAdmin, setLoadingAdmin] = useState(false);
   const [savingAdmin, setSavingAdmin] = useState(false);
+  const [adminMemberships, setAdminMemberships] = useState<AdminMembership[]>([]);
+  const [memberSubject, setMemberSubject] = useState('');
+  const [memberRole, setMemberRole] = useState<'Reader' | 'Officer'>('Reader');
+  const [savingMembership, setSavingMembership] = useState(false);
   const canWrite = Boolean(context?.roles.some(role => role === 'Admin' || role === 'Officer'));
   const canAdmin = Boolean(context?.roles.includes('Admin'));
   const protocolEnabled = Boolean(context?.modules.includes('protocol'));
@@ -144,7 +148,11 @@ export function App() {
     if (!token || !canAdmin) return;
     setLoadingAdmin(true);
     try {
-      setAdminModules(await getAdminModules(token));
+      const [modules, memberships] = await Promise.all([
+        getAdminModules(token), getAdminMemberships(token)
+      ]);
+      setAdminModules(modules);
+      setAdminMemberships(memberships);
       setError('');
     } catch {
       setError(t('serverError'));
@@ -174,6 +182,30 @@ export function App() {
     }
   }
 
+  async function changeMembership(subject: string, role: 'Reader' | 'Officer', enabled: boolean): Promise<boolean> {
+    if (!token || !canAdmin || savingMembership) return false;
+    setSavingMembership(true);
+    setError('');
+    try {
+      await setAdminMembership(token, role, subject, enabled);
+      setAdminMemberships(await getAdminMemberships(token));
+      setNotice(t('membershipUpdated'));
+      return true;
+    } catch {
+      setError(t('serverError'));
+      return false;
+    } finally {
+      setSavingMembership(false);
+    }
+  }
+
+  async function assignMembership(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const subject = memberSubject.trim();
+    if (!subject || subject.length > 160 || subject !== memberSubject) return;
+    if (await changeMembership(subject, memberRole, true)) setMemberSubject('');
+  }
+
   function enter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (tokenInput.trim()) {
@@ -197,6 +229,8 @@ export function App() {
     setContext(null);
     setRecords([]);
     setAdminModules([]);
+    setAdminMemberships([]);
+    setMemberSubject('');
     setPage('dashboard');
     setError('');
   }
@@ -364,6 +398,7 @@ export function App() {
               </section>
             </>
           ) : page === 'admin' ? (
+            <>
             <Card className="max-w-3xl">
               <CardHeader>
                 <CardTitle>{t('adminModulesTitle')}</CardTitle>
@@ -389,6 +424,57 @@ export function App() {
                   </ul>}
               </CardContent>
             </Card>
+            <Card className="max-w-3xl">
+              <CardHeader>
+                <CardTitle>{t('municipalMembers')}</CardTitle>
+                <p className="text-sm text-muted-foreground">{t('membershipHelp')}</p>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <form onSubmit={event => void assignMembership(event)}
+                  className="flex flex-col items-start gap-3 sm:flex-row sm:items-end">
+                  <div className="w-full flex-1">
+                    <label htmlFor="idp-member-subject" className="mb-2 block text-sm font-medium">{t('memberSubject')}</label>
+                    <input id="idp-member-subject" required maxLength={160}
+                      value={memberSubject} onChange={event => setMemberSubject(event.target.value)}
+                      className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      autoComplete="off" spellCheck={false} />
+                  </div>
+                  <div className="w-full sm:w-32">
+                    <label htmlFor="member-role" className="mb-2 block text-sm font-medium">{t('memberRole')}</label>
+                    <select id="member-role" value={memberRole}
+                      onChange={event => setMemberRole(event.target.value as 'Reader' | 'Officer')}
+                      className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm">
+                      <option value="Reader">Reader</option>
+                      <option value="Officer">Officer</option>
+                    </select>
+                  </div>
+                  <Button disabled={savingMembership || loadingAdmin} type="submit">{t('assignMembership')}</Button>
+                </form>
+                {loadingAdmin ? <p className="text-sm text-muted-foreground">{t('loading')}</p> :
+                  adminMemberships.length === 0 ? <p className="text-sm text-muted-foreground">{t('noMembers')}</p> :
+                  <ul className="divide-y divide-border">
+                    {adminMemberships.map(member => (
+                      <li key={member.subject + ':' + member.role}
+                        className="flex flex-wrap items-center justify-between gap-3 py-3">
+                        <div className="min-w-0">
+                          <p className="break-all text-sm font-semibold">{member.subject}</p>
+                          <p className="text-sm text-muted-foreground">{member.role} · {member.enabled ? t('moduleActive') : t('moduleInactive')}</p>
+                        </div>
+                        {member.role !== 'Admin' && (member.role === 'Officer' || member.role === 'Reader') && (
+                          <Button type="button" disabled={savingMembership} variant="outline"
+                            aria-label={member.enabled ?
+                              t('deactivateMembership', { role: member.role, subject: member.subject }) :
+                              t('reactivateMembership', { role: member.role, subject: member.subject })}
+                            onClick={() => void changeMembership(member.subject, member.role as 'Reader' | 'Officer', !member.enabled)}>
+                            {member.enabled ? t('deactivate') : t('reactivate')}
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>}
+              </CardContent>
+            </Card>
+            </>
           ) : (
             <>
               {newRecordOpen && canWrite && (

@@ -43,3 +43,18 @@ export const setAdminModule = (token: string, key: string, enabled: boolean) =>
   request<AdminModule>(`/api/v1/admin/modules/${encodeURIComponent(key)}`, token, {
     method: 'PUT', body: JSON.stringify({ enabled }),
   });
+
+export interface AdminMembership {
+  subject: string;
+  role: 'Admin' | 'Reader' | 'Officer';
+  enabled: boolean;
+}
+
+export const getAdminMemberships = (token: string) =>
+  request<AdminMembership[]>('/api/v1/admin/memberships', token);
+
+export const setAdminMembership = (
+  token: string, role: 'Reader' | 'Officer', subject: string, enabled: boolean
+) => request<AdminMembership>(`/api/v1/admin/memberships/${role}`, token, {
+  method: 'PUT', body: JSON.stringify({ subject, enabled })
+});
