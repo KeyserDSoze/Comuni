@@ -69,7 +69,7 @@ test('Superadmin visualizza solamente metadata minimali con paginazione', async 
   await expect(table.getByText('Comune Alfa')).toBeVisible();
   await expect(table.getByText('Comune Beta')).toHaveCount(0);
   await expect(table.getByText(alpha.id)).toBeVisible();
-  await expect(table.getByText('Attivo')).toBeVisible();
+  await expect(table.getByText('Attivo', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Carica altri Comuni' })).toBeVisible();
   await page.getByRole('button', { name: 'Carica altri Comuni' }).click();
   await expect(table.getByText('Comune Beta')).toBeVisible();
