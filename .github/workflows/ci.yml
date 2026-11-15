@@ -96,6 +96,8 @@ jobs:
       - run: terraform fmt -recursive infra
       - run: terraform -chdir=infra init -backend=false -input=false
       - run: terraform -chdir=infra validate
+      - name: Test Key Vault secret state boundary and preflight (no Azure)
+        run: python3 -m unittest discover -s tests/infra -p 'test_*.py' -v
 
   container:
     name: Combined container image
