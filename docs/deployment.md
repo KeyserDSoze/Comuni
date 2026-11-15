@@ -144,3 +144,25 @@ Ordine vincolante per qualunque rotazione futura, **da provare ancora in Azure**
 Dopo lo stage, verificare che la stable continui a servire il 100%, che la candidata sia provisioned/healthy, che la nuova secret e il key ID corrispondano davvero al verifier PostgreSQL, e testare con account/organization autorizzati l'accesso API, la RLS e l'audit transazionale **su una revisione candidata raggiunta con un canale di smoke test controllato**. **La pipeline attuale non lo fa e non promuove automaticamente**; la procedura futura deve aggiungere un'azione di traffico approvata e un rollback a 100% stable. Evitare di applicare di nuovo il Terraform con stable suffix vecchio dopo un'eventuale promozione manuale: il piano potrebbe riportare il 100% al valore dichiarato nello state. Non revocare la vecchia chiave prima di confermare che tutte le repliche dipendenti siano dismesse e siano scadute le proof.
 
 **Limiti di questo incremento:** non c'è test Azure reale, controllo live di suffix/traffic, green/blue smoke, approvazione promozione, policy WAF/edge, schedulazione di migrazioni private, rollback collaudato o zero-downtime dimostrato. #19 e #6 rimangono aperte; non usare dati personali in produzione.
+
+## Post-stage gate sulle revisioni ACA (ADR 0018 / #24)
+
+Il workflow manuale `Deploy to Azure`, **dopo l'apply** di uno stage 100% stabile / 0% candidata, esegue ora `scripts/azure/verify-staged-revisions.py` (solo letture). La verifica è obbligatoria per considerare lo stage riuscito; se fallisce il workflow termina con errore **senza spostare traffico o revocare chiavi**. La candidata può risultare già creata in Azure quando la verifica fallisce: un operatore deve ispezionarla e risolvere il problema; non tentare una promozione automatica né ripetere apply senza esaminare il piano.
+
+Lo script invoca `az containerapp show` per controllare `Multiple`, `az containerapp revision list` per lo stato delle revisioni e `az containerapp ingress traffic show` per i pesi effettivi. Per la revisione stabile e la candidata richiede `active=true`, `healthState=Healthy`, `provisioningState=Provisioned`, `runningState=Running`, almeno una replica in esecuzione. Sulla candidata confronta **esattamente** l'immagine immutabile `<acr>/comuni:<GITHUB_SHA>`, `Security__TenantProofKeyId` e il riferimento `Security__TenantProofKey` con `tenant-proof-key-v<32hex>` previsto. Il traffico deve essere composto **esclusivamente** da stable 100% e latest 0%. Nessuna terza destinazione, nessun passaggio a latest. Il nome della revisione segue `<container-app-name>-<revision-suffix>` secondo Microsoft Learn.
+
+L'esecuzione usa un numero massimo di tentativi con intervallo limitato (default 12 x 10 secondi tra tentativi) per tollerare l'eventuale consistenza dell'API di Azure dopo il deploy. Gli input sono validati (nome app, gruppo risorse, SHA immagine, revision suffix, key ID e versione Key Vault). Gli output raw della CLI sono catturati **in memoria** e non compaiono nei log GitHub: potrebbero contenere metadati di configurazione e secret references. La CLI non usa comandi di mutazione del traffico.
+
+Comando per uso manuale dell'operatore (senza valori segreti):
+
+```bash
+python3 scripts/azure/verify-staged-revisions.py \
+  --app '<prefix>-app' --resource-group '<prefix>-rg' \
+  --stable-revision '<suffix-stable-approvato>' \
+  --candidate-revision 'r<12-cifre-sha>' \
+  --expected-image '<acr>.azurecr.io/comuni:<40-hex-commit>' \
+  --candidate-key-id '<key-id-stage-in-postgresql>' \
+  --candidate-secret-version '<32-hex-versione-key-vault>'
+```
+
+**Gate NON sufficienti al go-live:** un esito verde del controllo metadati non equivale a smoke HTTP del backend, né certifica che la chiave HMAC sia uguale a quella nel database (la managed identity può avere un secret configurato ma errato); verificare tramite accesso controllato alla candidata (URL di revisione/label con policy adeguate), autenticazione OIDC e RLS reali su **almeno due Comuni**, auditing e errori/timeout. L'endpoint `/health/ready` controlla la readiness applicativa, non prova la firma RLS. La promozione del traffico e il rollback con approvazioni restano attività distinte e **non** sono implementate (#19/#6). Non dichiarare zero downtime: nessun deployment Azure reale o test di carico effettuato.

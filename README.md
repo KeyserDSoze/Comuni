@@ -65,3 +65,7 @@ Il deployment API su Azure usa `TENANT_PROOF_SECRET_VERSION` (versione esatta de
 ## Staging revisioni Azure in sicurezza (#23)
 
 Il workflow di deploy predispone una revisione candidata in Azure Container Apps con **0% di traffico pubblico** e mantiene **100%** sulla revisione stabile preesistente. Ogni candidata usa un riferimento Key Vault con nome/versione distincti, senza mutare la secret della stable. Un controllo su piano Terraform blocca promozioni automatiche e cambi distruttivi. Leggere [ADR 0017](adr/0017-zero-traffic-aca-staging.md) e [runbook](docs/deployment.md): **non** è un workflow di bootstrap o promozione e non è stato testato su Azure reale; #19/#6 rimangono aperte.
+
+## Check revisioni Azure dopo lo staging (#24)
+
+La pipeline `Deploy to Azure` ora verifica **dopo Terraform apply** che la revisione stabile riceva ancora il 100% del traffico e che la nuova candidata (0%) sia attiva e sana, con immagine del commit e configurazione HMAC pin esatta. Il controllo è di sola lettura e non può promuovere/revocare una revisione. Vedere [ADR 0018](adr/0018-live-aca-staging-verification.md) e [docs/deployment.md](docs/deployment.md). La verifica è testata in CI con CLI Azure simulata, non ancora provata in una subscription reale.

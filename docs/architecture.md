@@ -67,3 +67,7 @@ Il deploy usa una **versioned Key Vault URI** nella secret reference di Azure Co
 ## Canary staging di revisioni Container Apps (ADR 0017)
 
 La stessa singola Container App API/React passa alla modalità `Multiple` con revision suffix immutabile per commit e **nessun inoltro automatico del traffico pubblico alla latest**. Lo stable revision suffix è input esplicito e la secret HMAC precedente conserva il proprio nome/Key Vault version; la candidata usa un nome nuovo di app-scoped secret e una versione pin distinta. Un gate Python su Terraform plan JSON controlla le modifiche ammesse prima di apply, per evitare che Terraform alteri la stable o altre risorse critiche. La parte di *promotion* e relativi smoke test non è implementata: #19/#6.
+
+## Gate metadata-only dopo lo staging ACA (ADR 0018)
+
+Il workflow approvato di release conserva il blocco anti-distruzione di Terraform e, dopo apply, verifica in Azure le revisioni reali senza alterare il 100%/0% del traffico. Il verificatore legge stato/routing/identità configurata con Azure CLI, mai valori Key Vault, e controlla immagine SHA + key ID/secret reference della candidata. La verifica è uno step obbligatorio prima di pianificare smoke HTTP/RLS e promozione, che restano fuori scope. Un fallimento non implica rollback automatico, dato che lo stage deve essere già a 0% di traffico.

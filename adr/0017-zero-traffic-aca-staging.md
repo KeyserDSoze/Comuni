@@ -28,3 +28,7 @@ Il GitHub Environment contiene anche `STABLE_REVISION_SUFFIX` e `STABLE_TENANT_P
 ## Limiti / obblighi successivi
 
 Questo incremento **non** è un orchestratore blue-green completo. Lo stage non garantisce che il suffisso stable corrisponda a una revisione Azure esistente e sana; il gate opera su JSON sintetico in CI e richiede collaudo su piano reale prima dell'apply. Una prima infrastruttura senza revisione stable deve seguire un percorso separato. Il workflow non automatizza una label/URL di test sicura, il pairing ID/chiave/DB, il controllo di readiness, la promozione di traffico, il rollback, il grace/retire delle chiavi precedenti o la pulizia di secret usate da revisioni attive. L'assenza di cleanup automatico è una **scelta fail-closed**: nuove iterazioni non possono cancellare segreti di cui non sia stata approvata la dismissione. È necessario un workflow autorizzato che includa la verifica Azure in VNet, audit, allarmi, test di concorrenza e rollback: #19/#6. Non dichiarare go-live/compliance o zero-downtime con i soli test CI.
+
+## Evoluzione successiva — ADR 0018
+
+L'ADR 0018 aggiunge una verifica **post-apply** live dei metadati e del traffico effettivo, da usare prima di qualunque smoke test e promozione. Non introduce una procedura di promozione/rollback né una prova di pairing crittografico tra Key Vault e PostgreSQL.
