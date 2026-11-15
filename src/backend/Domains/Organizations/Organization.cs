@@ -14,4 +14,8 @@ public sealed class Organization
 
     public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
+    public bool IsSuspended { get; private set; }
+
+    public void Suspend() => IsSuspended = true;
+    public void Reactivate() => IsSuspended = false;
 }
