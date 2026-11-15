@@ -171,6 +171,38 @@ public sealed class RuntimeDatabasePrivilegesTests
         Assert.Equal("42501", denied.SqlState);
     }
 
+    [Fact]
+    public async Task Signed_tenant_runtime_cannot_deactivate_Admin_membership_even_via_raw_SQL()
+    {
+        var org = await SeedOrganizationAsync();
+        var options = new DbContextOptionsBuilder<ComuniDbContext>()
+            .UseNpgsql(RuntimeConnection).Options;
+        await using var db = new ComuniDbContext(options, new CurrentTestOrganization(org));
+        var signer = new TenantProofSigner(
+            Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Tenant proof key is required."));
+        await using var transaction = await TenantDatabaseTransaction.BeginAsync(
+            db, signer, CancellationToken.None);
+
+        // UPDATE(is_active) is granted for operational roles only by RESTRICTIVE RLS.
+        var changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE platform.organization_memberships SET is_active = FALSE
+            WHERE organization_id = {org} AND subject = {"runtime-test-admin"}
+              AND role = {"Admin"}
+            """);
+        Assert.Equal(0, changed);
+        await transaction.CommitAsync();
+
+        await using var owner = new NpgsqlConnection(AdminConnection);
+        await owner.OpenAsync();
+        await using var query = new NpgsqlCommand("""
+            SELECT is_active FROM platform.organization_memberships
+            WHERE organization_id = @org AND subject = 'runtime-test-admin' AND role = 'Admin'
+            """, owner);
+        query.Parameters.AddWithValue("org", org);
+        Assert.True((bool)(await query.ExecuteScalarAsync())!);
+    }
+
     private static async Task<Guid> SeedOrganizationAsync()
     {
         var org = Guid.NewGuid();

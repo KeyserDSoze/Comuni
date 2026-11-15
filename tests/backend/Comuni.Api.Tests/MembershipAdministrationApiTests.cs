@@ -164,6 +164,29 @@ public sealed class MembershipAdministrationApiTests(ApiFactory factory) : IClas
     }
 
     [Fact]
+    public async Task Suspended_organization_denies_membership_listing_and_changes()
+    {
+        var org = await SeedAsync();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE platform.organizations SET is_suspended = TRUE WHERE id = {org}");
+        }
+        using var client = factory.ClientFor(org.ToString(), "Admin");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.GetAsync("/api/v1/admin/memberships")).StatusCode);
+        var target = "no-creation-" + Guid.NewGuid().ToString("N");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.PutAsJsonAsync("/api/v1/admin/memberships/Officer",
+                new { subject = target, enabled = true })).StatusCode);
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ComuniDbContext>();
+        Assert.False(await verifyDb.OrganizationMemberships.IgnoreQueryFilters()
+            .AnyAsync(x => x.OrganizationId == org && x.Subject == target));
+    }
+
+    [Fact]
     public async Task Deactivation_of_unknown_subject_is_not_a_membership_creation()
     {
         var org = await SeedAsync();
