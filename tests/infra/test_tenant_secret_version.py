@@ -34,8 +34,11 @@ class TenantSecretVersionTests(unittest.TestCase):
             fake_az = Path(folder) / "az"
             fake_az.write_text(
                 "#!/bin/sh\n"
-                f'case " $* " in *" --id {SECRET_URI} "*) ;; *) exit 13;; esac\n'
-                'case " $* " in *" --query attributes.enabled "*) ;; *) exit 14;; esac\n'
+                'case " $* " in *" list-versions "*) ;; *) exit 12;; esac\n'
+                'case " $* " in *" --vault-name comuni-itn-001-kv "*) ;; *) exit 13;; esac\n'
+                'case " $* " in *" --name tenant-proof-key "*) ;; *) exit 14;; esac\n'
+                f'case " $* " in *"{SECRET_URI}"*) ;; *) exit 16;; esac\n'
+                'case " $* " in *" --query "*".attributes.enabled"* ) ;; *) exit 17;; esac\n'
                 'case " $* " in *" --output tsv "*) ;; *) exit 15;; esac\n'
                 f"printf '%s\\n' '{enabled}'\n"
                 f"exit {error}\n"
@@ -67,7 +70,9 @@ class TenantSecretVersionTests(unittest.TestCase):
 
     def test_secret_preflight_does_not_read_or_log_the_value(self):
         script = PREFLIGHT.read_text()
-        self.assertIn("--id", script)
+        self.assertIn("secret list-versions", script)
+        self.assertNotIn("secret show", script)
+        self.assertIn("--vault-name", script)
         self.assertIn("--query attributes.enabled", script)
         self.assertNotIn("--query value", script)
         self.assertNotIn("--query 'value'", script)

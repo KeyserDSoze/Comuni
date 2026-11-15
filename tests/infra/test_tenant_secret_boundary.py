@@ -38,7 +38,9 @@ class TenantProofSecretBoundaryTests(unittest.TestCase):
             fake_az.write_text(
                 "#!/bin/sh\n"
                 'case " $* " in *" --query attributes.enabled "*) ;; *) exit 9;; esac\n'
-                'case " $* " in *" --id https://comuni-itn-001-kv.vault.azure.net/secrets/tenant-proof-key/' + 'a' * 32 + ' "*) ;; *) exit 8;; esac\n'
+                'case " $* " in *" list-versions "*) ;; *) exit 8;; esac\n'
+                'case " $* " in *" --vault-name comuni-itn-001-kv "*) ;; *) exit 10;; esac\n'
+                'case " $* " in *" --name tenant-proof-key "*) ;; *) exit 11;; esac\n'
                 f"printf '%s\\n' '{enabled}'\n"
                 f"exit {exit_status}\n"
             )
@@ -62,6 +64,8 @@ class TenantProofSecretBoundaryTests(unittest.TestCase):
     def test_preflight_never_prints_secret_value(self):
         # Metadata-only query must not ask Azure CLI for the actual HMAC secret.
         text = PREFLIGHT.read_text()
+        self.assertIn("secret list-versions", text)
+        self.assertNotIn("secret show", text)
         self.assertNotIn("--query value", text)
         self.assertNotIn("--query '{value", text)
         self.assertNotIn("--query \"value\"", text)
