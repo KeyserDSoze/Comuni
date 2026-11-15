@@ -6,6 +6,11 @@ void i18n.use(initReactI18next).init({
     it: { translation: {
       appName: 'Comuni', appTagline: 'La piattaforma digitale per gli enti locali',
       dashboard: 'Dashboard', protocol: 'Protocollo', overview: 'Panoramica',
+      administration: 'Amministrazione', adminModulesTitle: 'Gestione moduli del Comune',
+      adminModulesDesc: 'Gestisci i servizi disponibili per il tuo Comune. Le autorizzazioni sono verificate sul server.',
+      moduleActive: 'Attivo', moduleInactive: 'Non attivo',
+      enableProtocol: 'Abilita Protocollo', disableProtocol: 'Disabilita Protocollo',
+      moduleUpdated: 'Configurazione del modulo aggiornata.',
       services: 'Servizi attivi', access: 'Accesso tecnico', tokenHelp: 'Inserisci un JWT firmato per la tua organization. Il token resta solo nella memoria di questa pagina.',
       tokenLabel: 'Token JWT di sviluppo', tokenPlaceholder: 'Incolla il JWT generato dallo script locale',
       useToken: 'Usa token', signOut: 'Esci', workspace: 'Spazio di lavoro',
@@ -26,6 +31,11 @@ void i18n.use(initReactI18next).init({
     en: { translation: {
       appName: 'Comuni', appTagline: 'Digital services for local authorities',
       dashboard: 'Dashboard', protocol: 'Protocol', overview: 'Overview',
+      administration: 'Administration', adminModulesTitle: 'Municipality modules',
+      adminModulesDesc: 'Manage enabled services for your municipality. Authorization is checked on the server.',
+      moduleActive: 'Enabled', moduleInactive: 'Disabled',
+      enableProtocol: 'Enable Protocol', disableProtocol: 'Disable Protocol',
+      moduleUpdated: 'Module configuration updated.',
       services: 'Active services', access: 'Technical access', tokenHelp: 'Enter a signed JWT for your organization. This token is held only in page memory.',
       tokenLabel: 'Development JWT token', tokenPlaceholder: 'Paste a locally generated JWT',
       useToken: 'Use token', signOut: 'Sign out', workspace: 'Workspace',

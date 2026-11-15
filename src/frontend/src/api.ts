@@ -5,6 +5,11 @@ export interface OrganizationContext {
   modules: string[];
 }
 
+export interface AdminModule {
+  key: string;
+  enabled: boolean;
+}
+
 export interface ProtocolRecord {
   id: string;
   subject: string;
@@ -29,4 +34,12 @@ export const getRecords = (token: string) => request<ProtocolRecord[]>('/api/v1/
 export const registerRecord = (token: string, subject: string) =>
   request<ProtocolRecord>('/api/v1/protocol/records', token, {
     method: 'POST', body: JSON.stringify({ subject }),
+  });
+
+export const getAdminModules = (token: string) =>
+  request<AdminModule[]>('/api/v1/admin/modules', token);
+
+export const setAdminModule = (token: string, key: string, enabled: boolean) =>
+  request<AdminModule>(`/api/v1/admin/modules/${encodeURIComponent(key)}`, token, {
+    method: 'PUT', body: JSON.stringify({ enabled }),
   });

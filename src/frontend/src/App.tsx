@@ -2,14 +2,14 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowRight, Building2, CheckCircle2, ClipboardList, Files, Globe2,
-  Layers3, LogOut, Menu, Moon, Plus, ShieldCheck, Sun, X,
+  Layers3, LogOut, Menu, Moon, Plus, Settings2, ShieldCheck, Sun, X,
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { getContext, getRecords, registerRecord, type OrganizationContext, type ProtocolRecord } from './api';
+import { getContext, getRecords, getAdminModules, setAdminModule, registerRecord, type OrganizationContext, type ProtocolRecord, type AdminModule } from './api';
 import { cn } from './lib/utils';
 
-type Page = 'dashboard' | 'protocol';
+type Page = 'dashboard' | 'protocol' | 'admin';
 
 function Brand() {
   const { t } = useTranslation();
@@ -40,7 +40,11 @@ export function App() {
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const [subject, setSubject] = useState('');
   const [notice, setNotice] = useState('');
+  const [adminModules, setAdminModules] = useState<AdminModule[]>([]);
+  const [loadingAdmin, setLoadingAdmin] = useState(false);
+  const [savingAdmin, setSavingAdmin] = useState(false);
   const canWrite = Boolean(context?.roles.some(role => role === 'Admin' || role === 'Officer'));
+  const canAdmin = Boolean(context?.roles.includes('Admin'));
   const protocolEnabled = Boolean(context?.modules.includes('protocol'));
 
   useEffect(() => {
@@ -80,6 +84,40 @@ export function App() {
     if (page === 'protocol' && protocolEnabled) void loadRecords();
   }, [page, protocolEnabled, loadRecords]);
 
+  const loadAdminModules = useCallback(async () => {
+    if (!token || !canAdmin) return;
+    setLoadingAdmin(true);
+    try {
+      setAdminModules(await getAdminModules(token));
+      setError('');
+    } catch {
+      setError(t('serverError'));
+    } finally {
+      setLoadingAdmin(false);
+    }
+  }, [token, canAdmin, t]);
+
+  useEffect(() => {
+    if (page === 'admin' && canAdmin) void loadAdminModules();
+  }, [page, canAdmin, loadAdminModules]);
+
+  async function toggleAdminModule(key: string, enabled: boolean) {
+    if (!token || !canAdmin || savingAdmin) return;
+    setSavingAdmin(true);
+    setError('');
+    try {
+      await setAdminModule(token, key, enabled);
+      const [modules, nextContext] = await Promise.all([getAdminModules(token), getContext(token)]);
+      setAdminModules(modules);
+      setContext(nextContext);
+      setNotice(t('moduleUpdated'));
+    } catch {
+      setError(t('serverError'));
+    } finally {
+      setSavingAdmin(false);
+    }
+  }
+
   function enter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (tokenInput.trim()) {
@@ -94,12 +132,14 @@ export function App() {
     setTokenInput('');
     setContext(null);
     setRecords([]);
+    setAdminModules([]);
     setPage('dashboard');
     setError('');
   }
 
   function navigate(next: Page) {
     if (next === 'protocol' && !protocolEnabled) return;
+    if (next === 'admin' && !canAdmin) return;
     setPage(next);
     setMenuOpen(false);
     setNotice('');
@@ -188,6 +228,11 @@ export function App() {
               <Files className="h-4 w-4" aria-hidden="true" />{t('protocol')}
             </Button>
           )}
+          {canAdmin && (
+            <Button variant={page === 'admin' ? 'default' : 'ghost'} className="justify-start" onClick={() => navigate('admin')}>
+              <Settings2 className="h-4 w-4" aria-hidden="true" />{t('administration')}
+            </Button>
+          )}
         </nav>
         <div className="mt-auto rounded-lg bg-muted p-4">
           <div className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck className="h-4 w-4 text-teal-500" aria-hidden="true" />{t('secure')}</div>
@@ -212,9 +257,9 @@ export function App() {
         <main className="mx-auto max-w-7xl space-y-7 px-4 py-8 sm:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-teal-600 dark:text-teal-400">{t('overview')} / {page === 'dashboard' ? t('dashboard') : t('protocol')}</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight">{page === 'dashboard' ? t('welcome') : t('protocol')}</h1>
-              <p className="mt-2 text-sm text-muted-foreground">{page === 'dashboard' ? t('subtitle') : t('protocolDesc')}</p>
+              <p className="text-sm font-semibold text-teal-600 dark:text-teal-400">{t('overview')} / {page === 'dashboard' ? t('dashboard') : page === 'admin' ? t('administration') : t('protocol')}</p>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight">{page === 'dashboard' ? t('welcome') : page === 'admin' ? t('administration') : t('protocol')}</h1>
+              <p className="mt-2 text-sm text-muted-foreground">{page === 'dashboard' ? t('subtitle') : page === 'admin' ? t('adminModulesDesc') : t('protocolDesc')}</p>
             </div>
             {page === 'protocol' && canWrite && protocolEnabled && (
               <Button onClick={() => setNewRecordOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />{t('register')}</Button>
@@ -243,6 +288,32 @@ export function App() {
                 ) : <Card><CardContent className="pt-5 text-muted-foreground">{t('noModules')}</CardContent></Card>}
               </section>
             </>
+          ) : page === 'admin' ? (
+            <Card className="max-w-3xl">
+              <CardHeader>
+                <CardTitle>{t('adminModulesTitle')}</CardTitle>
+                <p className="text-sm text-muted-foreground">{t('adminModulesDesc')}</p>
+              </CardHeader>
+              <CardContent>
+                {loadingAdmin ? <p className="text-sm text-muted-foreground">{t('loading')}</p> :
+                  adminModules.length === 0 ? <p className="text-sm text-muted-foreground">{t('noModules')}</p> :
+                  <ul className="divide-y divide-border">
+                    {adminModules.map(module => (
+                      <li key={module.key} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                        <div>
+                          <p className="font-semibold">{module.key === 'protocol' ? t('protocol') : module.key}</p>
+                          <p className="text-sm text-muted-foreground">{module.enabled ? t('moduleActive') : t('moduleInactive')}</p>
+                        </div>
+                        <Button disabled={savingAdmin} variant={module.enabled ? 'outline' : 'default'}
+                          aria-label={module.enabled ? t('disableProtocol') : t('enableProtocol')}
+                          onClick={() => void toggleAdminModule(module.key, !module.enabled)}>
+                          {module.enabled ? t('disableProtocol') : t('enableProtocol')}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>}
+              </CardContent>
+            </Card>
           ) : (
             <>
               {newRecordOpen && canWrite && (
