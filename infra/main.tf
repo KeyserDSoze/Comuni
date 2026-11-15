@@ -151,8 +151,8 @@ resource "azurerm_key_vault_secret" "postgres_connection" {
     "Host=%s;Port=5432;Database=%s;Username=%s;Password=%s;SSL Mode=Require",
     azurerm_postgresql_flexible_server.main.fqdn,
     azurerm_postgresql_flexible_server_database.main.name,
-    azurerm_postgresql_flexible_server.main.administrator_login,
-    var.postgres_admin_password
+    "comuni_app_runtime",
+    var.postgres_runtime_password
   )
   key_vault_id = azurerm_key_vault.main.id
 }

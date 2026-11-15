@@ -25,6 +25,12 @@ variable "postgres_admin_password" {
   sensitive   = true
 }
 
+variable "postgres_runtime_password" {
+  description = "Separate least-privileged PostgreSQL runtime role password; provision role after EF migrations."
+  type        = string
+  sensitive   = true
+}
+
 variable "authentication_authority" {
   description = "Trusted OIDC issuer base URL (HTTPS) for JWT validation; must be provisioned separately."
   type        = string

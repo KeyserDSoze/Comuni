@@ -10,4 +10,4 @@ tags = {
   managed_by  = "Terraform"
   environment = "development"
 }
-# postgres_admin_password must be passed as a secret. OIDC authority is not a secret.
+# postgres_admin_password and postgres_runtime_password must be supplied separately as secrets. OIDC authority is not a secret.
