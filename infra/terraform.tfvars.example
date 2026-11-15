@@ -34,3 +34,23 @@ tags = {
 # Values must match Authentication.Authority's HTTPS hostname.
 # Configure GitHub Environment OIDC_BROWSER_* vars; no browser client secret.
 # Until a provider is registered, the UI DISABLES Production login.
+
+
+# Platform Superadmin inventory (#38, ADR 0032): OFF by default.
+# A second SQL role must be owner-provisioned on the SAME PostgreSQL instance
+# in the private VNet. Its full connection string (with restricted username)
+# is created EXTERNALLY as Key Vault secret 'platform-inventory-connection'.
+# Terraform NEVER receives its password or connection string, only optional
+# approved version metadata:
+# platform_inventory_enabled        = false
+# platform_inventory_secret_version = ""
+#
+# The GitHub Actions manual Deploy workflow has input:
+#   enable_platform_inventory = false (default)
+# and reads GitHub Environment variable PLATFORM_INVENTORY_SECRET_VERSION
+# (exact 32-hex Key Vault version, no value). Opt in ONLY after approval,
+# owner-side SQL role verification, OIDC/MFA and two-tenant synthetic smoke
+# readiness. It stages at 0% traffic; stable retains 100%.
+# NEVER put the connection string/role password in tfvars or TF_VAR_*.
+# Future rotations must retain all app-scoped stable secrets until retired
+# under a separate approved plan; the stage gate blocks removal.
