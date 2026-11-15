@@ -143,3 +143,44 @@ export async function getPlatformOrganizations(
   }
   return { organizations: items, nextCursor: result.nextCursor };
 }
+
+
+/** Strictly minimised and bounded municipal audit. No actor, tenant selector,
+ * resource ID, correlation ID or unbounded paging is exposed to the browser.
+ * Authorization comes exclusively from server-side Admin membership + RLS.
+ */
+export interface MunicipalAuditEntry {
+  id: string;
+  action: string;
+  resourceType: string;
+  occurredAt: string;
+}
+
+export async function getMunicipalAudit(token: string): Promise<MunicipalAuditEntry[]> {
+  const response = await fetch('/api/v1/admin/audit', {
+    method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'error',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error('Municipal audit denied');
+  const raw: unknown = await response.json();
+  if (!Array.isArray(raw) || raw.length > 25) throw new Error('Invalid audit response');
+  const items: MunicipalAuditEntry[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object' || Array.isArray(row) ||
+        Object.keys(row).length !== 4 ||
+        !('id' in row) || typeof row.id !== 'string' || !guidD.test(row.id) ||
+        !('action' in row) || typeof row.action !== 'string' ||
+        row.action.length === 0 || row.action.length > 120 ||
+        !('resourceType' in row) || typeof row.resourceType !== 'string' ||
+        row.resourceType.length === 0 || row.resourceType.length > 100 ||
+        !('occurredAt' in row) || typeof row.occurredAt !== 'string' ||
+        !Number.isFinite(Date.parse(row.occurredAt))) {
+      throw new Error('Invalid municipal audit metadata');
+    }
+    items.push({
+      id: row.id, action: row.action,
+      resourceType: row.resourceType, occurredAt: row.occurredAt
+    });
+  }
+  return items;
+}
