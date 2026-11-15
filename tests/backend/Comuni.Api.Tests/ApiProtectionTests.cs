@@ -102,11 +102,18 @@ internal sealed class ScopedApiLimit : IDisposable
 {
     private const string PermitName = "Security__ApiRateLimit__PermitLimit";
     private const string WindowName = "Security__ApiRateLimit__WindowSeconds";
+    private const string ConnectionName = "ConnectionStrings__Default";
     private readonly string? _priorPermit = Environment.GetEnvironmentVariable(PermitName);
     private readonly string? _priorWindow = Environment.GetEnvironmentVariable(WindowName);
+    private readonly string? _priorConnection = Environment.GetEnvironmentVariable(ConnectionName);
 
     public ScopedApiLimit()
     {
+        // Minimal hosting evaluates configuration before ConfigureAppConfiguration runs.
+        // Do not rely on another test factory having initialized this process-wide setting.
+        Environment.SetEnvironmentVariable(ConnectionName,
+            Environment.GetEnvironmentVariable("TEST_DATABASE_CONNECTION")
+            ?? throw new InvalidOperationException("TEST_DATABASE_CONNECTION is required."));
         Environment.SetEnvironmentVariable(PermitName, "3");
         Environment.SetEnvironmentVariable(WindowName, "60");
     }
@@ -115,6 +122,7 @@ internal sealed class ScopedApiLimit : IDisposable
     {
         Environment.SetEnvironmentVariable(PermitName, _priorPermit);
         Environment.SetEnvironmentVariable(WindowName, _priorWindow);
+        Environment.SetEnvironmentVariable(ConnectionName, _priorConnection);
     }
 }
 
