@@ -145,7 +145,12 @@ export function App() {
       if (municipalContext && !operator) {
         setPlatformSession(null);
         setContext(municipalContext);
-        setPage('dashboard');
+        // A language switch revalidates the token, but must not send a
+        // still-authorized Admin away from their municipal admin page.
+        setPage(previous => previous === 'admin' && municipalContext.roles.includes('Admin')
+          ? 'admin'
+          : previous === 'protocol' && municipalContext.modules.includes('protocol')
+            ? 'protocol' : 'dashboard');
         if (window.location.pathname === '/platform')
           window.history.replaceState(window.history.state, '', '/');
         setError('');
@@ -781,7 +786,7 @@ export function App() {
               <CardContent className="space-y-4">
                 {auditLoading ? <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p> :
                   auditError ? (
-                    <div role="alert" className="space-y-3">
+                    <div role="status" className="space-y-3">
                       <p className="text-sm text-rose-600">{t('municipalAuditError')}</p>
                       <Button type="button" variant="outline" onClick={() => void loadMunicipalAudit()}>
                         {t('municipalAuditRetry')}
