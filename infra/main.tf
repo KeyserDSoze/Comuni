@@ -69,6 +69,14 @@ resource "azurerm_postgresql_flexible_server" "main" {
   depends_on                    = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
 
+# pgcrypto provides server-side HMAC verification of signed tenant proofs.
+# PostgreSQL owner must apply migration 202611150006 after extension allowlisting.
+resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
+  name      = "azure.extensions"
+  server_id = azurerm_postgresql_flexible_server.main.id
+  value     = "PGCRYPTO"
+}
+
 resource "azurerm_postgresql_flexible_server_database" "main" {
   name      = "comuni"
   server_id = azurerm_postgresql_flexible_server.main.id
@@ -157,6 +165,12 @@ resource "azurerm_key_vault_secret" "postgres_connection" {
   key_vault_id = azurerm_key_vault.main.id
 }
 
+resource "azurerm_key_vault_secret" "tenant_proof_key" {
+  name         = "tenant-proof-key"
+  value        = var.tenant_proof_key
+  key_vault_id = azurerm_key_vault.main.id
+}
+
 resource "azurerm_role_assignment" "acr_pull" {
   scope                = azurerm_container_registry.main.id
   role_definition_name = "AcrPull"
@@ -198,6 +212,12 @@ resource "azurerm_container_app" "main" {
     key_vault_secret_id = azurerm_key_vault_secret.postgres_connection.versionless_id
   }
 
+  secret {
+    name                = "tenant-proof-key"
+    identity            = azurerm_user_assigned_identity.app.id
+    key_vault_secret_id = azurerm_key_vault_secret.tenant_proof_key.versionless_id
+  }
+
   template {
     min_replicas = 0
     max_replicas = 2
@@ -215,6 +235,10 @@ resource "azurerm_container_app" "main" {
       env {
         name        = "ConnectionStrings__Default"
         secret_name = "postgres-connection"
+      }
+      env {
+        name        = "Security__TenantProofKey"
+        secret_name = "tenant-proof-key"
       }
       env {
         name  = "Authentication__Mode"
