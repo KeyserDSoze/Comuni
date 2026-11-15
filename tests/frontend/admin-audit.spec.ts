@@ -80,3 +80,14 @@ test('Audit fallito non mostra righe precedenti e offre un retry manuale', async
   await page.getByRole('button', { name: 'Esci' }).click();
   await expect(page.getByRole('heading', { name: 'Attività recenti del Comune' })).toHaveCount(0);
 });
+
+
+test('Admin vede una comunicazione chiara sulla tracciatura della consultazione senza identità o token', async ({ page }) => {
+  await open(page);
+  await page.getByRole('navigation').getByRole('button', { name: 'Amministrazione' }).click();
+  await expect(page.getByText('Le consultazioni del registro sono registrate per sicurezza.')).toBeVisible();
+  await page.getByRole('button', { name: 'Lingua' }).click();
+  await expect(page.getByText('Audit register consultations are logged for security.')).toBeVisible();
+  await expect(page.getByText('audit-admin')).toHaveCount(0);
+  await expect(page.getByText('synthetic-test-token')).toHaveCount(0);
+});
