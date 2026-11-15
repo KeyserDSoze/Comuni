@@ -280,3 +280,31 @@ Un codice di uscita non zero blocca la procedura: non ignorare errori con `|| tr
 La migration additiva `202611150010_PlatformOperatorIdentityBoundary` crea `platform.platform_operators` **vuota** (PK `identity_issuer, subject`, `is_active` false) e la funzione booleana `platform.is_active_platform_operator(text,text)` con `SECURITY DEFINER`. Va applicata con il **migration/schema owner** prima di avviare il nuovo backend; dopo le migrazioni rieseguire **`scripts/postgres/provision-runtime-role.sql`** per concedere solo EXECUTE della funzione al ruolo runtime, non SELECT/UPDATE/INSERT sulla tabella. Non inserire seed operatori in Azure o in SQL condiviso: **l'onboarding con verifica IdP, approval esterna e audit della nomina non è ancora implementato**. L'assenza di operatori attivi deve produrre 403, non attivare un fallback di sviluppo.
 
 L'API espone per ora solo `GET /api/v1/platform/session` che risponde al proprio stato con `role=Superadmin`, senza accesso alle organizzazioni o privilegio di impersonificazione. È obbligatorio un JWT OIDC verificato senza il claim `organization_id`; il medesimo token non dà accesso alle API comunali. La validazione è stata testata contro un IdP RSA **simulato**: nessuna registrazione IdP live, policy MFA o token audience dedicata sono state convalidate. Prima di realizzare azioni cross-organization occorrono threat model, approvazione Superadmin, session management, RBAC/audit e test RLS/Azure.
+
+
+## Enrollment e revoca owner-only operatori Superadmin (#35 / ADR 0029)
+
+La migration `202611150011_PlatformOperatorGlobalAudit` aggiunge un UUID pseudonimo `operator_id` a `platform.platform_operators` e una tabella `platform.platform_operator_audit_events` **senza organization_id**. Ogni evento globale contiene solo actor proprietario DB, azione, tipo risorsa, UUID casuale stabile, riferimento al ticket e timestamp. Trigger PostgreSQL rifiutano UPDATE/DELETE/TRUNCATE. Non c'è una API di assegnazione del ruolo Superadmin; la tabella resta priva di operatori reali per default. Dopo migrazioni rieseguire `scripts/postgres/provision-runtime-role.sql`: `comuni_app_runtime` non ottiene SELECT/INSERT/UPDATE/DELETE su roster e audit globale, soltanto il predicato booleano dell'ADR 0028.
+
+**Gate obbligatorio non automatizzato.** Prima di qualsiasi esecuzione in un ambiente con operatori veri: verificare responsabilità piattaforma, incarico nominale autorizzato, account presso IdP **affidabile** e `iss` HTTPS + `sub` esatti (non email/nome), OIDC discovery e audience API, MFA applicata al provider, identità del richiedente, secondo approvatore **indipendente**, change ticket distinto per ogni variazione e piano incident/recovery. Registrare evidenze nel change esterno senza inserirle nel repository; un valore impostato nelle variabili non prova l'approvazione. Non eseguire questo strumento in Azure live prima della verifica di accessi e network sicuro: il repository non ha ancora collegato IdP, Azure o un workflow di approvazione reali.
+
+Nel runner privato con accesso PostgreSQL/TLS, owner di `platform.platform_operators` e `platform.platform_operator_audit_events`, predisporre dal vault cinque variabili senza stampare dati nel log/shell history:
+
+- `COMUNI_PLATFORM_OPERATOR_IDENTITY_ISSUER`: `iss` esatto, formato HTTPS canonico verificato presso l'IdP.
+- `COMUNI_PLATFORM_OPERATOR_SUBJECT`: `sub` esatto del candidato, case-sensitive e verificato.
+- `COMUNI_PLATFORM_OPERATOR_ACTION`: `enroll` (prima concessione o riattivazione approvata) oppure `revoke`.
+- `COMUNI_PLATFORM_OPERATOR_CHANGE_TICKET`: change approvato **nuovo per ogni effettiva transizione**, senza PII.
+- `COMUNI_PLATFORM_OPERATOR_APPROVER`: alias di un secondo approvatore esterno (non un'autenticazione crittografica).
+
+Con environment già preparato dal runner, senza `set -x`, `psql -a`, `psql -e` né password in argomenti CLI:
+
+```bash
+psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+  -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/manage-platform-operator.sql
+```
+
+Il codice di uscita non zero interrompe l'operazione. `revoke` su operatore inesistente, `iss`/subject/action o approvazioni malformati e un ticket riutilizzato per cambiare stato falliscono senza modifiche. Il primo `enroll` crea il record `is_active=TRUE`; il `revoke` lo disabilita, un successivo `enroll` **con nuovo change** lo riattiva. Nessun retry dello stato già raggiunto crea altri audit. La transazione serializzata con lock advisory `iss+sub` + row lock assicura audit e modifica atomici.
+
+**Verifica post-change:** in sessione owner autorizzata e senza esportare identità, confermare un solo record corrispondente alla coppia `iss+sub`, stato attivo atteso e **esattamente un** evento aggiuntivo per transizione (`platform.operator.enrolled/revoked/reactivated`) con `resource_id=operator_id` e `correlation_id=operator:<ticket>`; la tabella globale non contiene issuer, sub o organizzazioni fittizie. Su IdP di test, un token OIDC privo di `organization_id` ottiene 200 da `/api/v1/platform/session` solo se attivo, poi 403 dopo revoca, senza accesso a `/api/v1/context`. L'IdP reale potrebbe mantenere token esistenti: la revoca DB blocca soltanto le **nuove richieste autorizzate**, non revoca le sessioni provider né interrompe le richieste in corso.
+
+**Incident:** su sospetto account compromesso, sospendere accessi IdP secondo procedura esterna; documentare l'incidente, usare il comando `revoke` con ticket indipendente e conservare il log SQL. Non correggere audit esistenti via UPDATE/DELETE, disabilitare trigger o attribuire la revoca a un Comune. Non dichiarare retention normativa, immutabilità contro superuser o conformità GDPR/AgID.
