@@ -42,6 +42,7 @@ def fixture_plan():
         "secret": [old_secret, candidate_secret],
         "template": [{
             "revision_suffix": CANDIDATE_REVISION,
+            "min_replicas": 1,
             "container": [{
                 "env": [
                     {"name": "Security__TenantProofKey", "secret_name": candidate_secret["name"]},
