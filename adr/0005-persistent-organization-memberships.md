@@ -20,3 +20,7 @@ L'unica API e il database rimangono invariati nella loro forma architetturale; l
 - Non è un IAM completo: creazione/mutazione membership e registrazione identità sono bloccate fino a OIDC, audit e API di amministrazione autorizzate.
 - `Roles` è un insieme applicativo nel DB; in futuro servono permessi granulari per moduli e workflow.
 - Isolamento tenant a livello query filter applicativo, non PostgreSQL RLS; resta aperta issue #5.
+
+## Evoluzione ADR 0021
+
+L'ADR 0021 introduce gestione per Comune delle membership **Reader/Officer** da parte di un Admin esistente, con audit transazionale e policy RLS restrittive contro l'inserimento di Admin da runtime. La prima/ultima membership Admin non è gestibile tramite questa slice.

@@ -19,3 +19,7 @@ React mostra la sezione Amministrazione solo per utenti con ruolo Admin ricevuto
 - La verifica dell'identità usa il modello OIDC validazione backend (ADR 0007), ma login e provisioning reali restano aperti nella #2.
 - Gestione di conflitti concorrenti, ottimistic locking e notifiche di modifica tra sessioni possono essere aggiunti quando più amministratori operano contemporaneamente.
 - I trigger audit bloccano alterazioni ordinarie ma non garantiscono immutabilità contro privilegi DBA; vedere #4/#5.
+
+## Evoluzione ADR 0021
+
+La console Admin della stessa React SPA include ora anche gestione membership Reader/Officer, indipendente dalle feature flag di modulo. L'API usa la stessa policy Admin e il medesimo contesto JWT verificato, senza scope cross-organization.

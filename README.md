@@ -77,3 +77,7 @@ La revisione candidata (0% traffico ordinario) riceve una **label immutabile** p
 ## Accesso browser OIDC con PKCE (#26)
 
 Il frontend ora include un **Authorization Code + PKCE S256** per client OIDC pubblico, configurabile dalla **stessa API** e senza client secret. Il campo JWT manuale è disponibile **solo** in DevelopmentJwt; in Production/Oidc senza provider completo la UI impedisce l'accesso. Token di accesso solo in RAM, stato PKCE a vita breve in sessionStorage. [ADR 0020](adr/0020-browser-oidc-pkce.md) e [runbook](docs/development.md). Non esiste ancora un IdP reale collegato o un BFF: issue #2 resta aperta; nessun login SPID/CIE o conformità verificata.
+
+## Gestione membership comunali (slice #27)
+
+Nell'area **Amministrazione** l'Admin della propria organization può elencare membership e gestire `Reader`/`Officer` (attivazione/disattivazione), con controlli lato API, audit atomico e policy RLS PostgreSQL che impedisce all'account runtime di scrivere ruoli `Admin` anche via SQL diretto. [ADR 0021](adr/0021-municipal-membership-administration.md), [API](docs/api.md). La gestione degli Admin e il binding reale con l'IdP restano da implementare (#2/#3/#10): **non è provisioning di identità** né rollout pronto per dati reali.

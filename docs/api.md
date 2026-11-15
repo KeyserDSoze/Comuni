@@ -48,3 +48,17 @@ API incluse risposte 401/403/429 sono `Cache-Control: no-store`. Gli header di p
 La risposta **non** contiene token, client secret, organization_id, ruoli o credenziali. Con `DevelopmentJwt` (solo Development/Testing) restituisce `{"mode":"DevelopmentJwt","enabled":false,...}` e il frontend mostra il form JWT tecnico. In `Oidc` senza configurazione browser completa restituisce `{"mode":"Oidc","enabled":false,...}`: il form JWT è **nascosto**, e il login è esplicitamente non configurato. Quando è abilitato, il browser inizia un Authorization Code flow con PKCE `S256`, scambia il codice **direttamente** con il token endpoint dell'IdP per un `access_token` e lo usa sulle API esistenti `Authorization: Bearer`. Il backend rimane l'unica fonte di ruoli e dell'organization.
 
 Per attivare un client browser: `Authentication:BrowserClientId`, `Authentication:BrowserAuthorizationEndpoint`, `Authentication:BrowserTokenEndpoint`, `Authentication:BrowserScope` devono essere **tutti** valorizzati e gli endpoint devono essere HTTPS sullo stesso host di `Authentication:Authority`; `BrowserScope` deve includere `openid` e uno scope API delegato senza `offline_access`. Non esiste né è accettato alcun `Authentication:BrowserClientSecret`. La risposta OAuth non costituisce autorizzazione: la API valida ancora JWT RS256 (issuer, aud, firma, exp) e membership PostgreSQL in ogni richiesta. L'endpoint pubblico è soggetto al rate limiter della API.
+
+## Gestione membership comunali — Reader/Officer (ADR 0021, #27)
+
+Gli endpoint di gestione sono accessibili **solo** a una membership `Admin` **attiva nel database** del Comune estratto dal JWT verificato; lo stato di sospensione dell'ente rimane un blocco per tutta l'API. Il ruolo JWT non conferisce autorizzazioni.
+
+| Metodo | Endpoint | Accesso | Risposta |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/admin/memberships` | Admin Comune | `[{ "subject": "idp-sub", "role": "Reader", "enabled": true }, ...]`, include Admin in sola lettura |
+| `PUT` | `/api/v1/admin/memberships/Reader` | Admin Comune | `{"subject":"idp-sub","enabled":true/false}` |
+| `PUT` | `/api/v1/admin/memberships/Officer` | Admin Comune | stesso contratto |
+
+Il `PUT` attiva/crea o disattiva la membership per il `sub` **esatto, case-sensitive** fornito dal gestore IdP. I cambiamenti sono idempotenti; disattivare una membership assente restituisce `404`, riattivare una esistente aggiorna lo stato. Input mancante/malformato e ruoli `Admin`, `Superadmin` o arbitrari restituiscono `400`; anonimo `401`, Reader/Officer senza Admin nel DB `403`. Il body non può scegliere `organization_id` o `actor`: anche se tali proprietà sono presenti, non cambiano il contesto derivato dal JWT. Subject 1–160 caratteri, senza controlli o spazi esterni.
+
+L'Admin **non può assegnare, disattivare o riattivare il ruolo Admin** tramite questi endpoint. La gestione del primo/ultimo amministratore è un workflow separato da progettare con elevazione, verifica IdP e audit (epiche #3/#10). Il comando assegna **solo una riga di membership**: non crea una persona nel provider esterno e **non verifica ancora l'esistenza del sub**; non usare per concedere privilegi a identità non verificate.
