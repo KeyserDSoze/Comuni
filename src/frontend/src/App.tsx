@@ -782,6 +782,7 @@ export function App() {
               <CardHeader>
                 <h2 className="text-lg font-semibold">{t('municipalAuditTitle')}</h2>
                 <p className="text-sm text-muted-foreground">{t('municipalAuditDesc')}</p>
+                <p className="text-xs text-muted-foreground">{t('municipalAuditConsultationsLogged')}</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 {auditLoading ? <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p> :
