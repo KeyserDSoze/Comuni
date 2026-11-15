@@ -14,5 +14,5 @@
 ## Comandi
 
 - Backend: `dotnet test tests/backend/Comuni.UnitTests/Comuni.UnitTests.csproj` e `dotnet test tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj` (secondo comando richiede `TEST_DATABASE_CONNECTION`).
-- Frontend: `cd src/frontend && npm ci && npm run build && npx playwright test`.
+- Frontend: `npm install && npm run build --workspace @comuni/frontend && npm run test:e2e --workspace @comuni/frontend`.
 - Locale: `docker compose -f docker/compose.yml up --build`.

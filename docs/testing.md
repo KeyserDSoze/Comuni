@@ -19,5 +19,5 @@ Il bootstrap è sviluppato in due incrementi registrati su `main`: specifiche/te
 ## Esecuzione
 `dotnet test tests/backend/Comuni.UnitTests` per test rapidi.
 `TEST_DATABASE_CONNECTION="Host=localhost;Port=5432;Database=comuni_test;Username=comuni;Password=..." dotnet test tests/backend/Comuni.Api.Tests` per integration con PostgreSQL reale.
-`cd src/frontend && npm ci && npx playwright install --with-deps chromium && npm run build && npx playwright test`.
+`npm install && npx playwright install --with-deps chromium && npm run build --workspace @comuni/frontend && npm run test:e2e --workspace @comuni/frontend`.
 GitHub Actions ripete queste verifiche con PostgreSQL service.

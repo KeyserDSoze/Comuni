@@ -25,3 +25,7 @@ Una piccola vertical slice verificabile: autenticazione JWT, organization contex
 Requisiti: Docker + Compose. Usare `docker compose -f docker/compose.yml up --build`, quindi aprire `http://localhost:8080`. Per ottenere un token *solo di sviluppo* vedere `docs/development.md`. I test backend richiedono .NET 10 e PostgreSQL; quelli E2E richiedono Node e Playwright.
 
 L'accesso applicativo definitivo tramite un identity provider OIDC e SPID/CIE non è incluso in questo primo incremento; nessuna credenziale predefinita è autorizzata in produzione.
+
+## Roadmap e limiti
+
+La vertical slice attuale è **dimostrativa, non pronta per dati comunali reali**. Consultare [mappa domini](docs/domains.md), [architettura](docs/architecture.md), [sicurezza](docs/security.md) e [deploy Azure](docs/deployment.md). Per il frontend usare npm workspace dalla root: `npm install && npm run build --workspace @comuni/frontend`.

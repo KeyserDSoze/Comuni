@@ -1,0 +1,29 @@
+# Architettura implementata — prima vertical slice
+
+```mermaid
+flowchart LR
+    B["Browser / React PWA"] -->|"HTTPS / JWT"| A["Unica ASP.NET Core API"]
+    A --> C["Business: ProtocolService"]
+    C --> D["Domains: ProtocolRecord"]
+    C --> I["Infrastructure: EF Core repositories"]
+    I --> P[("PostgreSQL")]
+    A --> O["OrganizationDirectory / Feature flags"]
+    O --> I
+    A --> S["Static React assets"]
+```
+
+## Confini e dipendenze
+- `Comuni.Domains`: dominio puro, nessuna dipendenza EF o ASP.NET.
+- `Comuni.Business`: interfacce di repository/directory e use case; dipende solo da Domains.
+- `Comuni.Infrastructures`: PostgreSQL EF Core, query filters, repository e migrazioni.
+- `Comuni.Api`: composition root, JWT, policies, endpoints REST OpenAPI, host per SPA.
+
+## Flusso sicurezza
+1. Middleware valida firma HS256, issuer, audience e lifetime.
+2. Policy `Read` / `Write` controlla ruolo e GUID `organization_id`.
+3. `HttpCurrentOrganization` estrae organization solo dal Principal autenticato.
+4. `ProtocolService` verifica `organization_modules` nel DB.
+5. Repository esprime `organizationId` nella query e EF impone query filter; SaveChanges rifiuta mismatch tenant.
+6. Frontend riceve il contesto `/api/v1/context` e mostra solo i moduli abilitati (non è un confine di sicurezza).
+
+Il database è condiviso con schemi `platform` e `protocol`. Il bootstrap migra e semina due organization solo in ambiente Development. In produzione non c'è seed automatico. Le operazioni admin/gestione organization richiederanno accessi separati e audit dedicato.
