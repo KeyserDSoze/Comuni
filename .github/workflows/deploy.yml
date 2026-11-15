@@ -81,3 +81,19 @@ jobs:
             --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID"
           terraform -chdir=infra apply -input=false -auto-approve deploy.tfplan
+      - name: Verify healthy candidate and unchanged production traffic (read-only)
+        env:
+          AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
+          STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
+          CANDIDATE_TENANT_PROOF_KEY_ID: ${{ vars.TENANT_PROOF_KEY_ID }}
+          CANDIDATE_TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
+        run: |
+          python3 scripts/azure/verify-staged-revisions.py \
+            --app "${AZURE_PREFIX}-app" \
+            --resource-group "${AZURE_PREFIX}-rg" \
+            --stable-revision "$STABLE_REVISION_SUFFIX" \
+            --candidate-revision "$TF_VAR_candidate_revision_suffix" \
+            --expected-image "$TF_VAR_image" \
+            --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID" \
+            --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION"
+
