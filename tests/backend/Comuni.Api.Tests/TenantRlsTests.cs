@@ -21,6 +21,53 @@ public sealed class TenantRlsTests
         ?? throw new InvalidOperationException("TEST_DATABASE_CONNECTION is required.");
 
     [Fact]
+    public async Task SQL_injection_cannot_switch_tenants_by_setting_unsigned_GUC_or_forging_proof()
+    {
+        var first = await SeedAsync();
+        var second = await SeedAsync();
+        await using var connection = new NpgsqlConnection(Runtime);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        // Reproduces the existing vulnerability: no cryptographic proof of the tenant.
+        await using (var spoof = new NpgsqlCommand(
+            "SELECT set_config('comuni.organization_id', @org, true)", connection, transaction))
+        {
+            spoof.Parameters.AddWithValue("org", second.ToString("D"));
+            await spoof.ExecuteScalarAsync();
+        }
+        Assert.Equal(0L, await CountAsync(connection, transaction, "protocol.records"));
+
+        var fake = $"{second:N}|{DateTimeOffset.UtcNow.AddMinutes(2).ToUnixTimeSeconds()}|{Guid.NewGuid():N}|{new string('0', 64)}";
+        await using (var spoof = new NpgsqlCommand(
+            "SELECT set_config('comuni.tenant_assertion', @token, true)", connection, transaction))
+        {
+            spoof.Parameters.AddWithValue("token", fake);
+            await spoof.ExecuteScalarAsync();
+        }
+        Assert.Equal(0L, await CountAsync(connection, transaction, "platform.organizations"));
+
+        await SelectTenantAsync(connection, transaction, first);
+        // The old unsigned organization-id setting cannot override a valid signed proof.
+        await using (var spoof = new NpgsqlCommand(
+            "SELECT set_config('comuni.organization_id', @org, true)", connection, transaction))
+        {
+            spoof.Parameters.AddWithValue("org", second.ToString("D"));
+            await spoof.ExecuteScalarAsync();
+        }
+        Assert.Equal(1L, await CountAsync(connection, transaction, "platform.organizations"));
+
+        // Untrusted runtime SQL cannot read the DB-side HMAC signing material.
+        await using (var secret = new NpgsqlCommand(
+            "SELECT signing_key FROM platform.tenant_proof_secret", connection, transaction))
+        {
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                () => secret.ExecuteScalarAsync());
+            Assert.Equal("42501", exception.SqlState);
+        }
+    }
+
+    [Fact]
     public async Task All_five_tenant_owned_tables_have_RLS_enabled()
     {
         await using var connection = new NpgsqlConnection(Owner);
@@ -152,9 +199,12 @@ public sealed class TenantRlsTests
     private static async Task SelectTenantAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, Guid organization)
     {
+        var signer = new TenantProofSigner(
+            Environment.GetEnvironmentVariable("Security__TenantProofKey")
+            ?? throw new InvalidOperationException("Security__TenantProofKey is required."));
         await using var cmd = new NpgsqlCommand(
-            "SELECT set_config('comuni.organization_id', @tenant, true)", conn, tx);
-        cmd.Parameters.AddWithValue("tenant", organization.ToString("D"));
+            "SELECT set_config('comuni.tenant_assertion', @token, true)", conn, tx);
+        cmd.Parameters.AddWithValue("token", signer.Create(organization));
         await cmd.ExecuteScalarAsync();
     }
 
