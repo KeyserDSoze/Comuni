@@ -35,11 +35,19 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def validate_candidate_url(url, app, label):
+def validate_candidate_url(url, app, label, environment_domain):
     if not isinstance(app, str) or not HOST_SEGMENT.fullmatch(app) or "--" in app:
         raise SmokeRejected("Invalid Container App name")
     if not isinstance(label, str) or not REVISION.fullmatch(label):
         raise SmokeRejected("Invalid immutable revision label")
+    if (
+        not isinstance(environment_domain, str)
+        or not re.fullmatch(
+            r"[a-z0-9-]+(?:\.[a-z0-9-]+){1,}\.azurecontainerapps\.io\Z",
+            environment_domain,
+        )
+    ):
+        raise SmokeRejected("Invalid approved Azure environment domain")
     try:
         parsed = urllib.parse.urlsplit(url)
         host = parsed.hostname
@@ -49,8 +57,7 @@ def validate_candidate_url(url, app, label):
         raise SmokeRejected("Invalid candidate URL")
     if not (
         parsed.scheme == "https" and parsed.netloc == host and host
-        and host.startswith(app + "---" + label + ".")
-        and host.endswith(".azurecontainerapps.io")
+        and host == app + "---" + label + "." + environment_domain
         and len(host.split(".")) >= 4
         and parsed.path in ("", "/") and not parsed.query and not parsed.fragment
         and parsed.username is None and parsed.password is None
@@ -102,9 +109,9 @@ def _get(origin, path, token, opener):
     return status, result
 
 
-def run_smoke(*, url, app, label, org_a, org_b, marker_a, marker_b,
+def run_smoke(*, url, app, label, environment_domain, org_a, org_b, marker_a, marker_b,
               token_a, token_b, opener):
-    origin = validate_candidate_url(url, app, label)
+    origin = validate_candidate_url(url, app, label, environment_domain)
     try:
         expected_a = str(uuid.UUID(org_a))
         expected_b = str(uuid.UUID(org_b))
@@ -170,6 +177,10 @@ def main():
     parser.add_argument("--candidate-url", required=True)
     parser.add_argument("--app", required=True)
     parser.add_argument("--revision-label", required=True)
+    parser.add_argument(
+        "--environment-domain", required=True,
+        help="Approved Azure Container Apps environment default domain, not a URL"
+    )
     parser.add_argument("--org-a", required=True)
     parser.add_argument("--org-b", required=True)
     parser.add_argument("--marker-a", required=True)
@@ -186,6 +197,7 @@ def main():
         )
         run_smoke(
             url=args.candidate_url, app=args.app, label=args.revision_label,
+            environment_domain=args.environment_domain,
             org_a=args.org_a, org_b=args.org_b,
             marker_a=args.marker_a, marker_b=args.marker_b,
             token_a=token_a, token_b=token_b, opener=opener,
