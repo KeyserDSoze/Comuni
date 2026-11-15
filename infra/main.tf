@@ -241,6 +241,10 @@ resource "azurerm_container_app" "main" {
         secret_name = "tenant-proof-key"
       }
       env {
+        name  = "Security__TenantProofKeyId"
+        value = var.tenant_proof_key_id
+      }
+      env {
         name  = "Authentication__Mode"
         value = "Oidc"
       }

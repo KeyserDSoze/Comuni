@@ -20,6 +20,7 @@ jobs:
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       TF_VAR_tenant_proof_key: ${{ secrets.TENANT_PROOF_KEY }}
+      TF_VAR_tenant_proof_key_id: ${{ vars.TENANT_PROOF_KEY_ID }}
       TF_VAR_authentication_authority: ${{ vars.OIDC_AUTHORITY }}
       TF_VAR_authentication_audience: ${{ vars.OIDC_AUDIENCE }}
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}

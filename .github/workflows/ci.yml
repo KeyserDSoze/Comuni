@@ -50,6 +50,21 @@ jobs:
           PGPASSWORD: integration-only-password
           TENANT_PROOF_KEY: ci-test-only-hmac-key-for-comuni-rls-2026-11
         run: psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/provision-tenant-proof.sql
+      - name: Verify idempotent key staging and irreversible retirement (test-only)
+        env:
+          PGPASSWORD: integration-only-password
+          TENANT_PROOF_KEY_ID: ci-rotate-v2
+          TENANT_PROOF_KEY: ci-versioned-key-staging-only-2026-11
+          TENANT_PROOF_RETIRE_KEY_ID: ci-rotate-v2
+          TENANT_PROOF_GRACE_SECONDS: "0"
+        run: |
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql
+          psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/retire-tenant-proof-key.sql
+          if psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql; then
+            echo "ERROR: a retired key was reactivated" >&2
+            exit 1
+          fi
       - name: API integration and isolation tests
         run: dotnet test tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj --configuration Release
 

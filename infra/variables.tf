@@ -31,6 +31,16 @@ variable "postgres_runtime_password" {
   sensitive   = true
 }
 
+variable "tenant_proof_key_id" {
+  description = "Version of the HMAC tenant proof signer; empty means legacy compatibility. Provision and authorize this ID in PostgreSQL BEFORE switching API replicas."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.tenant_proof_key_id == "" || can(regex("^[a-z][a-z0-9_-]{0,31}$", var.tenant_proof_key_id))
+    error_message = "tenant_proof_key_id must be blank or 1-32 lowercase ASCII letters, numbers, underscores or hyphens, starting with a letter."
+  }
+}
+
 variable "tenant_proof_key" {
   description = "Random secret of 32+ UTF-8 bytes shared by the API signer and PostgreSQL verifier, provisioned after EF migration. Rotate together."
   type        = string

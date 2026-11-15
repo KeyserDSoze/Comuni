@@ -27,3 +27,7 @@ Test rapidi: `dotnet test tests/backend/Comuni.UnitTests/Comuni.UnitTests.csproj
 ## Credenziale locale di verifica RLS
 
 Generare e configurare in `docker/.env` anche `TENANT_PROOF_KEY` (minimo 32 byte casuali, ad esempio `openssl rand -hex 32`). Docker Compose la passa soltanto al backend, **non** al frontend. In Development il bootstrap EF migra e memorizza la chiave nella tabella privata dopo `MigrateAsync`; in Production il bootstrap è esterno e il ruolo runtime non può mai scriverla. Dopo la modifica della chiave locale, riavviare il servizio Development, che aggiorna la chiave nel database demo. Vedere ADR 0013; non utilizzare la chiave di esempio in produzione.
+
+## Verifica locale delle chiavi tenant versionate
+
+`Security__TenantProofKeyId` è facoltativo; quando manca, il signer emette prove legacy a quattro campi (soltanto in presenza di un record DB `legacy` autorizzato). Per provare il nuovo protocollo usare un database migrato, effettuare lo staging con `TENANT_PROOF_KEY_ID` e `TENANT_PROOF_KEY` nell'ambiente del processo owner e lanciare `psql -f scripts/postgres/stage-tenant-proof-key.sql`. Impostare poi entrambe le variabili `Security__TenantProofKeyId`/`Security__TenantProofKey` nell'API. Non fare test con segreti di produzione. La CI copre staging ripetuto, revoca, unit tests del signer e verifier sotto PostgreSQL 17.

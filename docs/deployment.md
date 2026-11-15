@@ -71,3 +71,15 @@ L'API di produzione ora **fallisce all'avvio** se `Security:TenantProofKey` manc
 4. Attivare la versione dell'API che usa la medesima chiave e verificare in smoke test la lettura A/B, RLS senza proof, spoof con proof invalida, audit transazionale e riuso connessioni.
 
 **Rotazione:** scrivere una nuova chiave DB mentre è attiva la vecchia app provoca richieste non autorizzate; fare rolling update del segreto senza protocollo di doppia chiave non è zero-downtime. Richiede una procedura versionata e testata (issue #18/#6) prima del go-live. **Mai** distribuire la chiave in source, tfvars, browser o log; usare secret store e TLS. Prove attuali sono su PostgreSQL 17 in CI, non su Azure reale.
+
+## Stage/grace/revoke delle versioni RLS (ADR 0014 / issue #20)
+
+Questa procedura stabilisce l'ordine **tecnico**, non è ancora un runbook Azure verificato. Richiede un runner con `psql` e connessione privata TLS da un'identità schema-owner. Esclude il login runtime e non deve stampare i segreti.
+
+1. Eseguire migration `202611150007_VersionedTenantProofKeys` prima di aggiornare le API. La chiave precedente viene importata sotto l'ID `legacy`; verificare che le API esistenti continuino ad accedere ai soli tenant autorizzati.
+2. Generare fuori dal repository una nuova chiave random da almeno 32 byte e assegnare un ID univoco (es. `rotate_2026_11`). Popolare `TENANT_PROOF_KEY_ID` e `TENANT_PROOF_KEY` con il secret store autorizzato, poi eseguire `psql ... -f scripts/postgres/stage-tenant-proof-key.sql` come owner. Lo script non sovrascrive o riattiva gli ID esistenti: se fallisce, **non** proseguire il rollout.
+3. Distribuire la nuova configurazione API `Security__TenantProofKeyId` e `Security__TenantProofKey` da Key Vault con approvazione. Anche la variabile Terraform `tenant_proof_key_id` e GitHub Environment `TENANT_PROOF_KEY_ID` devono coincidere. Verificare ogni replica ed endpoint API, con monitoraggio di 403/5xx e accessi RLS.
+4. Solo dopo la verifica del rollout, scegliere un grace in secondi (da 0 a 3600), più lungo della vita delle proof residue (3 minuti), e fornire `TENANT_PROOF_RETIRE_KEY_ID=legacy`, `TENANT_PROOF_GRACE_SECONDS=...`; eseguire `psql ... -f scripts/postgres/retire-tenant-proof-key.sql`. Lo script **accorcia soltanto** la finestra e con `0` revoca subito. Un ID scaduto/revocato non può essere riattivato dagli script.
+5. Verificare con test di negazione che la vecchia proof ritorni zero righe e quella nuova conservi il proprio tenant. Non includere mai proof/secret nei log. In caso di problemi **prima della revoca**, rollback dell'app alla precedente versione mentre la chiave legacy è ancora valida. **Dopo la revoca**, rollback richiede un nuovo key ID/staging e un deployment coordinato; non reinstallare ciecamente il verifier legacy.
+
+**Gap P0 #19/#6:** runner Azure privato, doppia revisione attiva, gestione Key Vault e Terraform State sensibile, test carico multi-replica e connessioni pooled, controllo del clock skew, allarmi e procedura di rollback devono essere realizzati e collaudati prima di qualunque produzione reale.
