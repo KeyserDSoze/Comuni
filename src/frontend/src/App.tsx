@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, registerRecord, getPlatformSession, getPlatformOrganizations, PlatformInventoryHttpError,
-  type PlatformOrganization, type PlatformOrganizationsPage, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership } from './api';
+import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, getMunicipalAudit, registerRecord, getPlatformSession, getPlatformOrganizations, PlatformInventoryHttpError,
+  type PlatformOrganization, type PlatformOrganizationsPage, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership, type MunicipalAuditEntry } from './api';
 import { cn } from './lib/utils';
 import {
   beginOidcLogin, captureOidcCallback, clearPendingOidc,
@@ -64,6 +64,9 @@ export function App() {
   const [memberSubject, setMemberSubject] = useState('');
   const [memberRole, setMemberRole] = useState<'Reader' | 'Officer'>('Reader');
   const [savingMembership, setSavingMembership] = useState(false);
+  const [auditEvents, setAuditEvents] = useState<MunicipalAuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState(false);
   const canWrite = Boolean(context?.roles.some(role => role === 'Admin' || role === 'Officer'));
   const canAdmin = Boolean(context?.roles.includes('Admin'));
   const protocolEnabled = Boolean(context?.modules.includes('protocol'));
@@ -300,6 +303,35 @@ export function App() {
     if (page === 'admin' && canAdmin) void loadAdminModules();
   }, [page, canAdmin, loadAdminModules]);
 
+  const loadMunicipalAudit = useCallback(async () => {
+    if (!token || !canAdmin) {
+      setAuditEvents([]);
+      setAuditError(false);
+      return;
+    }
+    setAuditLoading(true);
+    setAuditError(false);
+    // Clear old metadata before revalidation, never retain stale audit data
+    // from an earlier Admin context or a failed request.
+    setAuditEvents([]);
+    try {
+      setAuditEvents(await getMunicipalAudit(token));
+    } catch {
+      setAuditEvents([]);
+      setAuditError(true);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [token, canAdmin]);
+
+  useEffect(() => {
+    if (page === 'admin' && canAdmin) void loadMunicipalAudit();
+    else {
+      setAuditEvents([]);
+      setAuditError(false);
+    }
+  }, [page, canAdmin, loadMunicipalAudit]);
+
   async function toggleAdminModule(key: string, enabled: boolean) {
     if (!token || !canAdmin || savingAdmin) return;
     setSavingAdmin(true);
@@ -372,6 +404,9 @@ export function App() {
     setRecords([]);
     setAdminModules([]);
     setAdminMemberships([]);
+    setAuditEvents([]);
+    setAuditError(false);
+    setAuditLoading(false);
     setMemberSubject('');
     setPage('dashboard');
     setError('');
@@ -736,6 +771,48 @@ export function App() {
                       </li>
                     ))}
                   </ul>}
+              </CardContent>
+            </Card>
+            <Card className="max-w-3xl">
+              <CardHeader>
+                <h2 className="text-lg font-semibold">{t('municipalAuditTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('municipalAuditDesc')}</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {auditLoading ? <p role="status" className="text-sm text-muted-foreground">{t('loading')}</p> :
+                  auditError ? (
+                    <div role="alert" className="space-y-3">
+                      <p className="text-sm text-rose-600">{t('municipalAuditError')}</p>
+                      <Button type="button" variant="outline" onClick={() => void loadMunicipalAudit()}>
+                        {t('municipalAuditRetry')}
+                      </Button>
+                    </div>
+                  ) : auditEvents.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">{t('municipalAuditEmpty')}</p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-border">
+                      <table aria-label={t('municipalAuditTitle')} className="w-full min-w-[480px] text-left text-sm">
+                        <thead className="bg-muted text-muted-foreground">
+                          <tr>
+                            <th scope="col" className="px-4 py-3">{t('municipalAuditAction')}</th>
+                            <th scope="col" className="px-4 py-3">{t('municipalAuditType')}</th>
+                            <th scope="col" className="px-4 py-3">{t('municipalAuditWhen')}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {auditEvents.map(event => (
+                            <tr key={event.id}>
+                              <td className="break-words px-4 py-3 font-medium">{event.action}</td>
+                              <td className="px-4 py-3">{event.resourceType}</td>
+                              <td className="px-4 py-3">
+                                <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleString(i18n.language)}</time>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
               </CardContent>
             </Card>
             </>
