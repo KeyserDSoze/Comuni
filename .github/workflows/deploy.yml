@@ -43,8 +43,11 @@ jobs:
             -backend-config="use_oidc=true"
       # The HMAC key is provisioned externally by the approved operator, never by
       # Terraform or through a TF_VAR_* environment variable.
-      - name: Fail closed if external tenant proof key is missing or disabled
-        run: bash scripts/azure/check-tenant-proof-secret.sh "${{ vars.AZURE_PREFIX }}-kv" "${{ vars.TENANT_PROOF_SECRET_VERSION }}"
+      - name: Fail closed if pinned tenant proof key version is missing or disabled
+        env:
+          AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
+          TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
+        run: bash scripts/azure/check-tenant-proof-secret.sh "${AZURE_PREFIX}-kv" "$TENANT_PROOF_SECRET_VERSION"
       - name: Build and push immutable image
         run: |
           az acr login --name "${{ vars.ACR_NAME }}"
