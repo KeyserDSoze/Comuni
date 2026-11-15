@@ -27,6 +27,8 @@ builder.Services.AddScoped<IOrganizationMembershipStore, OrganizationMembershipS
 builder.Services.AddScoped<IAuthorizationHandler, OrganizationRoleHandler>();
 builder.Services.AddScoped<IProtocolRepository, ProtocolRepository>();
 builder.Services.AddScoped<ProtocolService>();
+builder.Services.AddScoped<IModuleAdministrationStore, ModuleAdministrationRepository>();
+builder.Services.AddScoped<ModuleAdministrationService>();
 builder.Services.AddOpenApi();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -40,6 +42,9 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Write", policy => policy
         .RequireAuthenticatedUser()
         .AddRequirements(new OrganizationRoleRequirement("Admin", "Officer")));
+    options.AddPolicy("Admin", policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new OrganizationRoleRequirement("Admin")));
 });
 
 var app = builder.Build();
@@ -129,6 +134,31 @@ app.MapPost("/api/v1/protocol/records", async (
     }
 }).WithName("RegisterProtocolRecord").RequireAuthorization("Write");
 
+
+// Administration is scoped to the organization in the validated JWT.
+// Only server-side PostgreSQL memberships with Admin role may perform these operations.
+app.MapGet("/api/v1/admin/modules", async (
+    ICurrentOrganization current, ModuleAdministrationService service, CancellationToken ct) =>
+    Results.Ok(await service.ListAsync(current.OrganizationId, ct)))
+    .WithName("ListOrganizationModules").RequireAuthorization("Admin");
+
+app.MapPut("/api/v1/admin/modules/{moduleKey}", async (
+    string moduleKey, SetModuleEnabledRequest request, ICurrentOrganization current,
+    ModuleAdministrationService service, CancellationToken ct) =>
+{
+    if (request.Enabled is null)
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["enabled"] = ["The enabled boolean field is required."]
+        });
+
+    var status = await service.SetEnabledAsync(
+        current.OrganizationId, moduleKey, request.Enabled.Value, ct);
+    return status == ModuleUpdateStatus.NotFound
+        ? Results.NotFound()
+        : Results.Ok(new ModuleState(moduleKey, request.Enabled.Value));
+}).WithName("SetOrganizationModule").RequireAuthorization("Admin");
+
 // A single backend image also serves the built React PWA in production.
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -139,6 +169,7 @@ app.Run();
 static ProtocolRecordResponse ToResponse(ProtocolRecord record) =>
     new(record.Id, record.Subject, record.RegisteredAt);
 
+public sealed record SetModuleEnabledRequest(bool? Enabled);
 public sealed record CreateProtocolRecordRequest(string? Subject);
 public sealed record ProtocolRecordResponse(Guid Id, string Subject, DateTimeOffset RegisteredAt);
 public partial class Program { } // WebApplicationFactory entry point for integration tests.
