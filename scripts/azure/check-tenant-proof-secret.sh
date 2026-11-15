@@ -18,7 +18,7 @@ secret_uri="https://${vault_name}.vault.azure.net/secrets/tenant-proof-key/${sec
 # list-versions uses the metadata-only Key Vault endpoint (secrets/list permission).
 # In contrast, secret show retrieves a secret object that also contains its value.
 # The exact full URI is matched; do not allow a later/latest version as fallback.
-query="[?id==\u0027${secret_uri}\u0027].attributes.enabled | [0]"
+query="[?id=='${secret_uri}'].attributes.enabled | [0]"
 if ! enabled="$(az keyvault secret list-versions --vault-name "$vault_name" --name tenant-proof-key --query "$query" --output tsv 2>/dev/null)"; then
   echo "Pinned tenant proof signing secret metadata unavailable; deployment blocked." >&2
   exit 1
