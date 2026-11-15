@@ -24,3 +24,7 @@ Le future versioni dello state non devono più ricevere **questa** chiave HMAC d
 Il preflight controlla `enabled`, **non** verifica valore corretto, expiry, pairing con `Security__TenantProofKeyId` e tabella `platform.tenant_proof_keys`, né l'effettivo aggiornamento di tutte le repliche. L'URI versionless da solo non garantisce rollout atomico o zero-downtime: manca coordinamento DB/Key Vault/revision app, test di carico, allarmi, rollback su Azure (#19 e #6). È intenzionalmente vietato eseguire rotazioni cieche.
 
 Il provisioning segreti in PostgreSQL attraverso `psql` può essere visibile nei log o diagnostic events secondo le impostazioni del server: non assumere trasporto invisibile. Serve una procedura/log redaction verificata, privilegi minimi, gestione Key Vault autorizzata e secret rotation sicura. Non c'è verifica live Azure, privacy compliance o garanzia di produzione.
+
+## Evoluzione successiva — ADR 0016 / issue #22
+
+Questa decisione nasceva con un URI *versionless*. L'ADR 0016 lo sostituisce con un **URI versionato** per evitare l'aggiornamento automatico di un secret mentre `TenantProofKeyId` è ancora associato alla vecchia chiave. Il riferimento esterno e la rimozione non distruttiva dallo state rimangono invariati.

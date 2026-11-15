@@ -57,3 +57,7 @@ La RLS PostgreSQL ora verifica una **prova HMAC temporanea** generata dall'API: 
 ## Segreti RLS e Terraform (#21)
 
 Il secret HMAC `tenant-proof-key` deve essere installato **fuori da Terraform** in Azure Key Vault. Il deploy controlla solo che il secret esista e sia abilitato, senza recuperare il valore; lo stato Terraform nuovo non lo gestisce più. Vedere [ADR 0015](adr/0015-external-tenant-signing-secret.md) e [docs/deployment.md](docs/deployment.md). Gli snapshot storici Terraform possono contenere la vecchia chiave e devono essere gestiti/ruotati. Le issue #19 e #6 rimangono aperte; nessun rollout Azure è stato verificato.
+
+## Key Vault secret versionate per RLS (#22)
+
+Il deployment API su Azure usa `TENANT_PROOF_SECRET_VERSION` (versione esatta della Key Vault secret `tenant-proof-key`, 32 hex), non più la latest automatica. La versione è metadata, la chiave HMAC **non** è inserita in Terraform. Un preflight metadata-only usa `az keyvault secret list-versions` e fallisce se la versione prevista non è abilitata. [ADR 0016](adr/0016-pinned-tenant-proof-secret-version.md). La rotazione multi-replica e il deploy Azure reale restano aperti nella #19/#6.

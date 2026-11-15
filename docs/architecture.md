@@ -59,3 +59,7 @@ Il ruolo applicativo condiviso non firma asserzioni tenant: la singola API .NET 
 ## Boundary Key Vault / Terraform per la HMAC del tenant (ADR 0015)
 
 La chiave HMAC viene creata e ruotata esclusivamente mediante un workflow operativo esterno, approvato: **Terraform non legge né scrive il valore** e fornisce a Container Apps solo un riferimento versionless al secret. Il `removed` block con `destroy=false` tutela le installazioni che precedentemente avevano il secret nello state. La CI impedisce regressioni del contratto e verifica il preflight con metadata-only. L'ordine Key Vault → DB staging → nuova revisione API → verifica → revoca non è ancora orchestrato né collaudato in Azure. Vedere #19 e #6.
+
+## Pinning del secret HMAC RLS in Container Apps — ADR 0016
+
+Il deploy usa una **versioned Key Vault URI** nella secret reference di Azure Container Apps, senza esporre la chiave nella configurazione Terraform. La coppia `tenant_proof_key_id` (ID logico nel verifier PostgreSQL) e `tenant_proof_secret_version` (versione immutabile della risorsa Key Vault) appartiene al piano di rilascio. Prima di plan/apply un controllo `az keyvault secret list-versions` verifica solo enabled per quella versione; il valore è risolto esclusivamente dalla managed identity applicativa. La CI non testa un deployment live e `revision_mode Single` non supporta una fase di validazione parallela delle nuove repliche: vedere #19 e #6.
