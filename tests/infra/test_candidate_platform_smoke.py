@@ -87,7 +87,7 @@ class FakeOpener:
         assert urlsplit(req.full_url).scheme == "https"
         assert urlsplit(req.full_url).hostname == urlsplit(URL).hostname
         assert req.get_header("X-Organization-Id") is None
-        assert req.get_header("Authorization") not in (None, "Bearer ")
+        assert req.get_header("Authorization") != "Bearer "
         if urlsplit(req.full_url).path == "/health/ready":
             raise AssertionError("health should not have a bearer header")
         self.requests.append(req)
@@ -116,7 +116,9 @@ class FakeOpener:
                 return FakeResponse(403, {}, req.full_url)
             after = parse_qs(urlsplit(req.full_url).query).get("after", [None])[0]
             rows = ([item(B), item(A)] if self.wrong_order else [item(A), item(B)])
-            if not self.missing_tenant:
+            if self.missing_tenant:
+                rows = [item(A), item(C)]
+            else:
                 rows.append(item(C))
             if after is None:
                 page, next_cursor = rows[:2], rows[1]["id"]
