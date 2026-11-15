@@ -193,6 +193,8 @@ public sealed class OidcApiTests(OidcApiFactory factory) : IClassFixture<OidcApi
             issuer = "https://evil-issuer.example.test/"
         });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var result = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(OidcApiFactory.Issuer, result.RootElement.GetProperty("issuer").GetString());
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ComuniDbContext>();
         var row = await db.OrganizationMemberships.IgnoreQueryFilters().AsNoTracking()
