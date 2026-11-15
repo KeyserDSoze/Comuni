@@ -30,6 +30,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ?? throw new InvalidOperationException("TEST_DATABASE_CONNECTION must be set.");
         Environment.SetEnvironmentVariable("ConnectionStrings__Default", connection);
         Environment.SetEnvironmentVariable("Authentication__Mode", "DevelopmentJwt");
+        // A demo token never enables the global inventory, including when
+        // another OIDC WebApplicationFactory is alive in this test process.
+        Environment.SetEnvironmentVariable("PlatformInventory__Enabled", "false");
+        Environment.SetEnvironmentVariable("ConnectionStrings__PlatformRead", null);
         Environment.SetEnvironmentVariable("Jwt__SigningKey", SigningKey);
         Environment.SetEnvironmentVariable("Jwt__Issuer", "Comuni.Tests");
         Environment.SetEnvironmentVariable("Jwt__Audience", "Comuni.Api");
