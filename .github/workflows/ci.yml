@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '37 5 * * 1'
 
 permissions:
   contents: read
@@ -99,10 +101,71 @@ jobs:
       - name: Test Key Vault secret state boundary and preflight (no Azure)
         run: python3 -m unittest discover -s tests/infra -p 'test_*.py' -v
 
+  # Blocking SCA: re-check live advisories even when source has not changed.
+  dependency-audit:
+    name: Dependency security (NuGet and npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit NuGet API and integration tests (direct and transitive)
+        run: |
+          dotnet restore tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj \
+            -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high \
+            -warnaserror:NU1900,NU1903,NU1904
+      - name: Audit NuGet domain/unit tests (direct and transitive)
+        run: |
+          dotnet restore tests/backend/Comuni.UnitTests/Comuni.UnitTests.csproj \
+            -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=high \
+            -warnaserror:NU1900,NU1903,NU1904
+      - name: Install frontend dependencies for advisory resolution only
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Audit npm runtime dependencies (high and critical)
+        run: npm audit --omit=dev --audit-level=high
+
+  # CodeQL uploads findings to GitHub code scanning; alerts need human triage.
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build_mode: manual
+          - language: javascript-typescript
+            build_mode: none
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: 10.0.x
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+      - name: Build .NET API for C# extraction
+        if: matrix.language == 'csharp'
+        run: dotnet build src/backend/Applications/Api/Comuni.Api.csproj --configuration Release
+      - name: Analyze and upload CodeQL results
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
   container:
     name: Combined container image
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, dependency-audit, codeql]
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t comuni:ci .
