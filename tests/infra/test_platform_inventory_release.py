@@ -139,7 +139,7 @@ class PlatformInventoryReleaseTests(unittest.TestCase):
         p = valid_plan(True)
         change = p["resource_changes"][0]["change"]
         change["before"]["secret"].append({
-            "name": "platform-read-v" + "a" * 32,
+            "name": "pi-" + "a" * 16,
             "key_vault_secret_id": before_uri,
         })
         change["after"]["secret"].append(copy.deepcopy(change["before"]["secret"][-1]))
