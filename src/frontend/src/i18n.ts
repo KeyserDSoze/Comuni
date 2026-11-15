@@ -53,7 +53,13 @@ void i18n.use(initReactI18next).init({
       inventoryRetry: 'Riprova inventario', inventoryUnavailable: 'Inventario non disponibile. Riprova.',
       inventoryEmpty: 'Nessun Comune disponibile.', inventoryName: 'Comune',
       inventoryId: 'ID Comune', inventoryState: 'Stato',
-      inventoryActive: 'Attivo', inventorySuspended: 'Sospeso'
+      inventoryActive: 'Attivo', inventorySuspended: 'Sospeso',
+      municipalAuditTitle: 'Attività recenti del Comune',
+      municipalAuditDesc: 'Ultimi 25 eventi amministrativi, senza dati personali o identificativi degli operatori.',
+      municipalAuditAction: 'Azione', municipalAuditType: 'Risorsa',
+      municipalAuditWhen: 'Data e ora', municipalAuditEmpty: 'Nessuna attività recente.',
+      municipalAuditError: 'Attività non disponibile. Verifica i permessi o riprova.',
+      municipalAuditRetry: 'Riprova attività'
     } },
     en: { translation: {
       appName: 'Comuni', appTagline: 'Digital services for local authorities',
@@ -105,7 +111,13 @@ void i18n.use(initReactI18next).init({
       inventoryRetry: 'Retry inventory', inventoryUnavailable: 'Inventory unavailable. Try again.',
       inventoryEmpty: 'No municipalities available.', inventoryName: 'Municipality',
       inventoryId: 'Municipality ID', inventoryState: 'Status',
-      inventoryActive: 'Active', inventorySuspended: 'Suspended'
+      inventoryActive: 'Active', inventorySuspended: 'Suspended',
+      municipalAuditTitle: 'Recent municipal activity',
+      municipalAuditDesc: 'Last 25 administrative events, without personal or operator identifiers.',
+      municipalAuditAction: 'Action', municipalAuditType: 'Resource',
+      municipalAuditWhen: 'Date and time', municipalAuditEmpty: 'No recent activity.',
+      municipalAuditError: 'Activity unavailable. Check access or try again.',
+      municipalAuditRetry: 'Retry activity'
     } }
   },
   lng: 'it',
