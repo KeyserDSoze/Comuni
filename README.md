@@ -1,0 +1,27 @@
+# Comuni
+
+Piattaforma cloud-native multi-organization per i Comuni italiani: **Modular Monolith** .NET 10 + PostgreSQL, frontend React/TypeScript e deployment **esclusivamente Azure**.
+
+> Stato: progetto in avvio. L'incremento iniziale realizza la fondazione multi-organization e un **modulo Protocollo dimostrativo** per validare isolamento, permessi e feature flags; non costituisce un sistema di protocollo informatico conforme alle regole AgID.
+
+## Convenzioni non negoziabili
+
+- Si lavora **direttamente su `main`**, senza branch di lavoro o pull request obbligatorie.
+- DDD e dipendenze controllate: `Applications` → `Business` → `Domains`; `Infrastructures` implementa i contratti applicativi.
+- Un'unica API REST .NET 10, un solo PostgreSQL, un unico frontend React + Vite, senza microservizi.
+- Ogni dato applicativo è isolato per `organization_id`; l'identità del Comune proviene esclusivamente dal JWT validato, **mai** da header arbitrari o dal body.
+- Moduli, autorizzazioni e interfaccia sono configurati per organization.
+- **TDD: Red → Green → Refactor.** Prima test, poi codice. Nessuna feature completa senza suite verde.
+- ADR e documentazione devono evolvere insieme al codice. Terraform è la fonte di verità per l'infrastruttura Azure.
+
+Vedere [AGENTS.md](AGENTS.md), [ADR](adr/) e [documentazione](docs/).
+
+## Obiettivo del primo incremento
+
+Una piccola vertical slice verificabile: autenticazione JWT, organization context, gestione abilitazione moduli, lettura/creazione di metadati di documenti del Protocollo, frontend responsive e test di isolamento/permessi. Le integrazioni con ANPR, PagoPA, SEND, PDND, conservazione e le funzionalità legali di protocollo sono **fuori da questa prima slice**.
+
+## Esecuzione locale (dopo il bootstrap)
+
+Requisiti: Docker + Compose. Usare `docker compose -f docker/compose.yml up --build`, quindi aprire `http://localhost:8080`. Per ottenere un token *solo di sviluppo* vedere `docs/development.md`. I test backend richiedono .NET 10 e PostgreSQL; quelli E2E richiedono Node e Playwright.
+
+L'accesso applicativo definitivo tramite un identity provider OIDC e SPID/CIE non è incluso in questo primo incremento; nessuna credenziale predefinita è autorizzata in produzione.
