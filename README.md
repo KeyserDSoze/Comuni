@@ -40,4 +40,4 @@ La modalità di produzione ora richiede `Authentication:Mode=Oidc`, `Authenticat
 
 ## Amministrazione comunale — prima slice (#13)
 
-Un utente con membership `Admin` attiva può accedere alla voce **Amministrazione** del portale e attivare/disattivare il modulo Protocollo del proprio Comune. Il cambiamento è persistito su PostgreSQL, auditato e verificato dal backend. Non sono ancora implementati il catalogo completo né Superadmin. In Development il seed base ha il solo ruolo `Officer`; usare un Admin creato attraverso dati di sviluppo controllati per verificare la funzionalità.
+Un utente con membership `Admin` attiva può accedere alla voce **Amministrazione** del portale e attivare/disattivare il modulo Protocollo del proprio Comune. Il cambiamento è persistito su PostgreSQL, auditato e verificato dal backend. Non sono ancora implementati il catalogo completo né Superadmin. In Development il seed include l'utente dimostrativo `local-admin` con ruolo Admin sul solo Comune Aurora: il token si genera con lo script CLI indicato in [docs/development.md](docs/development.md). Non usare questo token fuori dallo sviluppo.

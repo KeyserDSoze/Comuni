@@ -66,6 +66,7 @@ if (app.Environment.IsDevelopment())
         ON CONFLICT (organization_id, module_key) DO NOTHING;
         INSERT INTO platform.organization_memberships (organization_id, subject, role, is_active) VALUES
           ('11111111-1111-1111-1111-111111111111', 'local-developer', 'Officer', TRUE),
+          ('11111111-1111-1111-1111-111111111111', 'local-admin', 'Admin', TRUE),
           ('22222222-2222-2222-2222-222222222222', 'local-developer', 'Reader', TRUE)
         ON CONFLICT (organization_id, subject, role) DO NOTHING;
         """);
