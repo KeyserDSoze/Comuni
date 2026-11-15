@@ -1,3 +1,4 @@
+using Comuni.Business.Organizations;
 using Comuni.Business.Protocol;
 using Comuni.Domains.Protocol;
 using Xunit;
