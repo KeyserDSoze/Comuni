@@ -113,6 +113,26 @@ app.UseAuthentication();
 app.UseWhen(
     context => context.Request.Path.StartsWithSegments("/api"),
     branch => branch.UseRateLimiter());
+// JWT authentication runs first. Each authorized tenant API request uses one
+// PostgreSQL transaction with SET LOCAL context across policies and endpoints.
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/api") ||
+        context.User.Identity?.IsAuthenticated != true ||
+        !Guid.TryParse(context.User.FindFirst("organization_id")?.Value, out var tenantId) ||
+        tenantId == Guid.Empty)
+    {
+        await next(context);
+        return;
+    }
+
+    var db = context.RequestServices.GetRequiredService<ComuniDbContext>();
+    await using var tenantTransaction = await TenantDatabaseTransaction.BeginAsync(db, context.RequestAborted);
+    await next(context);
+    // Denied and invalid requests must not commit even if a future handler writes before failing.
+    if (context.Response.StatusCode < 400)
+        await tenantTransaction.CommitAsync(context.RequestAborted);
+});
 app.UseAuthorization();
 
 app.MapOpenApi();

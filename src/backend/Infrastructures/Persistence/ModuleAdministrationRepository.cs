@@ -20,7 +20,10 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db) : IModule
         if (audit.OrganizationId != organizationId || audit.ResourceId != organizationId)
             throw new ArgumentException("Audit entry must belong to the current organization.", nameof(audit));
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var ownsTransaction = db.Database.CurrentTransaction is null;
+        await using var transaction = ownsTransaction
+            ? await TenantDatabaseTransaction.BeginAsync(db, cancellationToken)
+            : null;
         var module = await db.OrganizationModules.SingleOrDefaultAsync(
             m => m.OrganizationId == organizationId && m.ModuleKey == moduleKey, cancellationToken);
 
@@ -30,7 +33,7 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db) : IModule
         module.SetEnabled(enabled);
         await db.AuditEvents.AddAsync(audit, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return ModuleUpdateStatus.Updated;
     }
 }

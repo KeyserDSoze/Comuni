@@ -22,10 +22,15 @@ public sealed class ProtocolRepository(ComuniDbContext db) : IProtocolRepository
             throw new ArgumentException("Audit entry must match the registered protocol record.", nameof(audit));
 
         // Explicit transaction: both writes succeed or both are rolled back.
-        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        // API requests already own a tenant-scoped transaction; direct repository use
+        // creates an equivalent scope instead of attempting a nested transaction.
+        var ownsTransaction = db.Database.CurrentTransaction is null;
+        await using var tx = ownsTransaction
+            ? await TenantDatabaseTransaction.BeginAsync(db, cancellationToken)
+            : null;
         await db.ProtocolRecords.AddAsync(record, cancellationToken);
         await db.AuditEvents.AddAsync(audit, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
+        if (tx is not null) await tx.CommitAsync(cancellationToken);
     }
 }
