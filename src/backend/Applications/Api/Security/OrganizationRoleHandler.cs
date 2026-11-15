@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace Comuni.Api.Security;
 
-public sealed class OrganizationRoleHandler(IOrganizationMembershipStore memberships)
+public sealed class OrganizationRoleHandler(IOrganizationMembershipStore memberships, IOrganizationDirectory organizations)
     : AuthorizationHandler<OrganizationRoleRequirement>
 {
     protected override async Task HandleRequirementAsync(
@@ -17,6 +17,10 @@ public sealed class OrganizationRoleHandler(IOrganizationMembershipStore members
 
         var subject = principal.FindFirst("sub")?.Value;
         if (string.IsNullOrWhiteSpace(subject))
+            return;
+
+        // A valid JWT and membership are insufficient for a suspended organization.
+        if (!await organizations.IsOperationalAsync(organizationId, CancellationToken.None))
             return;
 
         var roles = await memberships.ActiveRolesAsync(organizationId, subject, CancellationToken.None);
