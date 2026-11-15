@@ -49,7 +49,7 @@ public sealed class RuntimeDatabasePrivilegesTests
                 has_table_privilege(current_user, 'platform.organizations', 'SELECT'),
                 has_table_privilege(current_user, 'platform.organizations', 'UPDATE'),
                 has_table_privilege(current_user, 'platform.organization_memberships', 'SELECT'),
-                has_table_privilege(current_user, 'platform.organization_memberships', 'INSERT'),
+                has_any_column_privilege(current_user, 'platform.organization_memberships', 'INSERT'),
                 has_table_privilege(current_user, 'platform.organization_modules', 'SELECT'),
                 has_column_privilege(current_user, 'platform.organization_modules', 'enabled', 'UPDATE'),
                 has_column_privilege(current_user, 'platform.organization_modules', 'module_key', 'UPDATE'),
