@@ -25,7 +25,10 @@ class TenantSecretVersionTests(unittest.TestCase):
 
     def test_workflow_requires_version_from_approved_environment_and_passes_it_to_preflight(self):
         self.assertIn("TF_VAR_tenant_proof_secret_version: " + "$" + "{{ vars.TENANT_PROOF_SECRET_VERSION }}", DEPLOY)
-        self.assertIn('check-tenant-proof-secret.sh "' + "$" + '{{ vars.AZURE_PREFIX }}-kv" "' + "$" + '{{ vars.TENANT_PROOF_SECRET_VERSION }}"', DEPLOY)
+        self.assertIn("AZURE_PREFIX: " + "$" + "{{ vars.AZURE_PREFIX }}", DEPLOY)
+        self.assertIn("TENANT_PROOF_SECRET_VERSION: " + "$" + "{{ vars.TENANT_PROOF_SECRET_VERSION }}", DEPLOY)
+        self.assertIn('check-tenant-proof-secret.sh "' + "$" + '{AZURE_PREFIX}-kv" "' + "$" + 'TENANT_PROOF_SECRET_VERSION"', DEPLOY)
+        self.assertNotIn('check-tenant-proof-secret.sh "' + "$" + '{{', DEPLOY)
         self.assertLess(DEPLOY.index("check-tenant-proof-secret.sh"), DEPLOY.index("terraform -chdir=infra plan"))
         self.assertNotIn("TF_VAR_tenant_proof_key:", DEPLOY)
 
