@@ -73,3 +73,7 @@ La pipeline `Deploy to Azure` ora verifica **dopo Terraform apply** che la revis
 ## Canary revision con smoke OIDC/RLS read-only (#25)
 
 La revisione candidata (0% traffico ordinario) riceve una **label immutabile** per commit e quindi un URL dedicato a test controllati. `scripts/azure/smoke-candidate-oidc.py` permette a un operatore di verificare contesti e isolamento Protocollo con due token OIDC reali e due Comuni **sintetici**, senza creare documenti e senza spostare traffico. [ADR 0019](adr/0019-immutable-canary-label-and-oidc-smoke.md), [runbook](docs/deployment.md). Non sono ancora stati effettuati smoke su Azure reale o login tramite IdP reale; label e token devono essere accessibili solo a operatori autorizzati.
+
+## Accesso browser OIDC con PKCE (#26)
+
+Il frontend ora include un **Authorization Code + PKCE S256** per client OIDC pubblico, configurabile dalla **stessa API** e senza client secret. Il campo JWT manuale è disponibile **solo** in DevelopmentJwt; in Production/Oidc senza provider completo la UI impedisce l'accesso. Token di accesso solo in RAM, stato PKCE a vita breve in sessionStorage. [ADR 0020](adr/0020-browser-oidc-pkce.md) e [runbook](docs/development.md). Non esiste ancora un IdP reale collegato o un BFF: issue #2 resta aperta; nessun login SPID/CIE o conformità verificata.

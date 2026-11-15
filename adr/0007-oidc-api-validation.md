@@ -26,3 +26,7 @@ Azure Terraform/Container Apps usa esplicitamente `Authentication__Mode=Oidc`, `
 - L'identità cittadino e quella operatore devono essere progettate con policy distinte, evitando impersonificazione senza audit.
 
 L'epica #2 rimane aperta.
+
+## Evoluzione successiva — ADR 0020
+
+La ADR 0020 introduce **un client React browser Authorization Code + PKCE S256** e un endpoint pubblico di sola configurazione `GET /api/v1/auth/browser`. Il browser non riceve mai client secret; rimane comunque client pubblico che può esporre access token a JS. L'issue #2 resta aperta per provider reale/BFF/MFA/identità.

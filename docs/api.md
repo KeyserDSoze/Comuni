@@ -38,3 +38,13 @@ Anonimo: 401. Reader/Officer o organization sospesa: 403. Modulo non riconosciut
 Una finestra fissa in-memory per replica limita soltanto gli endpoint `/api`: default **120 richieste per 60 secondi** per identità JWT validata (`organization_id` + `sub`) o IP della connessione per richieste anonime. Superata la quota, risposta `429 Too Many Requests` con `Retry-After` (secondi, valore conservativo). Non fare retry aggressivo. `/health/live`, `/health/ready` e asset statici PWA non sono limitati. Non fidarsi di `X-Forwarded-For` fornito dai client.
 
 API incluse risposte 401/403/429 sono `Cache-Control: no-store`. Gli header di protezione browser si applicano a tutte le risposte. Questo non sostituisce WAF/edge e quote centralizzate per deployment multipli.
+
+## Configurazione login browser OIDC (slice #26 di #2)
+
+| Metodo | Endpoint | Autenticazione | Risultato |
+| --- | --- | --- | --- |
+| GET | `/api/v1/auth/browser` | pubblico | `mode`, `enabled` e, solo se abilitato, metadati pubblici del client OAuth (issuer, clientId, authorizationEndpoint, tokenEndpoint, scope) |
+
+La risposta **non** contiene token, client secret, organization_id, ruoli o credenziali. Con `DevelopmentJwt` (solo Development/Testing) restituisce `{"mode":"DevelopmentJwt","enabled":false,...}` e il frontend mostra il form JWT tecnico. In `Oidc` senza configurazione browser completa restituisce `{"mode":"Oidc","enabled":false,...}`: il form JWT è **nascosto**, e il login è esplicitamente non configurato. Quando è abilitato, il browser inizia un Authorization Code flow con PKCE `S256`, scambia il codice **direttamente** con il token endpoint dell'IdP per un `access_token` e lo usa sulle API esistenti `Authorization: Bearer`. Il backend rimane l'unica fonte di ruoli e dell'organization.
+
+Per attivare un client browser: `Authentication:BrowserClientId`, `Authentication:BrowserAuthorizationEndpoint`, `Authentication:BrowserTokenEndpoint`, `Authentication:BrowserScope` devono essere **tutti** valorizzati e gli endpoint devono essere HTTPS sullo stesso host di `Authentication:Authority`; `BrowserScope` deve includere `openid` e uno scope API delegato senza `offline_access`. Non esiste né è accettato alcun `Authentication:BrowserClientSecret`. La risposta OAuth non costituisce autorizzazione: la API valida ancora JWT RS256 (issuer, aud, firma, exp) e membership PostgreSQL in ogni richiesta. L'endpoint pubblico è soggetto al rate limiter della API.
