@@ -54,3 +54,9 @@ L'utenza fissa `comuni_app_runtime` riceve solo `USAGE` schema, SELECT tabelle d
 La CI su PostgreSQL 17 esegue lo stesso script **due volte** dopo le migrazioni, verifica il login separato e gli accessi negati/consentiti con xUnit. In locale Docker Compose resta intenzionalmente configurato con account privilegiato per la migrazione automatica in Development; **non** riusare questo schema o le password dimostrative su Azure.
 
 **Limitazione critica:** questo riduce i privilegi DDL e amministrativi, ma NON è isolamento row-level tra Comuni: l'account condiviso può leggere le righe tenant-owned in SQL diretto finché non viene adottato un contesto PostgreSQL trusted con RLS fail-closed. Valutazione di `SET LOCAL` e pooling, enforcement e test raw SQL restano nella #5.
+
+## Tenant RLS — ordine migrazioni e connessioni (#17)
+
+La migration `202611150005_TenantRowLevelSecurity` abilita RLS su cinque tabelle tenant-owned. Applicarla **con ruolo owner** prima di eseguire nuovamente `scripts/postgres/provision-runtime-role.sql` e prima di promuovere la nuova API. L'API in produzione deve usare **soltanto** `comuni_app_runtime` non owner: l'owner/superuser bypassa RLS. Testare con il login runtime e due organization distinte la lettura senza contesto (0), `SET LOCAL` transaction-local, rollback/commit con connessioni riusate e POST con audit. Le policy SQL non richiedono un nuovo database o servizio Azure.
+
+**Gate di go-live:** la RLS basata su custom GUC PostgreSQL non resiste a SQL arbitrario sotto lo stesso login: un attaccante che possa eseguire `set_config` potrebbe cambiare organization. Definire il threat model e il binding non falsificabile prima di dati reali; #5 resta aperta. Il job privato Azure per migrare/provisionare continua a mancare (#6). Test di connessioni pooled sotto carico e rollout blue/green da verificare in Azure.

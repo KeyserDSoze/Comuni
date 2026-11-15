@@ -45,3 +45,7 @@ Un utente con membership `Admin` attiva può accedere alla voce **Amministrazion
 ## Accesso PostgreSQL in produzione (ADR 0011)
 
 Il runtime su Azure usa la credenziale separata `comuni_app_runtime` e non quella del proprietario/migratore del database. Il provisioning SQL idempotente e i GRANT limitati sono in `scripts/postgres/provision-runtime-role.sql`; la procedura e le dipendenze di bootstrap sono in [docs/deployment.md](docs/deployment.md). **L'isolamento RLS per singolo Comune non è ancora implementato**: restano bloccanti #5 e #6 per un deployment affidabile con dati reali.
+
+## RLS PostgreSQL — difesa in profondità (#17)
+
+Una migrazione EF abilita policy Row-Level Security sulle cinque tabelle tenant-owned e un middleware .NET 10 imposta il Comune con `SET LOCAL` nella transazione della richiesta, evitando che il contesto sopravviva nel pool delle connessioni. [ADR 0012](adr/0012-transaction-scoped-rls.md). **Attenzione:** il login runtime condiviso può falsificare la variabile PostgreSQL con SQL arbitrario; il sistema non è ancora adatto a dati personali reali. La #5 resta aperta per completare questo confine.

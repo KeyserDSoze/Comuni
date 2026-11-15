@@ -26,3 +26,7 @@ Manteniamo una sola API, uno schema logico per dominio e **un unico PostgreSQL**
 3. Il runtime non può migrare o aggiungere nuovi moduli. Nuove migrazioni richiedono revisione del provisioning/grant e test nuovi.
 4. Il ruolo owner e i segreti di Terraform rimangono sensibili. Rotazione delle credenziali già usate in ambienti precedenti, telemetria e backup/restore verificati prima del go-live.
 5. Solo Docker Compose Development continua a usare il proprietario per `MigrateAsync` e seed dimostrativo; non replica la sicurezza di produzione.
+
+## Aggiornamento ADR 0012
+
+La vertical slice #17 ha successivamente introdotto RLS su cinque tabelle tenant-owned e un contesto applicativo SET LOCAL per transazione. Le avvertenze storiche sull'assenza di RLS sopra descrivono lo stato **prima della #17**; restano validi i rischi di owner bypass e SQL injection che può modificare la custom GUC. Vedere ADR 0012 e #5.
