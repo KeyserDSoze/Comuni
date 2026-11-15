@@ -39,7 +39,11 @@ public sealed class ComuniDbContextModelSnapshot : ModelSnapshot
         modelBuilder.Entity<OrganizationMembership>(b =>
         {
             b.ToTable("organization_memberships", "platform", t =>
-                t.HasCheckConstraint("ck_organization_memberships_role", "role IN ('Admin','Officer','Reader')"));
+            {
+                t.HasCheckConstraint("ck_organization_memberships_role", "role IN ('Admin','Officer','Reader')");
+                t.HasCheckConstraint("ck_membership_identity_issuer_https",
+                    "identity_issuer IS NULL OR (identity_issuer LIKE 'https://%' AND identity_issuer !~ '[?#]')");
+            });
             b.HasKey(x => new { x.OrganizationId, x.Subject, x.Role });
             b.Property(x => x.OrganizationId).HasColumnName("organization_id");
             b.Property(x => x.Subject).HasColumnName("subject").HasMaxLength(160).IsRequired();
