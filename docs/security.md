@@ -18,7 +18,7 @@
 - Test end-to-end completi su Azure, segreti/chiavi ruotati, backup/restore verificati, monitoraggio e alerting.
 - Policy GDPR, ruoli titolare/responsabile, minimizzazione e cifratura dati, retention, DPIA ove dovuta.
 - Protocollo a norma, documenti, segnatura, fascicolazione, conservazione, interoperabilità AgID.
-- PostgreSQL RLS come difesa in profondità, permessi DB least privilege al posto dell'account admin.
+- PostgreSQL **RLS per tenant** come difesa in profondità, account runtime dotato di identità gestita/Entra dove applicabile, test raw SQL su tenant differenti e un job di provisioning/migrazione privata Azure. La separazione least-privilege a livello ruolo SQL è progettata e testata nella #16, ma non è stata ancora verificata in un deploy Azure reale.
 - Rete privata/endpoint Blob e Key Vault, firewall, WAF e policy aziendali da definire.
 
 **Non trattare il modulo Protocollo demo come registro ufficiale né inserire dati personali reali.**
@@ -34,3 +34,11 @@ Le richieste `/api` sono limitate mediante il rate limiter **in memoria per repl
 Risposte API incluse 401/403/429: `Cache-Control: no-store`, `Pragma: no-cache`. Tutte le risposte: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` restrittiva, CSP con script/worker solo dalla stessa origine e `frame-ancestors 'none'`. La CSP consente ancora CSS inline (`style-src 'unsafe-inline'`) per compatibilità e richiede revisione con il frontend definitivo.
 
 **Limiti obbligatori per il go-live:** con più repliche ACA la quota **non è globale**; istanze diverse non condividono contatori. Dietro reverse proxy l'IP visto da Kestrel potrebbe essere quello del proxy, con effetto di aggregazione sui client anonimi; non prendere mai `X-Forwarded-For` senza restringere i proxy fidati. Difesa DDoS, WAF, limiti edge, load test, proxy chain attendibile, HSTS e redirect HTTPS gestiti in frontiera richiedono configurazione/validazione Azure separata. Queste protezioni **non** risolvono PostgreSQL RLS e privilegi DB (resta aperta #5).
+
+## Credenziali PostgreSQL e limiti del ruolo runtime — issue #16
+
+Il provisioning SQL `scripts/postgres/provision-runtime-role.sql` definisce il login `comuni_app_runtime`, distinto dal proprietario degli schemi/migrazioni. **Il connection string dell'applicazione Azure** in Terraform ora usa questo login con password separata; `comuniadmin` è riservato al provisioning infrastrutturale e alle migrazioni eseguite da un operatore autorizzato. La CI usa realmente questo login PostgreSQL per verificare funzioni consentite e errori `42501` su operazioni privilegiate.
+
+Il ruolo runtime può leggere solo le tabelle necessarie a organizzazione, flag, membership e Protocollo demo; può inserire metadati Protocollo e nuovi eventi Audit e aggiornare **solo** `organization_modules.enabled`. Non è owner di tabelle né membro di ruoli admin e non possiede GRANT di CREATE negli schemi. Non riceve GRANT automatici per i nuovi domini. Aggiornare esplicitamente il provisioning per ogni schema/dominio aggiunto.
+
+**Rischio residuo critico:** non esiste ancora RLS; il medesimo login applicativo ha accesso SQL trasversale alle righe delle organization per cui dispone di SELECT. I filtri EF e le policy API restano il solo isolamento per tenant finché #5 non introduce RLS con contesto database trusted per richiesta e corretta gestione del pooling. Un accesso diretto/SQL injection sotto l'account runtime potrebbe leggere dati cross-tenant; il sistema **non è pronto per dati comunali reali**. Il provisioning in rete privata Azure, la gestione/rotazione dei segreti, l'isolamento delle connessioni Entra e backup/restore restano da verificare.

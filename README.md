@@ -41,3 +41,7 @@ La modalità di produzione ora richiede `Authentication:Mode=Oidc`, `Authenticat
 ## Amministrazione comunale — prima slice (#13)
 
 Un utente con membership `Admin` attiva può accedere alla voce **Amministrazione** del portale e attivare/disattivare il modulo Protocollo del proprio Comune. Il cambiamento è persistito su PostgreSQL, auditato e verificato dal backend. Non sono ancora implementati il catalogo completo né Superadmin. In Development il seed include l'utente dimostrativo `local-admin` con ruolo Admin sul solo Comune Aurora: il token si genera con lo script CLI indicato in [docs/development.md](docs/development.md). Non usare questo token fuori dallo sviluppo.
+
+## Accesso PostgreSQL in produzione (ADR 0011)
+
+Il runtime su Azure usa la credenziale separata `comuni_app_runtime` e non quella del proprietario/migratore del database. Il provisioning SQL idempotente e i GRANT limitati sono in `scripts/postgres/provision-runtime-role.sql`; la procedura e le dipendenze di bootstrap sono in [docs/deployment.md](docs/deployment.md). **L'isolamento RLS per singolo Comune non è ancora implementato**: restano bloccanti #5 e #6 per un deployment affidabile con dati reali.

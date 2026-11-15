@@ -43,3 +43,7 @@ La registrazione dei metadati Protocollo genera un `AuditEvent` in `Domains/Audi
 ## Protezioni HTTP incrementali (ADR 0010)
 
 Il middleware di header opera **prima** di autenticazione e rifiuti, così che 401/403/429 ricevano le intestazioni di sicurezza. Il rate limiter globale ASP.NET Core è inserito soltanto nel ramo `/api`, **dopo** la validazione JWT e **prima** delle policy autorizzative: può partizionare richieste valide per Comune/operatore senza fidarsi dei claim prima della validazione. Il traffico anonimo è per IP socket. Health e PWA non sono soggetti a quota. Finestra e limite sono configurabili e validati all'avvio, nessuna infrastruttura distribuita aggiuntiva (vedere ADR 0010 e #15).
+
+## PostgreSQL: role runtime vs owner delle migrazioni (ADR 0011)
+
+La connessione `ConnectionStrings__Default` per l'API di **produzione** viene provisionata dal Terraform con `comuni_app_runtime`, un login PostgreSQL non owner. Il provisioning SQL esplicito avviene **dopo** le migrazioni EF applicate dal ruolo amministrativo, prima del rollout app. Gli adapter EF continuano a usare un'unica istanza logica di PostgreSQL e la stessa API; la barriera dei privilegi DB riduce l'impatto di un errore applicativo ma non implementa RLS o filtri per singola organization sul database. Vedere ADR 0011 e #5/#6 per job di migrazione remoto e RLS con contesto tenant affidabile.
