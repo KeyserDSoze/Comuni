@@ -134,3 +134,21 @@ Risposta `200`:
 La lista è ordinata per UUID crescente; `limit` predefinito 10, ammesso **1–25**. `after` è facoltativo, UUID non nullo nel formato canonico; `nextCursor` è l'ID dell'ultima riga restituita solo se esiste un'altra pagina. Niente `count` né ricerca nome o parametri di tenant. Query sconosciute/duplicate, limit fuori intervallo e cursor malformato danno **400**, senza leggere enti o inserire audit. Token anonimi/errati danno **401/403**. L'endpoint non legge né restituisce utenti, ruoli, documenti, tributi, operatori globali o dati sensibili. Il backend scrive un evento append-only `platform.organizations.listed` per ogni pagina riuscita, con ID opaco dell'operatore e correlation random, nella stessa transazione della SELECT. La UI in `/platform` mostra una tabella e un pulsante per le pagine successive, ma è **solo presentazione** e non attribuisce diritti.
 
 Non sono disponibili endpoint per creazione, modifica, sospensione/riattivazione o impersonificazione. Vedere ADR 0031, `docs/deployment.md` e `docs/security.md`.
+
+
+## Admin Comune: ultimi eventi di audit in sola lettura (#41 / ADR 0035)
+
+`GET /api/v1/admin/audit` è accessibile **solo con membership Admin attiva nel DB** del Comune derivato dal JWT verificato; l'organization sospesa, Reader/Officer, Superadmin privo di tenant o JWT con ruolo Admin contraffatto restano 401/403. La risposta è **un array JSON** con massimo **25 eventi**, ordinati per `occurredAt DESC, id DESC`, con *esattamente* quattro campi:
+
+```json
+[
+  {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "action": "platform.module.protocol.disabled",
+    "resourceType": "platform.module",
+    "occurredAt": "2026-11-16T09:00:00Z"
+  }
+]
+```
+
+Sono **esclusi** `actorSubject` (identità IdP), `correlationId`, `resourceId`, `organizationId`, testo Protocollo, payload e ogni informazione dell'audit globale. **Qualsiasi query string** (anche `limit`, `organizationId`, `subject`, `after`) restituisce 400: non sono previsti filtro, offset, export o consultazione cross-organization. Il controllo Server Admin, l'EF query filter e la policy RLS con assertion HMAC firmata sono obbligatori. Le normali API di modifica rimangono invariate; l'endpoint non scrive audit né modifica dati. Vedere ADR 0035. La nuova sezione `Attività recenti del Comune` è integrata in **Amministrazione** nella stessa React PWA, solo per Admin, con traduzione IT/EN ed error/retry.
