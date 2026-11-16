@@ -37,9 +37,14 @@ public sealed record PlatformInventorySettings(bool Enabled, string? ConnectionS
             reader.Port != normal.Port)
             throw new InvalidOperationException("Platform inventory needs its own least-privilege login on the same PostgreSQL database.");
 
+        // Global platform credentials can enumerate ALL municipality metadata.
+        // In hosted environments, encryption alone is insufficient: reject a
+        // TLS peer whose CA or hostname was not verified. No implicit fallback
+        // to Require/VerifyCA or Trust Server Certificate=true.
         if (environmentName is not ("Development" or "Testing") &&
-            reader.SslMode is not (SslMode.Require or SslMode.VerifyCA or SslMode.VerifyFull))
-            throw new InvalidOperationException("Platform inventory requires encrypted PostgreSQL connections.");
+            (reader.SslMode != SslMode.VerifyFull || reader.TrustServerCertificate))
+            throw new InvalidOperationException(
+                "Platform inventory requires full PostgreSQL server certificate and hostname verification.");
 
         return new PlatformInventorySettings(true, platformConnection);
     }
