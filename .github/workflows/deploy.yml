@@ -115,6 +115,48 @@ jobs:
             --registry-host "$REGISTRY_HOST" \
             --push-output-file "$PUSH_OUTPUT" \
             --github-env "$GITHUB_ENV"
+      # Pin the Trivy installer/action and scanner version; no floating "latest".
+      # Scan the exact pushed manifest digest, not its mutable commit tag.
+      - name: Install pinned Trivy image scanner
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.76.2
+          cache: false
+      - name: Validate runtime container CVEs and generate SPDX from same scan
+        run: |
+          set -euo pipefail
+          umask 077
+          SCAN_REPORT="$(mktemp "$RUNNER_TEMP/comuni-scan.XXXXXXXX.json")"
+          SBOM_REPORT="$(mktemp "$RUNNER_TEMP/comuni-sbom.XXXXXXXX.json")"
+          scan_approved=false
+          cleanup() {
+            rm -f -- "$SCAN_REPORT"
+            if [[ "$scan_approved" != true ]]; then
+              rm -f -- "$SBOM_REPORT"
+            fi
+          }
+          trap cleanup EXIT
+          # Include unfixed vulnerabilities; never suppress UNKNOWN/HIGH/CRITICAL.
+          # Log files are private and the report is never uploaded as an artifact.
+          trivy image --scanners vuln --pkg-types os,library --list-all-pkgs \
+            --format json --output "$SCAN_REPORT" "$TF_VAR_image" >/dev/null 2>&1
+          # Convert the SAME exact scan result: no second registry/tag lookup.
+          trivy convert --format spdx-json --output "$SBOM_REPORT" "$SCAN_REPORT" >/dev/null 2>&1
+          python3 scripts/azure/check-image-sbom-scan.py \
+            --image "$TF_VAR_image" \
+            --candidate-image-digest "$CANDIDATE_IMAGE_DIGEST" \
+            --scan-report "$SCAN_REPORT" \
+            --sbom "$SBOM_REPORT"
+          printf 'CANDIDATE_SBOM_PATH=%s\n' "$SBOM_REPORT" >> "$GITHUB_ENV"
+          scan_approved=true
+      - name: Sign verified image SPDX 2.3 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ vars.ACR_LOGIN_SERVER }}/comuni
+          subject-digest: ${{ env.CANDIDATE_IMAGE_DIGEST }}
+          sbom-path: ${{ env.CANDIDATE_SBOM_PATH }}
+          push-to-registry: false
+          create-storage-record: false
       # GitHub-issued Sigstore attestation: repository, signer workflow,
       # source commit, main ref, and approved OCI manifest digest.
       # Store the signed bundle in GitHub's attestations API (no untested ACR
@@ -139,6 +181,26 @@ jobs:
             --registry-host "$REGISTRY_HOST" \
             --repository "$GITHUB_REPOSITORY" \
             --source-ref "$GITHUB_REF"
+      - name: Verify signed SPDX SBOM before Terraform plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_HOST: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          set -euo pipefail
+          python3 scripts/azure/verify-image-sbom-attestation.py \
+            --image "$TF_VAR_image" \
+            --candidate-image-digest "$CANDIDATE_IMAGE_DIGEST" \
+            --source-commit-sha "$GITHUB_SHA" \
+            --registry-host "$REGISTRY_HOST" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-ref "$GITHUB_REF"
+      # Remove private intermediate SPDX file on success OR on earlier failure.
+      - name: Delete temporary SPDX SBOM after signing and verification
+        if: always()
+        run: |
+          if [[ -n "${CANDIDATE_SBOM_PATH:-}" ]]; then
+            rm -f -- "$CANDIDATE_SBOM_PATH"
+          fi
       - name: Plan and stage candidate at zero traffic (no automatic promotion)
         env:
           STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
