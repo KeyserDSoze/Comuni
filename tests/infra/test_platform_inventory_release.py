@@ -32,7 +32,8 @@ def valid_plan(enabled=True):
     env = app["template"][0]["container"][0]["env"]
     env.append({"name": "PlatformInventory__Enabled", "value": str(enabled).lower()})
     if enabled:
-        app["secret"].append({"name": SECRET, "key_vault_secret_id": URI})
+        app["secret"].append({"name": SECRET, "key_vault_secret_id": URI,
+                              "identity": app["identity"][0]["identity_ids"][0]})
         env.append({"name": "ConnectionStrings__PlatformRead", "secret_name": SECRET})
     return plan
 
@@ -142,6 +143,7 @@ class PlatformInventoryReleaseTests(unittest.TestCase):
         change["before"]["secret"].append({
             "name": "pi-" + "a" * 16,
             "key_vault_secret_id": before_uri,
+            "identity": change["before"]["identity"][0]["identity_ids"][0],
         })
         change["after"]["secret"].append(copy.deepcopy(change["before"]["secret"][-1]))
         self.assertEqual(0, check(p, enabled=True, version=VERSION).returncode)
