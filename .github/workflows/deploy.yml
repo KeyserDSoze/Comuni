@@ -44,7 +44,7 @@ jobs:
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}
       TF_VAR_location: ${{ vars.AZURE_LOCATION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Environment-level OIDC trust is broad without a main-only guard.
       # Do not acquire either federated Azure identity on unapproved refs.
       - name: Reject unapproved GitHub release source before OIDC
@@ -54,7 +54,7 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || exit 1
           [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || exit 1
       - name: Login Azure infrastructure identity for RBAC preflight
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -93,7 +93,7 @@ jobs:
           az logout --only-show-errors >/dev/null 2>&1
           az account clear --only-show-errors >/dev/null 2>&1
       - name: Login Azure ACR build/push identity
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -248,7 +248,7 @@ jobs:
           az logout --only-show-errors >/dev/null 2>&1
           az account clear --only-show-errors >/dev/null 2>&1
       - name: Login Azure infrastructure identity for Terraform stage
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -263,7 +263,7 @@ jobs:
             --other-client-id "$ACR_PUSH_CLIENT_ID" \
             --expected-tenant-id "$ARM_TENANT_ID" \
             --expected-subscription-id "$ARM_SUBSCRIPTION_ID"
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
       - name: Initialize remote Terraform state
         run: |
           terraform -chdir=infra init -input=false \
