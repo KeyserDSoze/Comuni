@@ -44,6 +44,10 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
         var db = new NpgsqlConnectionStringBuilder(connection ?? Owner);
         var psi = new ProcessStartInfo("psql")
         {
+            // The fixed COPY helper is resolved from the trusted checkout root.
+            // Testhost runs with bin/Release/net10.0 as its current directory.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(path)!, "..", "..")),
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false
         };
         foreach (var arg in new[] {
