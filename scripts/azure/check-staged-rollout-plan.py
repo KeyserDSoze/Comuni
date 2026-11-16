@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 APP_ADDRESS = "azurerm_container_app.main"
 STABLE_SECRET = "tenant-proof-key"
 PLATFORM_INVENTORY_SECRET = "platform-inventory-connection"
+RUNTIME_POSTGRES_SECRET = "postgres-runtime-connection"
 VERSION = re.compile(r"[0-9a-fA-F]{32}\Z")
 KEY_ID = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
 SUFFIX = re.compile(r"[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\Z")
@@ -69,7 +70,24 @@ def platform_inventory_version_uri(value, version, trusted_vault_host):
     )
 
 
+def runtime_postgres_version_uri(value, version, trusted_vault_host):
+    """The candidate SQL URI must be pinned to the SAME approved Key Vault."""
+    if not isinstance(value, str) or not isinstance(trusted_vault_host, str):
+        return False
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc == trusted_vault_host
+        and (parsed.path or "").lower()
+            == ("/secrets/" + RUNTIME_POSTGRES_SECRET + "/" + version).lower()
+        and not parsed.query and not parsed.fragment and not parsed.username
+        and not parsed.password
+    )
+
+
 def validate(plan, args):
+    require(bool(VERSION.fullmatch(args.runtime_secret_version)),
+            "candidate runtime PostgreSQL requires explicit pinned Key Vault version")
     require(args.inventory_enabled in ("true", "false"),
             "invalid inventory activation flag")
     enable_inventory = args.inventory_enabled == "true"
@@ -139,6 +157,16 @@ def validate(plan, args):
     require(candidate_name != STABLE_SECRET,
             "candidate must use a separate app-scoped secret name")
 
+    runtime_secret_name = "pg-" + args.runtime_secret_version[:16]
+    runtime_secret = named(after_secrets, runtime_secret_name)
+    trusted_vault = urlparse(candidate_secret["key_vault_secret_id"]).netloc
+    require(runtime_postgres_version_uri(
+        runtime_secret.get("key_vault_secret_id"),
+        args.runtime_secret_version, trusted_vault),
+        "candidate PostgreSQL runtime must use its own pinned version in the same vault")
+    require(runtime_secret_name not in (STABLE_SECRET, "postgres-connection", candidate_name),
+            "candidate PostgreSQL runtime must use an independent app-scoped secret name")
+
     inventory_secret_name = "pi-" + args.inventory_secret_version[:16]
     if enable_inventory:
         inventory_secret = named(after_secrets, inventory_secret_name)
@@ -151,7 +179,7 @@ def validate(plan, args):
     # Reject new app-scoped secrets unrelated to this release, even if they
     # appear benign. Existing secret names/URIs remain immutable in either mode.
     existing_names = {item["name"] for item in before_secrets}
-    allowed_new = {candidate_name}
+    allowed_new = {candidate_name, runtime_secret_name}
     if enable_inventory:
         allowed_new.add(inventory_secret_name)
     for item in after_secrets:
@@ -177,6 +205,13 @@ def validate(plan, args):
     require(proof_id.get("value") == args.candidate_key_id and
             not proof_id.get("secret_name"),
             "candidate key ID must match approved PostgreSQL verifier ID")
+
+    # The municipal runtime MUST NOT receive an inline connection string,
+    # a versionless stable secret, or the privileged platform reader credential.
+    db_connection = named(containers[0].get("env", []), "ConnectionStrings__Default")
+    require(db_connection.get("secret_name") == runtime_secret_name and
+            not db_connection.get("value"),
+            "candidate runtime must use only its approved pinned PostgreSQL secret")
 
     # No JWT claim or tenant context may activate this setting; only the
     # explicitly approved workflow option selects a platform-read secret.
@@ -238,6 +273,7 @@ def main():
     parser.add_argument("--stable-secret-version", required=True)
     parser.add_argument("--candidate-secret-version", required=True)
     parser.add_argument("--candidate-key-id", required=True)
+    parser.add_argument("--runtime-secret-version", required=True)
     parser.add_argument("--inventory-enabled", default="false")
     parser.add_argument("--inventory-secret-version", default="")
     args = parser.parse_args()
