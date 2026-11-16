@@ -21,7 +21,7 @@ VERSION = re.compile(r"[0-9a-fA-F]{32}\Z")
 POSTGRES_HOST = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.postgres\.database\.azure\.com\Z"
 )
-IMAGE = re.compile(r"[a-z0-9][a-z0-9.-]*(?:/[a-z0-9._-]+)+:[0-9a-f]{40}\Z")
+IMAGE = re.compile(r"[a-z0-9]{5,50}\.azurecr\.io/comuni@sha256:[0-9a-f]{64}\Z")
 
 
 class VerificationError(Exception):
@@ -89,7 +89,7 @@ def candidate_metadata(revision, args, trusted_postgres_host):
     container = containers[0]
     required(
         container.get("image") == args.expected_image,
-        "Candidate image is not the approved immutable commit",
+        "Candidate image is not the approved immutable OCI digest",
     )
     env = container.get("env")
     required(isinstance(env, list), "Candidate environment missing")
@@ -217,7 +217,7 @@ def parse_args():
              args.stable_revision != args.candidate_revision,
              "Invalid candidate revision suffix")
     required(IMAGE.fullmatch(args.expected_image),
-             "Expected a commit-SHA-tagged image")
+             "Expected an ACR image pinned by OCI sha256 digest")
     required(KEY_ID.fullmatch(args.candidate_key_id),
              "Invalid candidate key ID")
     required(VERSION.fullmatch(args.candidate_secret_version),
