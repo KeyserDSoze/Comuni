@@ -122,7 +122,7 @@ class ReleaseCiGateTests(unittest.TestCase):
                          (parsed.scheme, parsed.netloc, parsed.path))
         self.assertEqual({
             "head_sha": [SHA], "branch": ["main"], "event": ["push"],
-            "status": ["completed"], "per_page": ["100"],
+            "per_page": ["100"],
         }, urllib.parse.parse_qs(parsed.query))
         self.assertEqual(
             "https://api.github.com/repos/KeyserDSoze/Comuni/actions/runs/"
