@@ -137,7 +137,7 @@ class OidcIdentityHandoffTests(unittest.TestCase):
                          build_phase)
 
     def test_workflow_uses_three_separate_login_boundaries_and_no_secret_fallback(self):
-        self.assertEqual(3, DEPLOY.count("uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6"))
+        self.assertEqual(3, DEPLOY.count("uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906"))
         self.assertEqual(3, DEPLOY.count("scripts/azure/check-azure-oidc-session.py"))
         self.assertIn("ACR_PUSH_CLIENT_ID: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
         self.assertIn("client-id: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
