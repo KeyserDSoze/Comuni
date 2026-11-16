@@ -21,6 +21,7 @@ WORKFLOW = (ROOT / ".github/workflows/deploy.yml").read_text()
 IMAGE = MANAGED_REGISTRY + "/comuni@" + SOURCE_IMAGE_DIGEST
 PREDICATE = "https://spdx.dev/Document/v2.3"
 SENTINEL = "private-token-should-never-be-in-cli-output"
+USE_DEFAULT = object()
 
 
 def trivy_report():
@@ -53,17 +54,17 @@ def spdx_document():
     }
 
 
-def scan(scan=None, sbom=None, image=IMAGE, digest=SOURCE_IMAGE_DIGEST,
+def scan(scan=USE_DEFAULT, sbom=USE_DEFAULT, image=IMAGE, digest=SOURCE_IMAGE_DIGEST,
          missing_scan=False, missing_sbom=False, malformed_scan=False):
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
         scan_file, sbom_file = d / "scan.json", d / "sbom.spdx.json"
         if not missing_scan:
             scan_file.write_text(
-                "{bad" if malformed_scan else json.dumps(trivy_report() if scan is None else scan),
+                "{bad" if malformed_scan else json.dumps(trivy_report() if scan is USE_DEFAULT else scan),
                 encoding="utf-8")
         if not missing_sbom:
-            sbom_file.write_text(json.dumps(spdx_document() if sbom is None else sbom),
+            sbom_file.write_text(json.dumps(spdx_document() if sbom is USE_DEFAULT else sbom),
                                  encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(CHECK),
@@ -284,12 +285,12 @@ class SignedSBOMTests(unittest.TestCase):
         self.assertIn("trivy image", WORKFLOW)
         self.assertIn("--format spdx-json", WORKFLOW)
         self.assertIn('"$TF_VAR_image"', WORKFLOW)
-        self.assertIn("sbom-path: \${{ env.CANDIDATE_SBOM_PATH }}", WORKFLOW)
-        self.assertIn("subject-digest: \${{ env.CANDIDATE_IMAGE_DIGEST }}", WORKFLOW)
+        self.assertIn("sbom-path: ${{ env.CANDIDATE_SBOM_PATH }}", WORKFLOW)
+        self.assertIn("subject-digest: ${{ env.CANDIDATE_IMAGE_DIGEST }}", WORKFLOW)
         self.assertIn("scripts/azure/verify-image-sbom-attestation.py", WORKFLOW)
         self.assertLess(WORKFLOW.index("scripts/azure/check-image-sbom-scan.py"),
-                        WORKFLOW.index("sbom-path: \${{ env.CANDIDATE_SBOM_PATH }}"))
-        self.assertLess(WORKFLOW.index("sbom-path: \${{ env.CANDIDATE_SBOM_PATH }}"),
+                        WORKFLOW.index("sbom-path: ${{ env.CANDIDATE_SBOM_PATH }}"))
+        self.assertLess(WORKFLOW.index("sbom-path: ${{ env.CANDIDATE_SBOM_PATH }}"),
                         WORKFLOW.index("scripts/azure/verify-image-sbom-attestation.py"))
         self.assertLess(WORKFLOW.index("scripts/azure/verify-image-sbom-attestation.py"),
                         WORKFLOW.index("terraform -chdir=infra plan"))
