@@ -133,11 +133,11 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
 
     // Synthetic RS256 compact JWT whose payload is authored verbatim to test
     // duplicate JSON names before an identity library materializes claims.
-    internal string RawSignedToken(string rawPayload)
+    internal string RawSignedToken(string rawPayload, string? rawHeader = null)
     {
         static string B64(byte[] bytes) =>
             Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var header = B64(Encoding.UTF8.GetBytes(
+        var header = B64(Encoding.UTF8.GetBytes(rawHeader ??
             """{"alg":"RS256","typ":"JWT","kid":"test-oidc-rsa-key"}"""));
         var message = header + "." + B64(Encoding.UTF8.GetBytes(rawPayload));
         var signature = _rsa.SignData(Encoding.ASCII.GetBytes(message),
