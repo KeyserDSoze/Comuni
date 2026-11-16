@@ -15,9 +15,9 @@ DEPLOY = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 FROM = re.compile(r"^FROM\s+(\S+)(?:\s+AS\s+([a-z][a-z0-9]*))?\s*$", re.I)
 APPROVED = (
-    ("mcr.microsoft.com/dotnet/sdk:10.0", "", "backend"),
-    ("node:22-alpine", "", "frontend"),
-    ("mcr.microsoft.com/dotnet/aspnet:10.0", "", None),
+    ("mcr.microsoft.com/dotnet/sdk:10.0", "sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb", "backend"),
+    ("node:22-alpine", "sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a", "frontend"),
+    ("mcr.microsoft.com/dotnet/aspnet:10.0", "sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e", None),
 )
 
 
