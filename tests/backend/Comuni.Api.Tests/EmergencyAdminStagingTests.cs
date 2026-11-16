@@ -37,7 +37,7 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
         string? newIssuer = Issuer, string? newSubject = New, string? incident = Ticket,
         string? reviewer1 = FirstReviewer, string? reviewer2 = SecondReviewer,
         string? reason = Reason, string? connection = null,
-        string? lifecycleAction = "suspend")
+        string? lifecycleAction = "suspend", bool logStatements = false)
     {
         var path = Script(file);
         Assert.True(File.Exists(path), "RED: owner-only emergency script missing.");
@@ -71,6 +71,9 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
             lifecycleAction == "reactivate" ? "CHANGE-2026-REACT85" : "CHANGE-2026-SUSP85");
         Set("COMUNI_LIFECYCLE_APPROVER", "independent-reviewer");
         Set("COMUNI_LIFECYCLE_REASON_CODE", "security-incident");
+        if (logStatements)
+            psi.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=0 -c log_parameter_max_length_on_error=0";
         using var process = Process.Start(psi) ??
             throw new InvalidOperationException("psql could not start.");
         var stdout = process.StandardOutput.ReadToEndAsync();
@@ -84,9 +87,10 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
         Guid org, string? oldIssuer = Issuer, string? oldSubject = Old,
         string? newIssuer = Issuer, string? newSubject = New, string? incident = Ticket,
         string? reviewer1 = FirstReviewer, string? reviewer2 = SecondReviewer,
-        string? reason = Reason, string? connection = null) =>
+        string? reason = Reason, string? connection = null, bool logStatements = false) =>
         Run("stage-emergency-admin-replacement.sql", org, oldIssuer, oldSubject,
-            newIssuer, newSubject, incident, reviewer1, reviewer2, reason, connection);
+            newIssuer, newSubject, incident, reviewer1, reviewer2, reason, connection,
+            logStatements: logStatements);
 
     private static Task<(int Code, string Output)> Lifecycle(Guid org, string action = "suspend") =>
         Run("set-organization-suspension.sql", org, lifecycleAction: action);
@@ -152,6 +156,89 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
         Assert.True(await row.ReadAsync());
         return (row.GetBoolean(0), row.GetBoolean(1), row.GetInt64(2), row.GetInt64(3),
             row.GetInt64(4), row.GetInt64(5), row.GetInt64(6), row.GetInt64(7));
+    }
+
+    [Fact]
+    public async Task Emergency_private_inputs_must_never_be_spliced_into_logged_SQL()
+    {
+        var sql = await File.ReadAllTextAsync(
+            Script("stage-emergency-admin-replacement.sql"));
+        Assert.Contains("CREATE TEMP TABLE", sql);
+        Assert.Contains("ON COMMIT DROP", sql);
+        Assert.Contains(
+            "FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py emergency'",
+            sql);
+        Assert.Contains("FROM pg_temp.comuni_private_input", sql);
+        foreach (var prohibited in new[] {
+            ":'emergency_org'", ":'emergency_old_issuer'",
+            ":'emergency_old_subject'", ":'emergency_new_issuer'",
+            ":'emergency_new_subject'", ":'emergency_ticket'",
+            ":'emergency_security_reviewer'",
+            ":'emergency_municipal_reviewer'", ":'emergency_reason'"
+        })
+            Assert.DoesNotContain(prohibited, sql);
+    }
+
+    [Fact]
+    public async Task Emergency_client_copy_does_not_log_opaque_subject_with_statement_logging_all()
+    {
+        var org = await Seed(administrators: [Old]);
+        Assert.Equal(0, (await Lifecycle(org)).Code);
+        var opaque = "privacy-probe-'::;SELECT-" + Guid.NewGuid().ToString("N");
+        var start = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+        var result = await Stage(org, newSubject: opaque, logStatements: true);
+        Assert.Equal(0, result.Code);
+        Assert.DoesNotContain(opaque, result.Output);
+        Assert.Equal((true, true, 1L, 1L, 1L, 1L, 1L, 0L), await State(org));
+
+        // GitHub Actions PostgreSQL 17 service uses container stderr logging.
+        // Inspect actual server logs under log_statement=all, not just psql stdout.
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "ps", "--filter", "ancestor=postgres:17-alpine",
+                                    "--format", "{{.ID}}" })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI PostgreSQL must be inspectable for statement log leakage.");
+            return;
+        }
+        var containerIds = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        var psErrors = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(containerIds))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI PostgreSQL service must expose its server logs to verify privacy.");
+            return;
+        }
+        Assert.DoesNotContain('\n', containerIds);
+        using var dockerLog = new Process();
+        dockerLog.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", start, containerIds })
+            dockerLog.StartInfo.ArgumentList.Add(arg);
+        dockerLog.Start();
+        var stdout = dockerLog.StandardOutput.ReadToEndAsync();
+        var stderr = dockerLog.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await dockerLog.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, dockerLog.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.DoesNotContain(opaque, serverLog);
     }
 
     [Fact]
