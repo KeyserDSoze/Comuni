@@ -146,6 +146,7 @@ class StagedRolloutTests(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(PLAN_GATE),
              "--stable-revision", stable, "--candidate-revision", candidate,
+             "--source-commit-sha", SOURCE_COMMIT_SHA,
              "--stable-secret-version", STABLE_VERSION,
              "--candidate-secret-version", CANDIDATE_VERSION,
              "--candidate-key-id", CANDIDATE_KEY_ID,
