@@ -110,9 +110,9 @@ class OidcIdentityHandoffTests(unittest.TestCase):
     def test_workflow_uses_three_separate_login_boundaries_and_no_secret_fallback(self):
         self.assertEqual(3, DEPLOY.count("uses: azure/login@v2"))
         self.assertEqual(3, DEPLOY.count("scripts/azure/check-azure-oidc-session.py"))
-        self.assertIn("AZURE_ACR_PUSH_CLIENT_ID: \${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
-        self.assertIn("client-id: \${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
-        self.assertEqual(2, DEPLOY.count("client-id: \${{ secrets.AZURE_CLIENT_ID }}"))
+        self.assertIn("AZURE_ACR_PUSH_CLIENT_ID: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
+        self.assertIn("client-id: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
+        self.assertEqual(2, DEPLOY.count("client-id: ${{ secrets.AZURE_CLIENT_ID }}"))
         self.assertIn('--deployer-client-id "$ACR_PUSH_CLIENT_ID"', DEPLOY)
         self.assertIn('--infra-client-id "$ARM_CLIENT_ID"', DEPLOY)
 
@@ -140,7 +140,7 @@ class OidcIdentityHandoffTests(unittest.TestCase):
             block = block[:block.index("      - name: ") if "      - name: " in block else len(block)]
             self.assertIn("az logout", block)
             self.assertIn("az account clear", block)
-        self.assertNotIn("client-id: \${{ inputs.", DEPLOY)
+        self.assertNotIn("client-id: ${{ inputs.", DEPLOY)
         self.assertNotIn("az acr update --role-assignment-mode", DEPLOY)
 
 
