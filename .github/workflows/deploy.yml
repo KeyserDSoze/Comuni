@@ -87,8 +87,11 @@ jobs:
             bash scripts/azure/check-platform-inventory-secret.sh "${AZURE_PREFIX}-kv" "$PLATFORM_INVENTORY_SECRET_VERSION"
           fi
       # Candidate revisions must get a unique suffix for each immutable commit.
-      - name: Pin candidate revision suffix to source commit
-        run: echo "TF_VAR_candidate_revision_suffix=r${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+      - name: Pin candidate revision suffix and full source commit
+        run: |
+          set -euo pipefail
+          echo "TF_VAR_candidate_revision_suffix=r${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+          echo "TF_VAR_source_commit_sha=$GITHUB_SHA" >> "$GITHUB_ENV"
       - name: Build, push and verify digest-pinned image
         env:
           REGISTRY_NAME: ${{ vars.ACR_NAME }}
