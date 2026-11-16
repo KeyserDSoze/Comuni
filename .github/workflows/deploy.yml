@@ -47,6 +47,14 @@ jobs:
       TF_VAR_location: ${{ vars.AZURE_LOCATION }}
     steps:
       - uses: actions/checkout@v4
+      # Environment-level OIDC trust is broad without a main-only guard.
+      # Do not acquire either federated Azure identity on unapproved refs.
+      - name: Reject unapproved GitHub release source before OIDC
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "KeyserDSoze/Comuni" ]] || exit 1
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || exit 1
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || exit 1
       - name: Login Azure infrastructure identity for RBAC preflight
         uses: azure/login@v2
         with:
