@@ -135,7 +135,16 @@ class SensitiveStagePlanCleanupTests(unittest.TestCase):
             with self.subTest(failure=failure):
                 result, calls, mode, exists, _ = run_stage(failure)
                 self.assertEqual(failure == "", result.returncode == 0)
-                self.assertEqual(expected_calls, calls)
+                # 'terraform show | python3 gate' launches both sides of
+                # the pipe concurrently: log-write order is NOT guaranteed.
+                # Only the plan must precede the pipe and an apply must
+                # follow successful completion of BOTH pipe commands.
+                self.assertEqual("plan", calls[0])
+                self.assertCountEqual(expected_calls, calls)
+                if "apply" in expected_calls:
+                    self.assertEqual("apply", calls[-1])
+                else:
+                    self.assertNotIn("apply", calls)
                 self.assertFalse(exists, "sensitive binary plan survived the step")
                 self.assertEqual("600", mode, "Terraform plan must be created private")
                 self.assertNotIn(SENTINEL, result.stdout + result.stderr)
