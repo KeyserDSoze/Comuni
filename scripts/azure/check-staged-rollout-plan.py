@@ -116,6 +116,12 @@ def validate(plan, args):
         actions = item["change"].get("actions", [])
         require(isinstance(actions, list) and "delete" not in actions,
                 "destructive infrastructure changes require a separate approved procedure")
+        # The legacy stable PostgreSQL connection is currently managed by
+        # Terraform with a versionless ACA reference. Never publish or rotate
+        # that Key Vault secret in an unattended candidate staging plan.
+        if item.get("address") == "azurerm_key_vault_secret.postgres_connection":
+            require(actions == ["no-op"],
+                    "legacy stable runtime PostgreSQL credential must remain unchanged")
     app_changes = [item for item in changes
                    if isinstance(item, dict) and item.get("address") == APP_ADDRESS]
     require(len(app_changes) == 1, "a single existing container-app change is required")

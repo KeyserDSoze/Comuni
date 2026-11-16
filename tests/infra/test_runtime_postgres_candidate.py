@@ -128,6 +128,21 @@ class RuntimePostgresCandidateSecretTests(unittest.TestCase):
         after["secret"].pop()
         self.assertNotEqual(0, gate(plan).returncode)
 
+    def test_no_change_to_legacy_stable_runtime_key_vault_secret_during_staging(self):
+        plan = runtime_plan()
+        plan["resource_changes"].append({
+            "address": "azurerm_key_vault_secret.postgres_connection",
+            "type": "azurerm_key_vault_secret",
+            "change": {"actions": ["update"],
+                       "before": {"value": "secret-do-not-log"},
+                       "after": {"value": "different-do-not-log"}},
+        })
+        rejected = gate(plan)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertNotIn("secret-do-not-log", rejected.stdout + rejected.stderr)
+        plan["resource_changes"][-1]["change"]["actions"] = ["no-op"]
+        self.assertEqual(0, gate(plan).returncode)
+
     def test_collision_of_prefix_with_an_existing_version_is_not_rewritten(self):
         plan = runtime_plan()
         old = VERSION[:16] + "e" * 16
