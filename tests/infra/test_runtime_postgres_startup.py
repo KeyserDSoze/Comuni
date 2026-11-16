@@ -26,8 +26,8 @@ class RuntimePostgresStartupContractTests(unittest.TestCase):
         self.assertIn("SslMode.VerifyFull", source)
         self.assertIn("TrustServerCertificate", source)
         self.assertIn("comuni_app_runtime", source)
-        self.assertIn("postgres.database.azure.com", source)
-        self.assertIn('environmentName is not ("Development" or "Testing")', source)
+        self.assertIn(r"\.postgres\.database\.azure\.com", source)
+        self.assertIn('if (environmentName is "Development" or "Testing")', source)
 
     def test_no_in_place_legacy_terraform_secret_update_in_this_slice(self):
         self.assertIn('name                = "postgres-connection"', TF)
