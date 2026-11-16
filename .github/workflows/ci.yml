@@ -111,6 +111,15 @@ jobs:
       - run: terraform fmt -recursive infra
       - run: terraform -chdir=infra init -backend=false -input=false
       - run: terraform -chdir=infra validate
+      # Temporary, read-only upstream registry audit for #77. Results must
+      # be reviewed and pinned before this probe is removed.
+      - name: Inspect exact upstream base OCI index digests for SHA approval
+        run: |
+          set -euo pipefail
+          for image in mcr.microsoft.com/dotnet/sdk:10.0 node:22-alpine mcr.microsoft.com/dotnet/aspnet:10.0; do
+            echo "BASE_SOURCE=$image"
+            docker buildx imagetools inspect "$image" | sed -n '1,32p'
+          done
       - name: Test Key Vault secret state boundary and preflight (no Azure)
         run: python3 -m unittest discover -s tests/infra -p 'test_*.py' -v
 
