@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import unittest
 
-from test_staged_rollout import fixture_plan, STABLE_REVISION, CANDIDATE_REVISION, STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, VAULT_URI, RUNTIME_POSTGRES_VERSION
+from test_staged_rollout import fixture_plan, STABLE_REVISION, CANDIDATE_REVISION, STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, VAULT_URI, RUNTIME_POSTGRES_VERSION, SOURCE_COMMIT_SHA
 
 ROOT = Path(__file__).resolve().parents[2]
 TF = (ROOT / "infra/main.tf").read_text()
@@ -43,6 +43,7 @@ def check(plan, enabled=False, version=""):
         sys.executable, str(GATE),
         "--stable-revision", STABLE_REVISION,
         "--candidate-revision", CANDIDATE_REVISION,
+        "--source-commit-sha", SOURCE_COMMIT_SHA,
         "--stable-secret-version", STABLE_VERSION,
         "--candidate-secret-version", CANDIDATE_VERSION,
         "--candidate-key-id", CANDIDATE_KEY_ID,
