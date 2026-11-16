@@ -44,6 +44,16 @@ public sealed class OrganizationActivationGate : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
+            -- Refuse a schema downgrade that would implicitly activate any
+            -- pending tenant by removing the new authorization gate.
+            DO $downgrade$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM platform.organizations WHERE is_activated = FALSE) THEN
+                    RAISE EXCEPTION 'Cannot remove activation gate while pending organizations exist';
+                END IF;
+            END
+            $downgrade$;
+
             CREATE OR REPLACE VIEW platform.platform_organization_inventory
                 WITH (security_barrier = true)
             AS
