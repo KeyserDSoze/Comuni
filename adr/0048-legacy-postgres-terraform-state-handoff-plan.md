@@ -1,0 +1,29 @@
+# ADR 0048 — Piano Terraform fail-closed per handoff NON distruttivo della secret PostgreSQL legacy
+
+- Stato: Accepted per **gate di lettura offline**, non per migrazione dello State reale o esecuzione Azure.
+- Data: 2026-11-16.
+- Issue: #55, sotto le epiche #49/#5/#6 e #19.
+- Dipendenze: ADR 0043–0047.
+- Riferimenti: [HashiCorp — Remove a resource from state](https://developer.hashicorp.com/terraform/language/state/remove), [HashiCorp — removed block](https://developer.hashicorp.com/terraform/language/block/removed), [Terraform JSON plan format](https://developer.hashicorp.com/terraform/internals/json-format), [Azure Container Apps secrets](https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets).
+
+## Contesto e minaccia
+
+La vecchia `azurerm_key_vault_secret.postgres_connection` è Terraform-managed e ha un `value` contenente la password del login `comuni_app_runtime` in una connection string con `SSL Mode=Require`. L'unica ACA della piattaforma conserva una secret app-scoped `postgres-connection` che punta al `versionless_id` del resource, potenzialmente usato da revisioni stabili e inattive. Gli snapshot storici del remote State possono ancora contenere il valore, indipendentemente dal fatto che un piano futuro ne cambi la gestione.
+
+Le ADR 0043–0045 hanno introdotto la connessione candidata versionata con VerifyFull e binding all'esatto FQDN server; #54 ha predisposto un preflight metadata-only di tutte le revisioni, ma **non** ha dismesso il segreto. Il gate di stage della ADR 0046 proibisce qualunque mutazione diversa da `azurerm_container_app.main update`. Serve un meccanismo **separato** che impedisca a un futuro piano di rimozione dalla gestione Terraform di essere interpretato come cancellazione reale, cambi di ACA o upgrade simultanei di altre risorse.
+
+## Decisione
+
+1. **Separare piano e applicazione.** Un nuovo script `scripts/azure/check-legacy-postgres-handoff-plan.py` legge solo il JSON `terraform show -json <piano binario>` da stdin, non invoca Terraform, Azure CLI, Key Vault o State API e non modifica il workflow di deploy protetto. Esamina la forma del piano, **non** il contenuto delle credenziali.
+2. **Un solo `forget` consentito:** nel JSON `resource_changes`, richiedere esattamente l'azione `["forget"]` per `azurerm_key_vault_secret.postgres_connection`, tipo `azurerm_key_vault_secret`, `before` con identità/ID e `versionless_id` legittimo per `https://<vault>.vault.azure.net/secrets/postgres-connection`, `after=null`. Questo corrisponde alla semantica del futuro `removed { from = azurerm_key_vault_secret.postgres_connection; lifecycle { destroy = false } }`. Una `["delete"]`, `["update"]`, `["create"]` o `["delete", "create"]` è vietata. Qualsiasi altra risorsa, comprese Key Vault, PostgreSQL, RBAC, rete o altre ACA, può soltanto essere `["no-op"]`.
+3. **Nessun drift o cambio di secret app-scoped.** Il piano deve contenere `azurerm_container_app.main` di tipo corretto `["no-op"]`, con `before==after`; la vecchia secret app-scoped `postgres-connection` deve rimanere invariata e il suo URI identico al precedente `versionless_id` del resource. Anche la candidata deve continuare a usare un segreto `pg-<16hex>` che punta a una versione completa `postgres-runtime-connection/<32hex>` nello stesso vault, senza connessione inline. Se cambia l'app o qualunque output, appare drift, mancano dati, si duplicano indirizzi o il piano è malformato, fallimento chiuso. **Non è prevista alcuna eccezione per modifiche accessorie.**
+4. **Metadati non significano autorizzazione.** Il gate produce soltanto messaggi statici (no nomi resource, URI, host, valori `value` o plan), e non è collegato al job `terraform apply`. Non verifica la provenienza del piano, la relazione tra diff Git e State, il corretto ownership dell'identità Azure, i byte della password, l'inventario completo esterno o l'esistenza dei backup. Una positiva verifica della forma non prova che sia opportuno trasferire il secret in questo momento.
+5. **Futuro change separato e approvato:** un operatore deve verificare la release candidata stable, l'esito live del preflight #54 su tutte le revisioni ACA (anche inattive) e gli eventuali consumatori extra; sostituire prima il riferimento `.versionless_id` nel Terraform source con l'URI equivalente dal Key Vault già in uso, senza mutare il valore della secret app-scoped; proporre in una change distinta il `removed { destroy=false }`; controllare backup/immutabilità e retention degli snapshot remoti, audit/RBAC e lo stesso plan validato in un runner protetto. La decisione di applicare e il successivo eventuale ritiro della secret o rotazione password **non sono effettuati** in questa implementazione e richiedono approval e test reali CA/VNet/IdP/RLS/rollback.
+6. **TDD:** RED in `tests/infra/test_legacy_postgres_handoff_plan.py` su un solo `forget` lecito e numerosi `delete/update/forget` illegittimi, mancate identità, URL/versioni/inline, drift, output e non-disclosure. GREEN nel validatore, poi CI completa xUnit/PostgreSQL17, React/Playwright, Terraform/Python, CodeQL, SCA e Docker sulla HEAD `main`. Non si aggiungono blocchi `removed` al Terraform live né passi apply al workflow.
+
+## Alternative scartate
+
+- Applicare direttamente `removed` in `infra/main.tf` durante uno stage a 0%: rischia di aggiornare automaticamente lo State con privilegi produzione prima del preflight live, e viola ADR 0046.
+- Eliminare la secret Azure o usare `terraform destroy`/`terraform state rm` senza plan: non consente revisione dichiarativa in sicurezza.
+- Leggere i valori della secret o stampare il piano per dimostrare una connessione: introdurrebbe esfiltrazione in log e non dimostrerebbe TLS o isolamento.
+- Considerare le credenziali storiche sanificate dopo `forget`: snapshot precedenti e versioni del secret restano sensibili.
