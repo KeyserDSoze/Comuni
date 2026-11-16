@@ -217,6 +217,54 @@ class ACRRestContractTests(unittest.TestCase):
                     with self.assertRaises(Exception):
                         client.tag_digest(SHA, expected_digest=DIGEST)
 
+    def test_tag_swap_during_patch_blocks_manifest_mutation(self):
+        # The PATCH tag response already reveals a changed digest; do not
+        # proceed to PATCH manifest even if the first preflight GET matched.
+        network = HTTPS([
+            reply({"refresh_token": REFRESH}),
+            reply({"access_token": BEARER}),
+            reply(tag_object()),
+            reply(tag_object(WRONG)),
+        ])
+        opener = mock.Mock()
+        opener.open = network.open
+        with mock.patch.object(self.mod.urllib.request, "build_opener",
+                               return_value=opener), \
+             mock.patch.object(self.mod.subprocess, "run",
+                               return_value=SimpleNamespace(
+                                   returncode=0, stdout=AAD, stderr=SECRET)):
+            client = self.mod.ACRClient(REGISTRY, HOST, TENANT)
+            client.authenticate()
+            with self.assertRaises(Exception):
+                client.lock(SHA, DIGEST)
+        self.assertEqual(["POST", "POST", "GET", "PATCH"],
+                         [r.get_method() for r, _ in network.requests])
+        self.assertEqual([], network.responses)
+
+    def test_bad_http_status_and_duplicate_json_keys_fail_closed(self):
+        for body, status in (
+            ({"refresh_token": REFRESH}, 301),
+            ({"refresh_token": REFRESH}, 307),
+            ({"refresh_token": REFRESH}, 401),
+            ({"refresh_token": REFRESH}, 500),
+            (b'{"refresh_token":"eyJ.valid.sig","refresh_token":"eyJ.evil.sig"}', 200),
+            (b"[]" , 200), (b"null", 200),
+            (b" " * 66000, 200),
+        ):
+            with self.subTest(status=status, payload_type=type(body).__name__):
+                fake = HTTPS([reply(body, status)])
+                opener = mock.Mock()
+                opener.open = fake.open
+                with mock.patch.object(self.mod.urllib.request, "build_opener",
+                                       return_value=opener), \
+                     mock.patch.object(self.mod.subprocess, "run",
+                                       return_value=SimpleNamespace(
+                                           returncode=0, stdout=AAD, stderr=SECRET)):
+                    client = self.mod.ACRClient(REGISTRY, HOST, TENANT)
+                    with self.assertRaises(Exception):
+                        client.authenticate()
+                self.assertEqual(1, len(fake.requests))
+
     def test_workflow_and_scripts_must_never_use_control_plane_cli(self):
         self.assertNotIn("az acr login", WORKFLOW)
         for content in (RESOLVER, LOCKER):
