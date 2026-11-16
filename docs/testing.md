@@ -342,3 +342,11 @@ Definition of Done dell'incremento: **7/7 CI** sull'ultimo commit di `main` (Ter
 Il workflow deve chiamare lo script **dopo** il resolver del digest da Docker push/ACR, **prima** di Trivy, firma SLSA/SPDX e Terraform plan. GREEN conserva test precedenti e controlli di RLS/OIDC/Key Vault/stable 100%-candidate 0%. Per completare l'issue servono i sette job verdi sullo **stesso SHA finale di main** (Terraform/Python, xUnit/PostgreSQL, React/Playwright, CodeQL C#/JS, SCA NuGet/npm, Docker).
 
 Questa CI verifica i **contratti di comando**, non la reale persistenza del lock ACR o il modello IAM del principal OIDC. La prima prova reale con owner Azure è necessaria per la #65/#6; non è permesso dichiarare produzione sicura in base ai fake.
+
+## #69 — TDD preflight read-only ACR RBAC e ruoli per UAI/runner (ADR 0060)
+
+La suite `tests/infra/test_aca_acr_rbac_preflight.py` installa un fake rigoroso del comando `az` in una directory temporanea su PATH: cinque chiamate attese **di sola lettura** (`az acr show`, `az identity show`, `az ad sp show`, due `az role assignment list` per principal ID), con flag identici a quelli della CLI e controllo anti-leak del sentinel. Il test positivo verifica registry Basic/RBAC, admin disabilitato, `AcrPull` per la UAI e `AcrPush` per il deployer OIDC **distinto**. RED: il verifier e il passo pre-push non esistevano; GREEN: script fail closed e invocazione dopo login. Le matrici avversariali rifiutano `rbac-abac`, admin true, host/ID/prefix spoofati, client e object ID sovrapposti, ruolo non presente, privilegio ereditato, assegnazione condizionata, errori in tutte le cinque chiamate e JSON malformati, senza mai mutare ruoli.
+
+Un test protegge anche Terraform: esiste solo l'assegnazione `AcrPull` alla managed identity dell'app, non `AcrPush`. La CI Python/Terraform, xUnit/PostgreSQL, React/Playwright, CodeQL C#/JS, SCA NuGet/npm e Docker devono essere **7/7 verdi sullo stesso SHA finale di `main`** prima di chiudere #69.
+
+Questa CI verifica esclusivamente la forma delle chiamate e risposte simulate; non effettua autenticazione reale Entra/Azure, test `docker pull` come ACA o prova dei permessi per modificare i lock ACR. La parent #65 e le issue #5/#6/#49 restano aperte per least privilege live e go-live.
