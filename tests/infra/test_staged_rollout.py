@@ -25,24 +25,36 @@ VAULT_URI = "https://comuni-itn-001-kv.vault.azure.net/"
 
 
 def fixture_plan():
+    identity_id = "/subscriptions/synthetic/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/comuni-app"
     old_secret = {
+        "identity": identity_id,
         "name": "tenant-proof-key",
         "key_vault_secret_id": VAULT_URI + "secrets/tenant-proof-key/" + STABLE_VERSION,
     }
     candidate_secret = {
+        "identity": identity_id,
         "name": "tp-" + CANDIDATE_VERSION[:16],
         "key_vault_secret_id": VAULT_URI + "secrets/tenant-proof-key/" + CANDIDATE_VERSION,
     }
     runtime_connection = {
+        "identity": identity_id,
         "name": "pg-" + RUNTIME_POSTGRES_VERSION[:16],
         "key_vault_secret_id": VAULT_URI + "secrets/postgres-runtime-connection/" + RUNTIME_POSTGRES_VERSION,
     }
+    shared = {
+        "identity": [{"type": "UserAssigned", "identity_ids": [identity_id]}],
+        "registry": [{"server": "synthetic.azurecr.io", "identity": identity_id}],
+        "container_app_environment_id": "/subscriptions/synthetic/containerAppEnvironment",
+    }
+    ingress_settings = {"external_enabled": True, "target_port": 8080, "transport": "auto"}
     before = {
+        **shared,
         "revision_mode": "Single",
         "secret": [old_secret],
-        "ingress": [{"traffic_weight": [{"latest_revision": True, "percentage": 100}]}],
+        "ingress": [{**ingress_settings, "traffic_weight": [{"latest_revision": True, "percentage": 100}]}],
     }
     after = {
+        **shared,
         "revision_mode": "Multiple",
         "secret": [old_secret, candidate_secret, runtime_connection],
         "template": [{
@@ -57,6 +69,7 @@ def fixture_plan():
             }],
         }],
         "ingress": [{
+            **ingress_settings,
             "traffic_weight": [
                 {"latest_revision": False, "revision_suffix": STABLE_REVISION, "percentage": 100},
                 {"latest_revision": True, "revision_suffix": None, "percentage": 0, "label": CANDIDATE_REVISION},
