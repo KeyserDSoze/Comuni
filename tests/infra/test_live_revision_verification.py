@@ -220,7 +220,8 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         ):
             result, _ = self.call(postgres_host=postgres_host)
             self.assertNotEqual(0, result.returncode)
-            self.assertNotIn(postgres_host, result.stdout + result.stderr)
+            if postgres_host:
+                self.assertNotIn(postgres_host, result.stdout + result.stderr)
         result, _ = self.call(postgres_fail=True)
         self.assertNotEqual(0, result.returncode)
 
