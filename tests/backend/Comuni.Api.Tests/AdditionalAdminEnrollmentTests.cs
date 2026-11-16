@@ -203,7 +203,6 @@ public sealed class AdditionalAdminEnrollmentTests
         }
         Assert.NotEqual(0, (await Add(inactive)).Code);
         var legacy = await Seed();
-        Assert.Equal(8, negativeIndex);
         await using (var conn = new NpgsqlConnection(Owner))
         {
             await conn.OpenAsync();
@@ -244,6 +243,7 @@ public sealed class AdditionalAdminEnrollmentTests
             Assert.NotEqual(0, denied.Code); // case must fail closed
             negativeIndex++;
         }
+        Assert.Equal(8, negativeIndex);
         await using (var conn = new NpgsqlConnection(Owner))
         {
             await conn.OpenAsync();
