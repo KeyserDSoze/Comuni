@@ -62,6 +62,10 @@ def fixture_plan():
             "min_replicas": 1,
             "container": [{
                 "env": [
+                    {"name": "ASPNETCORE_ENVIRONMENT", "value": "Production"},
+                    {"name": "Authentication__Mode", "value": "Oidc"},
+                    {"name": "Authentication__Authority", "value": "https://idp.example.test/"},
+                    {"name": "Authentication__Audience", "value": "comuni-api"},
                     {"name": "Security__TenantProofKey", "secret_name": candidate_secret["name"]},
                     {"name": "Security__TenantProofKeyId", "value": CANDIDATE_KEY_ID},
                     {"name": "ConnectionStrings__Default", "secret_name": runtime_connection["name"]},
@@ -210,7 +214,7 @@ class StagedRolloutTests(unittest.TestCase):
             VAULT_URI + "secrets/tenant-proof-key/" + "c" * 32)
         cases.append(p)
         p = fixture_plan()
-        p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][0]["secret_name"] = (
+        p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][4]["secret_name"] = (
             "tenant-proof-key")
         cases.append(p)
         for plan in cases:
@@ -236,7 +240,7 @@ class StagedRolloutTests(unittest.TestCase):
         p["resource_changes"][0]["change"]["after"]["ingress"][0]["traffic_weight"][0]["revision_suffix"] = "wrong"
         cases.append(p)
         p = fixture_plan()
-        p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][1]["value"] = "forged"
+        p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][5]["value"] = "forged"
         cases.append(p)
         p = fixture_plan()
         p["resource_changes"][0]["change"]["after"]["revision_mode"] = "Single"
