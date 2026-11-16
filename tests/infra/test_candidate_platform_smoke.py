@@ -63,15 +63,17 @@ class FakeResponse:
 
 
 def item(id, **changes):
-    return dict(id=id, name="Comune sintetico test", isSuspended=False,
-                protocolEnabled=True, **changes)
+    return dict(id=id, name="Comune sintetico test",
+                isSuspended=(id != A), protocolEnabled=(id == A),
+                lifecycleStatus=("active" if id == A else "suspended" if id == B else "created"),
+                **changes)
 
 
 class FakeOpener:
     def __init__(self, *, platform_role="Superadmin", deny_tenants=True,
                  extra_field=False, bad_cursor=False, wrong_order=False,
                  leak_field=False, redirect=False, bad_json=False,
-                 missing_tenant=False, always_next=False,
+                 missing_tenant=False, always_next=False, invalid_lifecycle=False,
                  deny_platform=False, http_status=200):
         self.requests = []
         self.platform_role = platform_role
@@ -84,6 +86,7 @@ class FakeOpener:
         self.bad_json = bad_json
         self.missing_tenant = missing_tenant
         self.always_next = always_next
+        self.invalid_lifecycle = invalid_lifecycle
         self.deny_platform = deny_platform
         self.http_status = http_status
 
@@ -134,6 +137,8 @@ class FakeOpener:
                 next_cursor = A
             if self.bad_cursor:
                 next_cursor = "untrusted-cursor"
+            if self.invalid_lifecycle and page:
+                page[0]["lifecycleStatus"] = "retired"
             if self.leak_field and page:
                 page[0]["subject"] = "personal-identifier-should-not-be-visible"
             result = {"organizations": page, "nextCursor": next_cursor}
@@ -221,7 +226,7 @@ class PlatformCandidateTests(unittest.TestCase):
         for o in [Opener(extra_field=True), Opener(leak_field=True),
                   Opener(bad_cursor=True), Opener(wrong_order=True),
                   Opener(missing_tenant=True), Opener(always_next=True),
-                  Opener(bad_json=True)]:
+                  Opener(bad_json=True), Opener(invalid_lifecycle=True)]:
             with self.subTest(o=o.__dict__.keys()), self.assertRaises(smoke.SmokeRejected):
                 run(o)
 

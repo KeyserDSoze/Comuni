@@ -10,9 +10,11 @@ const oidc = {
   scope: 'openid profile api://comuni-api/access_as_user'
 };
 const alpha = { id: '11111111-1111-1111-1111-111111111111', name: 'Comune Alfa',
-  isSuspended: false, protocolEnabled: true };
+  isSuspended: false, protocolEnabled: true, lifecycleStatus: 'active' };
 const beta = { id: '22222222-2222-2222-2222-222222222222', name: 'Comune Beta',
-  isSuspended: true, protocolEnabled: false };
+  isSuspended: true, protocolEnabled: false, lifecycleStatus: 'suspended' };
+const gamma = { id: '33333333-3333-3333-3333-333333333333', name: 'Comune Gamma',
+  isSuspended: true, protocolEnabled: false, lifecycleStatus: 'created' };
 
 async function login(page: Page, municipal = false,
   listStatus: () => number = () => 200) {
@@ -37,7 +39,7 @@ async function login(page: Page, municipal = false,
     if (status !== 200) return route.fulfill({ status, body: '{}' });
     const cursor = new URL(route.request().url()).searchParams.get('after');
     const body = cursor
-      ? { organizations: [beta], nextCursor: null }
+      ? { organizations: [beta, gamma], nextCursor: null }
       : { organizations: [alpha], nextCursor: alpha.id };
     return route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify(body) });
@@ -73,8 +75,9 @@ test('Superadmin visualizza solamente metadata minimali con paginazione', async 
   await expect(page.getByRole('button', { name: 'Carica altri Comuni' })).toBeVisible();
   await page.getByRole('button', { name: 'Carica altri Comuni' }).click();
   await expect(table.getByText('Comune Beta')).toBeVisible();
-  // Inventory's compatibility flag includes both suspended and pending.
-  await expect(table.getByText('Non operativo')).toBeVisible();
+  await expect(table.getByText('Comune Gamma')).toBeVisible();
+  await expect(table.getByText('Sospeso', { exact: true })).toBeVisible();
+  await expect(table.getByText('Creato', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Carica altri Comuni' })).toHaveCount(0);
   expect(trace.requests).toHaveLength(2);
   expect(trace.requests[0]).toContain('limit=10');
@@ -117,6 +120,21 @@ test('lingua e tema della vista elenco restano quelli della PWA unica', async ({
   await expect(page.getByRole('heading', { name: 'Comuni registrati' })).toBeVisible();
   await page.getByRole('button', { name: 'Lingua' }).click();
   await expect(page.getByRole('heading', { name: 'Registered municipalities' })).toBeVisible();
+  await page.getByRole('button', { name: 'Load more municipalities' }).click();
+  await expect(page.getByRole('table', { name: 'Registered municipalities' }).getByText('Created', { exact: true })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Registered municipalities' }).getByText('Suspended', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Theme' }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
+});
+
+test('payload inventario incoerente non viene mostrato', async ({ page }) => {
+  await login(page);
+  await expect(page.getByRole('table', { name: 'Comuni registrati' }).getByText('Comune Alfa')).toBeVisible();
+  await page.route('**/api/v1/platform/organizations?**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ organizations: [{ ...beta, lifecycleStatus: 'active' }], nextCursor: null })
+  }));
+  await page.getByRole('button', { name: 'Carica altri Comuni' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Comuni registrati' })).toHaveCount(0);
 });

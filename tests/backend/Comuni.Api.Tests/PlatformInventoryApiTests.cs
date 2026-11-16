@@ -36,19 +36,20 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
         return (subject, id);
     }
 
-    private static async Task<Guid> MunicipalityAsync(bool suspended, bool protocol)
+    private static async Task<Guid> MunicipalityAsync(bool suspended, bool protocol, bool activated = true)
     {
         var id = Guid.NewGuid();
         await using var db = new NpgsqlConnection(Owner);
         await db.OpenAsync();
         await using var insert = new NpgsqlCommand("""
-            INSERT INTO platform.organizations(id, name, is_suspended)
-                VALUES (@id, 'Comune inventario sintetico', @suspended);
+            INSERT INTO platform.organizations(id, name, is_suspended, is_activated)
+                VALUES (@id, 'Comune inventario sintetico', @suspended, @activated);
             INSERT INTO platform.organization_modules(organization_id, module_key, enabled)
                 VALUES (@id, 'protocol', @protocol);
             """, db);
         insert.Parameters.AddWithValue("id", id);
         insert.Parameters.AddWithValue("suspended", suspended);
+        insert.Parameters.AddWithValue("activated", activated);
         insert.Parameters.AddWithValue("protocol", protocol);
         await insert.ExecuteNonQueryAsync();
         return id;
@@ -71,9 +72,10 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
     {
         var active = await MunicipalityAsync(false, true);
         var suspended = await MunicipalityAsync(true, false);
+        var created = await MunicipalityAsync(false, false, activated: false);
         var (subject, operatorId) = await OperatorAsync();
         using var client = factory.Authenticated(factory.Token(subject: subject, organizationId: ""));
-        var all = new List<(Guid Id, bool Suspended, bool Protocol)>();
+        var all = new List<(Guid Id, bool Suspended, bool Protocol, string Lifecycle)>();
         string? after = null;
         var pages = 0;
 
@@ -89,9 +91,14 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
             var organizations = root.GetProperty("organizations");
             Assert.Single(organizations.EnumerateArray());
             var row = organizations[0];
-            Assert.Equal(4, row.EnumerateObject().Count());
+            Assert.Equal(5, row.EnumerateObject().Count());
             all.Add((row.GetProperty("id").GetGuid(), row.GetProperty("isSuspended").GetBoolean(),
-                row.GetProperty("protocolEnabled").GetBoolean()));
+                row.GetProperty("protocolEnabled").GetBoolean(),
+                row.GetProperty("lifecycleStatus").GetString()!));
+            Assert.Contains(row.GetProperty("lifecycleStatus").GetString(),
+                new[] { "created", "active", "suspended" });
+            Assert.Equal(row.GetProperty("lifecycleStatus").GetString() != "active",
+                row.GetProperty("isSuspended").GetBoolean());
             Assert.True(row.GetProperty("name").GetString()!.Length is > 0 and <= 200);
             Assert.DoesNotContain(subject, root.ToString());
             Assert.DoesNotContain("identityIssuer", root.ToString());
@@ -108,8 +115,9 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
 
         Assert.Equal(all.Count, all.Select(x => x.Id).Distinct().Count());
         Assert.Equal(all.Select(x => x.Id).Order(), all.Select(x => x.Id));
-        Assert.Contains(all, x => x.Id == active && !x.Suspended && x.Protocol);
-        Assert.Contains(all, x => x.Id == suspended && x.Suspended && !x.Protocol);
+        Assert.Contains(all, x => x.Id == active && !x.Suspended && x.Protocol && x.Lifecycle == "active");
+        Assert.Contains(all, x => x.Id == suspended && x.Suspended && !x.Protocol && x.Lifecycle == "suspended");
+        Assert.Contains(all, x => x.Id == created && x.Suspended && !x.Protocol && x.Lifecycle == "created");
         Assert.Equal(pages, await AuditCountAsync(operatorId));
         await using var db = new NpgsqlConnection(Owner);
         await db.OpenAsync();
@@ -249,7 +257,7 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
             Assert.Equal("42501", error.SqlState);
         }
         await using (var query = new NpgsqlCommand("""
-            SELECT id, name, is_suspended, protocol_enabled
+            SELECT id, name, is_suspended, protocol_enabled, lifecycle_status
             FROM platform.platform_organization_inventory ORDER BY id LIMIT 2
             """, platform))
         {
