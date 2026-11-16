@@ -92,15 +92,15 @@ class RuntimePostgresCandidateSecretTests(unittest.TestCase):
             plan["resource_changes"][0]["change"]["after"]["secret"][-1]["key_vault_secret_id"] = changed
             cases.append(plan)
         plan = runtime_plan()
-        plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][-2] = {
+        plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][-3] = {
             "name": "ConnectionStrings__Default", "secret_name": "postgres-connection"}
         cases.append(plan)
         plan = runtime_plan()
-        plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][-2] = {
+        plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][-3] = {
             "name": "ConnectionStrings__Default", "value": "Password=example-dont-print"}
         cases.append(plan)
         plan = runtime_plan()
-        plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"].pop(-2)
+        plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"].pop(-3)
         cases.append(plan)
         plan = runtime_plan()
         plan["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"].append(
