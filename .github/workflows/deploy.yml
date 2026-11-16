@@ -115,6 +115,21 @@ jobs:
             --registry-host "$REGISTRY_HOST" \
             --push-output-file "$PUSH_OUTPUT" \
             --github-env "$GITHUB_ENV"
+      # Lock only the freshly pushed SHA tag and matching OCI manifest.
+      # Tag and manifest have independent Azure ACR write/delete attributes.
+      # A failure blocks this release; never unlock a shared registry in CI.
+      - name: Lock and verify approved ACR tag and OCI manifest
+        env:
+          REGISTRY_NAME: ${{ vars.ACR_NAME }}
+          REGISTRY_HOST: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          set -euo pipefail
+          python3 scripts/azure/lock-approved-image.py \
+            --registry-name "$REGISTRY_NAME" \
+            --registry-host "$REGISTRY_HOST" \
+            --image "$TF_VAR_image" \
+            --candidate-image-digest "$CANDIDATE_IMAGE_DIGEST" \
+            --source-commit-sha "$GITHUB_SHA"
       # Pin the Trivy installer/action and scanner version; no floating "latest".
       # Scan the exact pushed manifest digest, not its mutable commit tag.
       - name: Install pinned Trivy image scanner
