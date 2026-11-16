@@ -230,7 +230,7 @@ jobs:
           REGISTRY_HOST: ${{ vars.ACR_LOGIN_SERVER }}
         run: |
           set -euo pipefail
-          docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true
+          docker logout "$REGISTRY_HOST" >/dev/null 2>&1
           az logout --only-show-errors >/dev/null 2>&1
           az account clear --only-show-errors >/dev/null 2>&1
       - name: Login Azure infrastructure identity for Terraform stage
