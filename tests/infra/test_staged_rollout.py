@@ -21,6 +21,7 @@ STABLE_REVISION = "stable001"
 CANDIDATE_REVISION = "r123456789abc"
 SOURCE_COMMIT_SHA = "123456789abc" + "d" * 28
 MANAGED_REGISTRY = "synthetic.azurecr.io"
+SOURCE_IMAGE_DIGEST = "sha256:" + "a" * 64
 CANDIDATE_KEY_ID = "rotate2026"
 RUNTIME_POSTGRES_VERSION = "d" * 32
 VAULT_URI = "https://comuni-itn-001-kv.vault.azure.net/"
@@ -63,7 +64,7 @@ def fixture_plan():
             "revision_suffix": CANDIDATE_REVISION,
             "min_replicas": 1,
             "container": [{
-                "image": MANAGED_REGISTRY + "/comuni:" + SOURCE_COMMIT_SHA,
+                "image": MANAGED_REGISTRY + "/comuni@" + SOURCE_IMAGE_DIGEST,
                 "env": [
                     {"name": "ASPNETCORE_ENVIRONMENT", "value": "Production"},
                     {"name": "Authentication__Mode", "value": "Oidc"},
@@ -147,6 +148,7 @@ class StagedRolloutTests(unittest.TestCase):
             [sys.executable, str(PLAN_GATE),
              "--stable-revision", stable, "--candidate-revision", candidate,
              "--source-commit-sha", SOURCE_COMMIT_SHA,
+             "--candidate-image-digest", SOURCE_IMAGE_DIGEST,
              "--stable-secret-version", STABLE_VERSION,
              "--candidate-secret-version", CANDIDATE_VERSION,
              "--candidate-key-id", CANDIDATE_KEY_ID,
