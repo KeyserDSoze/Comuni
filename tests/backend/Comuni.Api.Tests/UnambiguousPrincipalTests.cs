@@ -17,7 +17,6 @@ namespace Comuni.Api.Tests;
 public sealed class UnambiguousPrincipalTests
 {
     private static readonly string TenantA = ApiFactory.OrgA;
-    private static readonly string TenantB = ApiFactory.OrgB;
     private const string Issuer = "https://identity.example.test/tenant/v2.0";
 
     private static ClaimsPrincipal Principal(params Claim[] extra) =>

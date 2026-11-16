@@ -42,6 +42,19 @@ public sealed class ApiProtectionConfigurationTests
     }
 
     [Fact]
+    public void Incomplete_authenticated_identity_without_issuer_uses_peer_partition()
+    {
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = IPAddress.Parse("198.51.100.12");
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("sub", "officer-1"),
+            new Claim("organization_id", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        ], "verified-token"));
+        Assert.Equal("ip:198.51.100.12", ApiProtectionSettings.PartitionKey(http));
+    }
+
+    [Fact]
     public void Validated_identity_partitions_by_tenant_and_subject_not_untrusted_header()
     {
         var http = new DefaultHttpContext();
@@ -49,6 +62,7 @@ public sealed class ApiProtectionConfigurationTests
         http.User = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim("sub", "officer-1"),
+            new Claim("iss", "Comuni.Tests"),
             new Claim("organization_id", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         ], "verified-token"));
         var first = ApiProtectionSettings.PartitionKey(http);
@@ -59,6 +73,7 @@ public sealed class ApiProtectionConfigurationTests
         http.User = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim("sub", "officer-1"),
+            new Claim("iss", "Comuni.Tests"),
             new Claim("organization_id", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
         ], "verified-token"));
         Assert.NotEqual(first, ApiProtectionSettings.PartitionKey(http));
