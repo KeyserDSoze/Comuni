@@ -58,7 +58,9 @@ class DigestPinnedCandidateGateTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
     def test_mutable_tag_even_when_sha_matches_must_be_rejected(self):
-        self.assert_rejected(fixture_plan())
+        plan = fixture_plan()
+        candidate(plan)["image"] = MANAGED_REGISTRY + "/comuni:" + SOURCE_COMMIT_SHA
+        self.assert_rejected(plan)
 
     def test_different_digest_or_registry_is_rejected(self):
         for image in (
