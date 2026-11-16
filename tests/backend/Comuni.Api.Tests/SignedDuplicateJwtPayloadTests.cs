@@ -49,6 +49,12 @@ public sealed class SignedDuplicateJwtPayloadTests(ApiFactory factory) : IClassF
         string name, string value)
     {
         var extra = "," + JsonSerializer.Serialize(name) + ":" + JsonSerializer.Serialize(value);
+        // Unlike the identity claims, "role" is not present in the base
+        // synthetic payload. Make it a real duplicate instead of testing a
+        // legitimate single optional role.
+        if (name == "role")
+            extra = "," + JsonSerializer.Serialize("role") + ":" +
+                    JsonSerializer.Serialize("Reader") + extra;
         var payload = Payload("Comuni.Tests", "test-reader", ApiFactory.OrgA, "Comuni.Api", extra);
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization =
@@ -60,7 +66,50 @@ public sealed class SignedDuplicateJwtPayloadTests(ApiFactory factory) : IClassF
     [Theory]
     [InlineData(""","custom":{"one":1,"one":2}""")]
     [InlineData(""","custom":{"inner":{"key":"a","key":"b"}}""")]
+    [InlineData(""","custom":[{"one":1,"one":2}]""")]
     public async Task Signed_nested_duplicate_JSON_keys_are_unauthorized(string extra)
+    {
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", SignedHs256(Payload(
+                "Comuni.Tests", "test-reader", ApiFactory.OrgA, "Comuni.Api", extra)));
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Unicode_escaped_duplicate_property_name_cannot_bypass_guard()
+    {
+        // JSON property names are compared after unescaping, so this is a
+        // second "sub" even though the original bytes are different.
+        var escapedName = JsonSerializer.Serialize("sub").Replace(
+            "sub", @"\u0073ub", StringComparison.Ordinal);
+        var extra = "," + escapedName + ":" + JsonSerializer.Serialize("test-reader");
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", SignedHs256(Payload(
+                "Comuni.Tests", "test-reader", ApiFactory.OrgA, "Comuni.Api", extra)));
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Overlarge_signed_payload_is_rejected_without_logging_token()
+    {
+        var extra = "," + JsonSerializer.Serialize("custom") + ":" +
+                    JsonSerializer.Serialize(new string('x', 70 * 1024));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", SignedHs256(Payload(
+                "Comuni.Tests", "test-reader", ApiFactory.OrgA, "Comuni.Api", extra)));
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/v1/context")).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(",")]
+    [InlineData(""","malformed":/*comment*/1""")]
+    public async Task Malformed_but_signed_JSON_cannot_authenticate(string extra)
     {
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization =
