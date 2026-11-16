@@ -385,6 +385,13 @@ def validate(plan, args):
             isinstance(containers[0], dict),
             "expected single API + SPA container")
     validate_hosted_oidc_environment(containers[0].get("env"))
+    # The revision suffix carries only SHA12. A second, non-secret env value
+    # binds the FULL source SHA to the same trusted GITHUB_SHA passed to the
+    # gate by the runner, even though the image is selected by OCI digest.
+    source_metadata = named(containers[0].get("env", []), "Release__SourceCommitSha")
+    require(source_metadata.get("value") == args.source_commit_sha and
+            not source_metadata.get("secret_name"),
+            "candidate release source commit must match the approved Git commit")
     # Digest is received separately from the Docker push + authenticated ACR
     # match in the workflow. A mutable tag is never deployable, even if it
     # bears the same source commit SHA.
