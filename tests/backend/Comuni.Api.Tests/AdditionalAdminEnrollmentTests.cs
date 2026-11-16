@@ -235,7 +235,7 @@ public sealed class AdditionalAdminEnrollmentTests
             Add(org, ticket: null),
             Add(org, reviewer: null),
             Add(org, ticket: "bad ticket"),
-            Add(org, subject: "x'); DROP TABLE platform.organizations; --")
+            Add(org, subject: "x'); DROP TABLE platform.organizations; --\n")
         })
         {
             var denied = await attempt;
@@ -259,6 +259,27 @@ public sealed class AdditionalAdminEnrollmentTests
             ?? throw new InvalidOperationException("Restricted runtime PostgreSQL credential required.");
         Assert.NotEqual(0, (await Add(org, connection: runtime)).Code);
         Assert.Equal((1L, 1L, 0L, 1L), await Counts(org));
+    }
+
+
+    [Fact]
+    public async Task Sql_like_Oidc_subject_is_escaped_as_literal_and_cannot_execute_sql()
+    {
+        var org = await Seed();
+        Assert.Equal(0, (await Bootstrap(org)).Code);
+        var opaqueSubject = "synthetic'); DROP TABLE platform.organizations; --";
+        Assert.Equal(0, (await Add(org, subject: opaqueSubject)).Code);
+        Assert.Equal((2L, 2L, 1L, 1L), await Counts(org));
+
+        await using var db = new NpgsqlConnection(Owner);
+        await db.OpenAsync();
+        await using var cmd = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.organization_memberships
+            WHERE organization_id=@org AND subject=@subject AND role='Admin'
+            """, db);
+        cmd.Parameters.AddWithValue("org", org);
+        cmd.Parameters.AddWithValue("subject", opaqueSubject);
+        Assert.Equal(1L, (long)(await cmd.ExecuteScalarAsync())!);
     }
 
     [Fact]
