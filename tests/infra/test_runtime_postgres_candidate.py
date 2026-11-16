@@ -13,7 +13,7 @@ import unittest
 
 from test_staged_rollout import (
     fixture_plan, STABLE_REVISION, CANDIDATE_REVISION,
-    STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, VAULT_URI
+    STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, VAULT_URI, SOURCE_COMMIT_SHA
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +36,7 @@ def gate(plan, version=VERSION, *, include_version=True):
         sys.executable, str(PLAN_GATE),
         "--stable-revision", STABLE_REVISION,
         "--candidate-revision", CANDIDATE_REVISION,
+        "--source-commit-sha", SOURCE_COMMIT_SHA,
         "--stable-secret-version", STABLE_VERSION,
         "--candidate-secret-version", CANDIDATE_VERSION,
         "--candidate-key-id", CANDIDATE_KEY_ID,
