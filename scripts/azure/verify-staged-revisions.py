@@ -111,6 +111,13 @@ def candidate_metadata(revision, args):
         and not secret.get("value"),
         "Candidate RLS secret reference mismatch",
     )
+    runtime_connection = one_env("ConnectionStrings__Default")
+    required(
+        runtime_connection.get("secretRef")
+        == "pg-" + args.runtime_secret_version[:16]
+        and not runtime_connection.get("value"),
+        "Candidate PostgreSQL connection must use its own versioned secret",
+    )
 
 
 def verify_traffic(traffic, stable_name, candidate_label):
@@ -172,6 +179,7 @@ def parse_args():
     parser.add_argument("--expected-image", required=True)
     parser.add_argument("--candidate-key-id", required=True)
     parser.add_argument("--candidate-secret-version", required=True)
+    parser.add_argument("--runtime-secret-version", required=True)
     parser.add_argument("--attempts", type=int, default=12)
     parser.add_argument("--interval-seconds", type=int, default=10)
     args = parser.parse_args()
@@ -191,6 +199,8 @@ def parse_args():
              "Invalid candidate key ID")
     required(VERSION.fullmatch(args.candidate_secret_version),
              "Invalid pinned Key Vault secret version")
+    required(VERSION.fullmatch(args.runtime_secret_version),
+             "Invalid pinned runtime PostgreSQL Key Vault version")
     required(1 <= args.attempts <= 30 and 0 <= args.interval_seconds <= 30,
              "Invalid bounded Azure verification retry policy")
     return args
