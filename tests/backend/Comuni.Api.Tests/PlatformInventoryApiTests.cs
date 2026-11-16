@@ -76,12 +76,29 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
         var (subject, operatorId) = await OperatorAsync();
         using var client = factory.Authenticated(factory.Token(subject: subject, organizationId: ""));
         var all = new List<(Guid Id, bool Suspended, bool Protocol, string Lifecycle)>();
+        var seen = new HashSet<Guid>();
         string? after = null;
+        string? previousCursor = null;
         var pages = 0;
+        const int pageLimit = 25; // Same bounded limit enforced by the API.
+
+        // Other test classes legitimately seed more than 100 municipalities.
+        // Bound the number of pages to the actual disposable database size,
+        // rather than a fixed test-specific magic number.
+        long expectedTotal;
+        await using (var countDb = new NpgsqlConnection(Owner))
+        {
+            await countDb.OpenAsync();
+            await using var count = new NpgsqlCommand(
+                "SELECT COUNT(*) FROM platform.organizations", countDb);
+            expectedTotal = (long)(await count.ExecuteScalarAsync())!;
+        }
+        Assert.True(expectedTotal >= 3);
 
         do
         {
-            var url = Path + "?limit=1" + (after is null ? "" : "&after=" + after);
+            var url = Path + "?limit=" + pageLimit +
+                (after is null ? "" : "&after=" + after);
             using var response = await client.GetAsync(url);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Contains("no-store", response.Headers.CacheControl?.ToString() ?? "");
@@ -89,30 +106,43 @@ public sealed class PlatformInventoryApiTests(OidcApiFactory factory) : IClassFi
             var root = json.RootElement;
             Assert.Equal(2, root.EnumerateObject().Count());
             var organizations = root.GetProperty("organizations");
-            Assert.Single(organizations.EnumerateArray());
-            var row = organizations[0];
-            Assert.Equal(5, row.EnumerateObject().Count());
-            all.Add((row.GetProperty("id").GetGuid(), row.GetProperty("isSuspended").GetBoolean(),
-                row.GetProperty("protocolEnabled").GetBoolean(),
-                row.GetProperty("lifecycleStatus").GetString()!));
-            Assert.Contains(row.GetProperty("lifecycleStatus").GetString(),
-                new[] { "created", "active", "suspended" });
-            Assert.Equal(row.GetProperty("lifecycleStatus").GetString() != "active",
-                row.GetProperty("isSuspended").GetBoolean());
-            Assert.True(row.GetProperty("name").GetString()!.Length is > 0 and <= 200);
-            Assert.DoesNotContain(subject, root.ToString());
-            Assert.DoesNotContain("identityIssuer", root.ToString());
-            // A municipality's public name may legitimately contain "membership".
-            // Reject forbidden JSON FIELD NAMES, not ordinary name text.
-            Assert.DoesNotContain(row.EnumerateObject(),
-                property => property.Name.Contains("membership",
-                    StringComparison.OrdinalIgnoreCase));
+            Assert.InRange(organizations.GetArrayLength(), 1, pageLimit);
+            foreach (var row in organizations.EnumerateArray())
+            {
+                Assert.Equal(5, row.EnumerateObject().Count());
+                var id = row.GetProperty("id").GetGuid();
+                Assert.True(seen.Add(id), "Keyset pagination repeated an organization.");
+                all.Add((id, row.GetProperty("isSuspended").GetBoolean(),
+                    row.GetProperty("protocolEnabled").GetBoolean(),
+                    row.GetProperty("lifecycleStatus").GetString()!));
+                Assert.Contains(row.GetProperty("lifecycleStatus").GetString(),
+                    new[] { "created", "active", "suspended" });
+                Assert.Equal(row.GetProperty("lifecycleStatus").GetString() != "active",
+                    row.GetProperty("isSuspended").GetBoolean());
+                Assert.True(row.GetProperty("name").GetString()!.Length is > 0 and <= 200);
+                Assert.DoesNotContain(subject, row.ToString());
+                Assert.DoesNotContain("identityIssuer", row.ToString());
+                // Municipality names may contain the word "membership":
+                // reject forbidden JSON FIELD NAMES, not legitimate name text.
+                Assert.DoesNotContain(row.EnumerateObject(),
+                    property => property.Name.Contains("membership",
+                        StringComparison.OrdinalIgnoreCase));
+            }
             var cursor = root.GetProperty("nextCursor");
             after = cursor.ValueKind == JsonValueKind.Null ? null : cursor.GetString();
+            if (after is not null)
+            {
+                Assert.Equal(all[^1].Id, Guid.Parse(after));
+                Assert.True(previousCursor is null ||
+                    string.CompareOrdinal(previousCursor, after) < 0,
+                    "Keyset cursor must advance monotonically.");
+                previousCursor = after;
+            }
             pages++;
-            Assert.True(pages < 100, "Keyset pagination must terminate.");
+            Assert.True(pages <= expectedTotal, "Keyset pagination must terminate.");
         } while (after is not null);
 
+        Assert.Equal(expectedTotal, (long)all.Count);
         Assert.Equal(all.Count, all.Select(x => x.Id).Distinct().Count());
         Assert.Equal(all.Select(x => x.Id).Order(), all.Select(x => x.Id));
         Assert.Contains(all, x => x.Id == active && !x.Suspended && x.Protocol && x.Lifecycle == "active");
