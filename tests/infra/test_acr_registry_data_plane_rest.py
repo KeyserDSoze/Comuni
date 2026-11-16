@@ -132,7 +132,7 @@ class ACRRestContractTests(unittest.TestCase):
              mock.patch.object(self.mod.subprocess, "run", side_effect=run):
             client = self.mod.ACRClient(REGISTRY, HOST, TENANT)
             client.authenticate()
-            self.assertEqual(DIGEST, client.tag_digest(SHA))
+            self.assertEqual(DIGEST, client.tag_digest(SHA, expected_digest=DIGEST))
             client.lock(SHA, DIGEST)
             self.assertEqual([], network.responses)
             return network.requests, commands, build
@@ -215,7 +215,7 @@ class ACRRestContractTests(unittest.TestCase):
                     client = self.mod.ACRClient(REGISTRY, HOST, TENANT)
                     client.authenticate()
                     with self.assertRaises(Exception):
-                        client.tag_digest(SHA)
+                        client.tag_digest(SHA, expected_digest=DIGEST)
 
     def test_workflow_and_scripts_must_never_use_control_plane_cli(self):
         self.assertNotIn("az acr login", WORKFLOW)
