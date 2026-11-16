@@ -21,6 +21,7 @@ ACR_ID = f"/subscriptions/{SUB}/resourceGroups/{PREFIX}-rg/providers/Microsoft.C
 APP_ID = "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
 APP_CLIENT = "bbbbbbbb-1111-2222-3333-cccccccccccc"
 DEPLOY_CLIENT = "cccccccc-1111-2222-3333-dddddddddddd"
+INFRA_CLIENT = "eeeeeeee-1111-2222-3333-ffffffffffff"
 DEPLOY_ID = "dddddddd-1111-2222-3333-eeeeeeeeeeee"
 SENTINEL = "azure-private-token-never-print"
 
@@ -72,7 +73,7 @@ print(os.environ["RESPONSE_" + str(index)])
 
 def check(*, acr=None, app=None, deploy=DEPLOY_ID, pull=None, push=None,
           prefix=PREFIX, registry_name=ACR, host=HOST,
-          client=DEPLOY_CLIENT, fail_at=-1):
+          client=DEPLOY_CLIENT, infra_client=INFRA_CLIENT, fail_at=-1):
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
         fake = directory / "az"
@@ -95,7 +96,7 @@ def check(*, acr=None, app=None, deploy=DEPLOY_ID, pull=None, push=None,
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--prefix", prefix,
              "--registry-name", registry_name, "--registry-host", host,
-             "--deployer-client-id", client],
+             "--deployer-client-id", client, "--infra-client-id", infra_client],
             env=env, capture_output=True, text=True, check=False, timeout=12)
         calls = ([json.loads(line) for line in log.read_text().splitlines()]
                  if log.exists() else [])
@@ -138,6 +139,7 @@ class ACRRbacPreflightTests(unittest.TestCase):
             {"prefix": "BAD-prefix"}, {"prefix": "evilprefix"},
             {"registry_name": "evilacr"}, {"host": "evil.azurecr.io"},
             {"client": SENTINEL}, {"client": APP_CLIENT},
+            {"infra_client": SENTINEL}, {"infra_client": DEPLOY_CLIENT},
             {"deploy": APP_ID}, {"deploy": ""}, {"deploy": SENTINEL},
             {"app": {"principalId": DEPLOY_ID, "clientId": APP_CLIENT}},
             {"app": {"principalId": APP_ID, "clientId": "invalid"}},
@@ -145,6 +147,12 @@ class ACRRbacPreflightTests(unittest.TestCase):
         ):
             with self.subTest(mutation=list(mutation.keys())):
                 self.rejected(**mutation)
+
+    def test_build_and_infra_client_ids_must_be_distinct_before_any_azure_query(self):
+        for bad in (DEPLOY_CLIENT, "", "not-a-guid", SENTINEL):
+            with self.subTest(input_kind=bad[:4]):
+                calls = self.rejected(infra_client=bad)
+                self.assertEqual(0, len(calls))
 
     def test_app_pull_identity_must_have_no_registry_write_or_inherited_privilege(self):
         for roles in (
@@ -192,7 +200,8 @@ class ACRRbacPreflightTests(unittest.TestCase):
                         WORKFLOW.index("az acr login"))
         self.assertLess(WORKFLOW.index("check-acr-role-boundary.py"),
                         WORKFLOW.index("docker push"))
-        self.assertIn('--deployer-client-id "$ARM_CLIENT_ID"', WORKFLOW)
+        self.assertIn('--deployer-client-id "$ACR_PUSH_CLIENT_ID"', WORKFLOW)
+        self.assertIn('--infra-client-id "$ARM_CLIENT_ID"', WORKFLOW)
         self.assertIn('--prefix "$AZURE_PREFIX"', WORKFLOW)
         self.assertIn('--registry-host "$REGISTRY_HOST"', WORKFLOW)
         self.assertIn('role_definition_name = "AcrPull"', TERRAFORM)
