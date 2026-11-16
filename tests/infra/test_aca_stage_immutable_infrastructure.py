@@ -12,7 +12,7 @@ from pathlib import Path
 from test_staged_rollout import (
     fixture_plan, STABLE_REVISION, CANDIDATE_REVISION,
     STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID,
-    RUNTIME_POSTGRES_VERSION, SOURCE_COMMIT_SHA,
+    RUNTIME_POSTGRES_VERSION, SOURCE_COMMIT_SHA, SOURCE_IMAGE_DIGEST,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +43,7 @@ def check(plan, source_sha=SOURCE_COMMIT_SHA):
             "--stable-revision", STABLE_REVISION,
             "--candidate-revision", CANDIDATE_REVISION,
             "--source-commit-sha", source_sha,
+            "--candidate-image-digest", SOURCE_IMAGE_DIGEST,
             "--stable-secret-version", STABLE_VERSION,
             "--candidate-secret-version", CANDIDATE_VERSION,
             "--candidate-key-id", CANDIDATE_KEY_ID,
