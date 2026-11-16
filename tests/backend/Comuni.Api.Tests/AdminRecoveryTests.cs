@@ -212,6 +212,8 @@ public sealed class AdminRecoveryTests(OidcApiFactory factory) : IClassFixture<O
     {
         var org = await SeedRevoked();
         Assert.NotEqual(0, (await Add(org, Third, ticket: "CHANGE-2026-ADD83")).Code);
+        Assert.NotEqual(0, (await Add(org, Third, ticket: "CHANGE-2026-BOOT83")).Code);
+        Assert.NotEqual(0, (await Add(org, Third, ticket: "CHANGE-2026-REVOKE83")).Code);
         await using (var db = new NpgsqlConnection(Owner))
         {
             await db.OpenAsync();
@@ -260,6 +262,49 @@ public sealed class AdminRecoveryTests(OidcApiFactory factory) : IClassFixture<O
             await cmd.ExecuteNonQueryAsync();
         }
         Assert.NotEqual(0, (await Add(legacy)).Code);
+    }
+
+    [Fact]
+    public async Task Duplicate_or_missing_revocation_evidence_is_never_accepted()
+    {
+        var org = await SeedRevoked();
+        await using (var db = new NpgsqlConnection(Owner))
+        {
+            await db.OpenAsync();
+            await using var copy = new NpgsqlCommand("""
+                INSERT INTO platform.audit_events
+                    (id,organization_id,actor_subject,action,resource_type,
+                     resource_id,correlation_id,occurred_at)
+                SELECT gen_random_uuid(),organization_id,actor_subject,action,resource_type,
+                       resource_id,correlation_id,now()
+                FROM platform.audit_events
+                WHERE organization_id=@id AND action='platform.membership.admin.revoked'
+                """, db);
+            copy.Parameters.AddWithValue("id", org);
+            Assert.Equal(1, await copy.ExecuteNonQueryAsync());
+        }
+        Assert.NotEqual(0, (await Add(org)).Code);
+        Assert.Equal((1L, 1L, 1L, 2L), await Counts(org));
+    }
+
+    [Fact]
+    public async Task Deleted_historic_admin_cannot_be_regranted_because_its_audit_survives()
+    {
+        var org = await SeedRevoked();
+        await using (var db = new NpgsqlConnection(Owner))
+        {
+            await db.OpenAsync();
+            await using var delete = new NpgsqlCommand("""
+                DELETE FROM platform.organization_memberships
+                WHERE organization_id=@id AND subject=@sub AND role='Admin' AND NOT is_active
+                """, db);
+            delete.Parameters.AddWithValue("id", org);
+            delete.Parameters.AddWithValue("sub", First);
+            Assert.Equal(1, await delete.ExecuteNonQueryAsync());
+        }
+        // Simulate an unauthorized schema-owner hard delete; the audit remains.
+        Assert.NotEqual(0, (await Add(org, First)).Code);
+        Assert.Equal((1L, 0L, 1L, 1L), await Counts(org));
     }
 
     [Fact]
