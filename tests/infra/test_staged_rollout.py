@@ -50,13 +50,13 @@ def fixture_plan():
     before = {
         **copy.deepcopy(shared),
         "revision_mode": "Single",
-        "secret": [old_secret],
+        "secret": [copy.deepcopy(old_secret)],
         "ingress": [{**ingress_settings, "traffic_weight": [{"latest_revision": True, "percentage": 100}]}],
     }
     after = {
         **copy.deepcopy(shared),
         "revision_mode": "Multiple",
-        "secret": [old_secret, candidate_secret, runtime_connection],
+        "secret": [copy.deepcopy(old_secret), copy.deepcopy(candidate_secret), copy.deepcopy(runtime_connection)],
         "template": [{
             "revision_suffix": CANDIDATE_REVISION,
             "min_replicas": 1,
