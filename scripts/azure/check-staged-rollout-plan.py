@@ -11,6 +11,10 @@ import sys
 from urllib.parse import urlparse
 
 APP_ADDRESS = "azurerm_container_app.main"
+POSTGRES_ADDRESS = "azurerm_postgresql_flexible_server.main"
+AZURE_POSTGRES_HOST = re.compile(
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.postgres\.database\.azure\.com\Z"
+)
 STABLE_SECRET = "tenant-proof-key"
 PLATFORM_INVENTORY_SECRET = "platform-inventory-connection"
 RUNTIME_POSTGRES_SECRET = "postgres-runtime-connection"
@@ -85,6 +89,31 @@ def runtime_postgres_version_uri(value, version, trusted_vault_host):
     )
 
 
+def managed_postgres_fqdn(plan):
+    """Trust only the managed Flexible Server in Terraform planned_values.
+
+    Neither an operator variable nor the Key Vault secret can supply this
+    expected host. Never echo Terraform state or its sensitive values.
+    """
+    planned = plan.get("planned_values") if isinstance(plan, dict) else None
+    root = planned.get("root_module") if isinstance(planned, dict) else None
+    resources = root.get("resources") if isinstance(root, dict) else None
+    require(isinstance(resources, list), "missing managed PostgreSQL plan metadata")
+    matching = [resource for resource in resources if isinstance(resource, dict)
+                and resource.get("address") == POSTGRES_ADDRESS]
+    require(len(matching) == 1 and matching[0].get("type") ==
+            "azurerm_postgresql_flexible_server",
+            "missing or ambiguous authorized PostgreSQL resource")
+    values = matching[0].get("values")
+    require(isinstance(values, dict), "missing PostgreSQL planned values")
+    fqdn, name = values.get("fqdn"), values.get("name")
+    require(isinstance(fqdn, str) and bool(AZURE_POSTGRES_HOST.fullmatch(fqdn))
+            and isinstance(name, str)
+            and fqdn == name + ".postgres.database.azure.com",
+            "invalid approved PostgreSQL server FQDN")
+    return fqdn
+
+
 def validate(plan, args):
     require(bool(VERSION.fullmatch(args.runtime_secret_version)),
             "candidate runtime PostgreSQL requires explicit pinned Key Vault version")
@@ -106,6 +135,7 @@ def validate(plan, args):
     require(args.stable_revision != args.candidate_revision,
             "candidate cannot equal stable revision")
 
+    expected_postgres_host = managed_postgres_fqdn(plan)
     changes = plan.get("resource_changes", []) if isinstance(plan, dict) else []
     require(isinstance(changes, list), "missing Terraform changes")
     # The plan gate is followed by unattended apply. Never permit a destructive
@@ -119,6 +149,9 @@ def validate(plan, args):
         # The legacy stable PostgreSQL connection is currently managed by
         # Terraform with a versionless ACA reference. Never publish or rotate
         # that Key Vault secret in an unattended candidate staging plan.
+        if item.get("address") == POSTGRES_ADDRESS:
+            require(actions == ["no-op"],
+                    "managed PostgreSQL changes require separate approved procedure")
         if item.get("address") == "azurerm_key_vault_secret.postgres_connection":
             require(actions == ["no-op"],
                     "legacy stable runtime PostgreSQL credential must remain unchanged")
@@ -211,6 +244,13 @@ def validate(plan, args):
     require(proof_id.get("value") == args.candidate_key_id and
             not proof_id.get("secret_name"),
             "candidate key ID must match approved PostgreSQL verifier ID")
+
+    # Exact authorized Flexible Server FQDN must be wired as ordinary
+    # non-secret Terraform resource metadata, with no alternate secret ref.
+    expected_host = named(containers[0].get("env", []), "RuntimePostgres__ExpectedHost")
+    require(expected_host.get("value") == expected_postgres_host and
+            not expected_host.get("secret_name"),
+            "candidate expected PostgreSQL host must match managed resource")
 
     # The municipal runtime MUST NOT receive an inline connection string,
     # a versionless stable secret, or the privileged platform reader credential.
