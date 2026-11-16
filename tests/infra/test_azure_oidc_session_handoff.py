@@ -110,10 +110,20 @@ class OidcIdentityHandoffTests(unittest.TestCase):
             with self.subTest(kind=type(data).__name__, length=len(str(data))):
                 self.deny(data=data)
 
+    def test_only_main_workflow_dispatch_can_login_to_either_azure_principal(self):
+        guard = "name: Reject unapproved GitHub release source before OIDC"
+        login = "name: Login Azure infrastructure identity for RBAC preflight"
+        self.assertIn(guard, DEPLOY)
+        self.assertLess(DEPLOY.index(guard), DEPLOY.index(login))
+        content = DEPLOY[DEPLOY.index(guard):DEPLOY.index(login)]
+        self.assertIn('"$GITHUB_REPOSITORY" == "KeyserDSoze/Comuni"', content)
+        self.assertIn('"$GITHUB_REF" == "refs/heads/main"', content)
+        self.assertIn('"$GITHUB_EVENT_NAME" == "workflow_dispatch"', content)
+
     def test_workflow_uses_three_separate_login_boundaries_and_no_secret_fallback(self):
         self.assertEqual(3, DEPLOY.count("uses: azure/login@v2"))
         self.assertEqual(3, DEPLOY.count("scripts/azure/check-azure-oidc-session.py"))
-        self.assertIn("AZURE_ACR_PUSH_CLIENT_ID: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
+        self.assertIn("ACR_PUSH_CLIENT_ID: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
         self.assertIn("client-id: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}", DEPLOY)
         self.assertEqual(2, DEPLOY.count("client-id: ${{ secrets.AZURE_CLIENT_ID }}"))
         self.assertIn('--deployer-client-id "$ACR_PUSH_CLIENT_ID"', DEPLOY)
