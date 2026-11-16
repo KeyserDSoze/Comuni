@@ -106,6 +106,18 @@ jobs:
           PLATFORM_INVENTORY_ENABLED: ${{ inputs.enable_platform_inventory }}
           PLATFORM_INVENTORY_SECRET_VERSION: ${{ vars.PLATFORM_INVENTORY_SECRET_VERSION }}
         run: |
+          set -euo pipefail
+          # Terraform binary plans may include sensitive SQL connection values
+          # from historical State. Limit local access while the plan is needed.
+          umask 077
+          # Registered BEFORE plan creation: cleanup on success, plan failure,
+          # gate rejection or apply failure. This is not secure erase.
+          trap 'rm -f -- infra/deploy.tfplan' EXIT
+          # Never reuse an old plan or follow a stale symlink in the runner.
+          if [[ -e infra/deploy.tfplan || -L infra/deploy.tfplan ]]; then
+            echo "Refusing to reuse an existing Terraform staging plan." >&2
+            exit 1
+          fi
           terraform -chdir=infra plan -input=false -out=deploy.tfplan
           # The plan JSON may include DB credentials. Stream it to the gate, never log it.
           terraform -chdir=infra show -json deploy.tfplan | python3 scripts/azure/check-staged-rollout-plan.py \
