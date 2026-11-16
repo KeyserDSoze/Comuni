@@ -8,7 +8,7 @@ import unittest
 
 from test_aca_stage_immutable_infrastructure import check
 from test_staged_rollout import (
-    fixture_plan, SOURCE_COMMIT_SHA, MANAGED_REGISTRY,
+    fixture_plan, SOURCE_COMMIT_SHA, MANAGED_REGISTRY, DEPLOY, TERRAFORM,
 )
 
 SENTINEL = "synthetic-secret-that-must-never-appear-in-the-gate-output"
@@ -107,6 +107,29 @@ class CandidateImagePreapplyTests(unittest.TestCase):
         # Existing check already rejects a suffix different from CLI argument;
         # subsequent TDD covers the CLI SHA binding itself.
         self.reject_without_leaks(plan)
+
+
+    def test_rejects_wrong_malformed_or_ambiguous_source_sha(self):
+        for source_sha in (
+            "", "abc", SOURCE_COMMIT_SHA.upper(), SOURCE_COMMIT_SHA + "0",
+            SOURCE_COMMIT_SHA + " ", "f" * 40,
+            SOURCE_COMMIT_SHA[:12] + "f" * 28, SENTINEL,
+        ):
+            with self.subTest(sha_prefix=str(source_sha)[:12]):
+                self.reject_without_leaks_source(fixture_plan(), source_sha)
+
+    def reject_without_leaks_source(self, plan, source_sha):
+        result = check(plan, source_sha=source_sha)
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn(SENTINEL, result.stdout + result.stderr)
+
+    def test_release_workflow_uses_source_commit_not_plan_image_as_trust_anchor(self):
+        self.assertIn('--source-commit-sha "$GITHUB_SHA"', DEPLOY)
+        self.assertIn('IMAGE="${{ vars.ACR_LOGIN_SERVER }}/comuni:${GITHUB_SHA}"', DEPLOY)
+        self.assertIn('image  = var.image', TERRAFORM)
+        self.assertIn('azurerm_container_registry.main.login_server', TERRAFORM)
+        self.assertLess(DEPLOY.index('--source-commit-sha "$GITHUB_SHA"'),
+                        DEPLOY.index('terraform -chdir=infra apply'))
 
 
 if __name__ == "__main__":
