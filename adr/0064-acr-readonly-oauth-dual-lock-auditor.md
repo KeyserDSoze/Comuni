@@ -1,0 +1,24 @@
+# ADR 0064 — Verifica ACR read-only separata dal writer con OAuth2 scope pull
+
+- Data: 2026-11-16.
+- Stato: Accepted per codice e CI offline; la verifica su ACR reale deve essere autorizzata dall'owner.
+- Issue: #75, sotto #74/#72/#70/#65; integra ADR 0063.
+- Riferimenti: [Microsoft Get Tag Properties](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry/get-tag-properties?view=rest-registry-dataplane-2021-07-01), [Microsoft Get Manifest Properties](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry/get-manifest-properties?view=rest-registry-dataplane-2021-07-01), [ACR OAuth2](https://github.com/Azure/acr/blob/main/docs/AAD-OAuth.md).
+
+## Contesto
+
+Il job #74 usa il principal federato GitHub **builder** per confrontare il digest del proprio Docker push e bloccare il tag più il manifest via REST ACR. Tale operazione richiede un token con `scope=repository:comuni:pull,push` e muta i metadata (PATCH). Per il **read-back indipendente** dei lock in ambiente di test approvato non è necessario e non è desiderabile consentire anche operazioni di scrittura, sblocco o un `terraform apply`. Il passaggio del token writer a un audit manuale allargherebbe inutilmente i privilegi.
+
+## Decisione
+
+1. Estendere `ACRClient(..., read_only=True)` nel client condiviso `scripts/azure/acr-registry-data-plane.py`. L'impostazione è un **booleano esplicito**, mai uno scope arbitrario in input. Quando `read_only=True`, la seconda richiesta ACR `POST /oauth2/token` usa **solo** `repository:comuni:pull` (vs. `repository:comuni:pull,push` del workflow di rilascio). Entrambe le richieste OAuth usano la sessione `az account get-access-token --resource https://containerregistry.azure.net` dell'operatore federato e il registry host gestito/allowlisted HTTPS; redirect disabilitati, timeout, errori e output sensibili catturati e non propagati.
+2. Nella modalità di sola lettura il client **nega immediatamente qualsiasi richiesta metadata diversa da GET**, incluse chiamate dirette a `_request("PATCH", ...)`; `lock()` rifiuta prima di leggere o mutare il registry. Gli unici POST consentiti sono i due exchange OAuth2 a endpoint fissi. Il token Bearer non viene mai passato su command-line, Terraform env o log.
+3. Aggiungere `verify_locked(sha, approved_digest)`: un GET alla proprietà del tag `comuni:<sha>`, confronto esplicito col digest approvato e attributi `writeEnabled=false`, `deleteEnabled=false`, `readEnabled=true`; quindi un GET al manifest `comuni@sha256:<digest>` con gli stessi attributi. Valida `registry`, `imageName`, `tag.name`/`manifest.digest` e tipi booleani, rifiuta metadata mancanti o ambigui. Nessuna scansione di altre repository, nessuna operazione repository-wide.
+4. Nuovo script **manuale** `scripts/azure/check-acr-readonly-lock.py`: richiede `--registry-name`, `--registry-host`, `--tenant-id`, `--source-commit-sha`, `--candidate-image-digest` e `--image` esattamente `<host>/comuni@sha256:<digest>`. Fallisce chiuso per SHA/digest/host sbagliati, output HTTPS/CLI non disponibile, tag non corrispondente, flag modificabili o lettura disabilitata; stdout vuoto in caso di successo, errori statici senza token/digest/tenant. Non si aggiunge un passo di mutazione né di audit al workflow di rilascio: il comando viene richiamato soltanto dall'owner per la verifica manuale di un **manifest di prova già bloccato**.
+5. TDD RED→GREEN: `tests/infra/test_acr_readonly_lock_attestation.py` simula il token Entra e le quattro richieste HTTPS `POST/POST/GET/GET`, conferma il solo scope pull e il divieto PATCH; verifica rifiuti su digest incongruente, attributi unlocked, schema sbagliato, failure HTTP, argomenti spoofati e log senza sentinelle. Il contratto `SCOPE=repository:comuni:pull,push` del workflow writer rimane invariato. Chiudere la #75 solo dopo **7/7 job CI** sul medesimo SHA finale di `main`.
+
+## Limiti e sicurezza operativa
+
+La modalità read-only limita sia **il token richiesto** sia **il client che lo usa**; il diritto effettivamente concesso è verificato dal servizio ACR, non dimostrato dalla suite finta. Il principal Azure che effettua `az account get-access-token` deve già essere autorizzato dall'owner e deve avere una sessione OIDC in un ambiente segregato: lo script non effettua `az login` e non legge credenziali persistenti.
+
+La verifica di lock è una **lettura istantanea**, non prova l'impossibilità di uno sblocco successivo da parte di admin, non prova che il writer con solo `AcrPush` possa fare PATCH e **non** implementa/promuove una revisione ACA. La #74 resta aperta per prove OAuth2/GET/PATCH reali con tag+manifest di test autorizzati; #72/#70/#65/#6/#49 e gli epic restano aperti. Nessuna richiesta Azure live, `terraform apply`, assegnazione di ruoli, lettura di secret o manipolazione di immagini esistenti è stata effettuata nella fase di sviluppo.
