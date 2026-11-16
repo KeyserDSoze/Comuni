@@ -31,7 +31,10 @@ if sys.argv[1:] != ["account", "show",
 if os.environ.get("FAIL_AZ") == "1":
     sys.stderr.write(os.environ["SENTINEL"])
     sys.exit(62)
-print(os.environ["ACCOUNT_OUTPUT"])
+if os.environ["ACCOUNT_OUTPUT"] == "__OVERSIZED__":
+    print(" " * 200000)
+else:
+    print(os.environ["ACCOUNT_OUTPUT"])
 '''
 
 
@@ -102,7 +105,7 @@ class OidcIdentityHandoffTests(unittest.TestCase):
     def test_rejects_cli_error_null_ambiguous_or_invalid_account_response(self):
         self.deny(fail_cli=True)
         for data in ("", "null", "[]", "{}", "{bad-json", SENTINEL,
-                     " " * 180000, [{**account()}, {**account()}],
+                     "__OVERSIZED__", [{**account()}, {**account()}],
                      {**account(), "user": {"type": True, "name": UUID_BUILD}}):
             with self.subTest(kind=type(data).__name__, length=len(str(data))):
                 self.deny(data=data)
