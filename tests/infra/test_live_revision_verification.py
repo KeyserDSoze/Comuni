@@ -21,6 +21,7 @@ CANDIDATE = "r123456789abc"
 IMAGE = "comuni.azurecr.io/comuni:" + ("a" * 40)
 KEY_ID = "rotate2026"
 VERSION = "b" * 32
+RUNTIME_POSTGRES_VERSION = "d" * 32
 
 
 def revision(suffix, *, image, key_id="legacy", secret="tenant-proof-key"):
@@ -42,13 +43,15 @@ def revision(suffix, *, image, key_id="legacy", secret="tenant-proof-key"):
 
 
 def valid_revisions():
-    return [
-        revision(STABLE, image="comuni.azurecr.io/comuni:" + ("0" * 40)),
-        revision(
-            CANDIDATE, image=IMAGE, key_id=KEY_ID,
-            secret="tp-" + VERSION[:16],
-        ),
-    ]
+    stable = revision(STABLE, image="comuni.azurecr.io/comuni:" + ("0" * 40))
+    candidate = revision(
+        CANDIDATE, image=IMAGE, key_id=KEY_ID,
+        secret="tp-" + VERSION[:16],
+    )
+    candidate["properties"]["template"]["containers"][0]["env"].append(
+        {"name": "ConnectionStrings__Default",
+         "secretRef": "pg-" + RUNTIME_POSTGRES_VERSION[:16]})
+    return [stable, candidate]
 
 
 def valid_traffic():
@@ -112,6 +115,7 @@ class LiveRevisionVerificationTests(unittest.TestCase):
                 "--expected-image", image,
                 "--candidate-key-id", KEY_ID,
                 "--candidate-secret-version", VERSION,
+                "--runtime-secret-version", RUNTIME_POSTGRES_VERSION,
                 "--attempts", attempts,
                 "--interval-seconds", "0",
             ]
@@ -169,6 +173,25 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         for revisions in cases:
             result, _ = self.call(revisions=revisions)
             self.assertNotEqual(0, result.returncode)
+
+    def test_rejects_wrong_missing_or_inline_candidate_runtime_sql_credential(self):
+        cases = []
+        for change in ("stable", "inline", "missing", "duplicate"):
+            revisions = valid_revisions()
+            candidate = revisions[1]["properties"]["template"]["containers"][0]["env"]
+            if change == "stable":
+                candidate[-1]["secretRef"] = "postgres-connection"
+            elif change == "inline":
+                candidate[-1] = {"name": "ConnectionStrings__Default", "value": "Password=example-dont-echo"}
+            elif change == "missing":
+                candidate.pop()
+            else:
+                candidate.append(dict(candidate[-1]))
+            cases.append(revisions)
+        for revisions in cases:
+            result, _ = self.call(revisions=revisions)
+            self.assertNotEqual(0, result.returncode)
+            self.assertNotIn("example-dont-echo", result.stdout + result.stderr)
 
     def test_rejects_missing_or_misdirected_candidate_label(self):
         p = valid_traffic()
@@ -235,6 +258,7 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         self.assertIn("--expected-image", WORKFLOW)
         self.assertIn("--candidate-key-id", WORKFLOW)
         self.assertIn("--candidate-secret-version", WORKFLOW)
+        self.assertIn("--runtime-secret-version", WORKFLOW)
         self.assertNotIn("az containerapp ingress traffic set", WORKFLOW)
         self.assertNotIn("az containerapp revision deactivate", WORKFLOW)
 
