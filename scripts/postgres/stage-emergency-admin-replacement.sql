@@ -199,6 +199,18 @@ BEGIN
         RAISE EXCEPTION 'The exact compromised OIDC Admin was not found';
     END IF;
 
+    -- Do not stage a replacement if the compromised principal has ANY
+    -- other role in this municipality. After reactivation that role would
+    -- still authorize the old OIDC subject. Revocation/cleanup of other
+    -- roles needs its own independently reviewed, audited change.
+    IF EXISTS (
+        SELECT 1 FROM platform.organization_memberships
+        WHERE organization_id = v_org AND subject = v_old_subject
+          AND role <> 'Admin'
+    ) THEN
+        RAISE EXCEPTION 'Compromised identity has other membership roles';
+    END IF;
+
     IF v_old_active IS DISTINCT FROM TRUE THEN
         IF v_emergency_events = 2 AND v_old_event_count = 1 AND v_new_event_count = 1
             AND EXISTS (
