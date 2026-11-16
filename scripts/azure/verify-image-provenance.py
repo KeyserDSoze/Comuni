@@ -112,7 +112,6 @@ def main():
                   else "invalid or unavailable provenance metadata")
         print("Candidate provenance rejected: " + reason, file=sys.stderr)
         return 1
-    print("Signed OCI provenance verified for approved repository, workflow, ref and digest.")
     return 0
 
 
