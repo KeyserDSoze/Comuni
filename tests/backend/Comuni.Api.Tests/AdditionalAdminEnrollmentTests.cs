@@ -138,13 +138,15 @@ public sealed class AdditionalAdminEnrollmentTests
             WHERE m.organization_id=@org AND role='Admin' ORDER BY subject
             """, db);
         readerCmd.Parameters.AddWithValue("org", org);
-        await using var rows = await readerCmd.ExecuteReaderAsync();
         var names = new List<string>();
-        while (await rows.ReadAsync())
+        await using (var rows = await readerCmd.ExecuteReaderAsync())
         {
-            names.Add(rows.GetString(0));
-            Assert.Equal(Issuer, rows.GetString(1));
-            Assert.True(rows.GetBoolean(2));
+            while (await rows.ReadAsync())
+            {
+                names.Add(rows.GetString(0));
+                Assert.Equal(Issuer, rows.GetString(1));
+                Assert.True(rows.GetBoolean(2));
+            }
         }
         Assert.Equal(new[] { Initial, Second }, names);
 
