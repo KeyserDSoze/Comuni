@@ -429,3 +429,8 @@ La suite `PlatformInventoryApiTests.Oidc_platform_operator_can_page_safely_over_
 
 La CI esegue anche regressioni xUnit/PostgreSQL, Playwright, Terraform, SCA, CodeQL e build Docker; il verde deve riferirsi al **commit finale di main**. Non ci sono credenziali o identità di Comuni reali; nessuna prova di IdP/approvatore effettivo, rollout Azure o conformità PA.
 
+## Emergency staging del singolo Admin OIDC sospeso (#85 / ADR 0072)
+
+La suite `tests/backend/Comuni.Api.Tests/EmergencyAdminStagingTests.cs` è stata introdotta **RED** prima di `scripts/postgres/stage-emergency-admin-replacement.sql`. Esegue test xUnit contro PostgreSQL 17 e `psql` owner/runtime, con JWT RS256 OIDC firmati localmente. Test positivi: Comune inizialmente attivo con un solo Admin, sospensione owner-only e 403 immediato, stage transazionale e audit duplicemente collegato allo stesso incident, mantenimento della sospensione e dei moduli, vecchio e nuovo token entrambi 403 fino a separato change di riattivazione, successivo 403 del compromesso e 200 del nuovo Admin; retry identico senza ulteriore audit. Negative: tenant non suspended, senza evento di sospensione, created/missing, due Admin attivi, Admin inattivo o legacy, target con Reader, reviewer uguali/mancanti, issuer o ticket/subject invalidi, login runtime, cross-tenant, incident/target riusati e due staging concorrenti. Playwright, CodeQL, supply chain, Terraform e build Docker restano gate di regressione CI 7/7 sullo SHA finale.
+
+I reviewer sono stringhe sintetiche di test, non identità legalmente verificate; i test **non** collaudano IdP/SPID/CIE, MFA, operatori reali, Azure o un Comune reale. Lo scenario break-glass completo resta nella #84.
