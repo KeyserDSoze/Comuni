@@ -177,7 +177,7 @@ class ReleaseCiGateTests(unittest.TestCase):
             [*full[:-1], job(JOBS[-1], conclusion="skipped")],
             [*full[:-1], job(JOBS[-1], head_sha=OTHER_SHA)],
             [*full[:-1], job(JOBS[-1], run_id=RUN_ID + 1)],
-            [*full[:-1], job(JOBS[-1], name=JOBS[0])],
+            [*full[:-1], {**job(JOBS[-1]), "name": JOBS[0]}],
         ):
             with self.subTest(job_count=len(jobs)):
                 self.assertEqual(2, len(self.deny(jobs=jobs).requests))
