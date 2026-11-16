@@ -166,3 +166,15 @@ variable "platform_inventory_secret_version" {
     error_message = "platform_inventory_secret_version must be empty or a 32-hex pinned Key Vault version."
   }
 }
+
+# This is NON-SECRET metadata: never pass a PostgreSQL password or connection
+# string to Terraform for the candidate. The existing stable secret is retained.
+variable "runtime_postgres_connection_secret_version" {
+  description = "Required pinned Key Vault version of externally provisioned postgres-runtime-connection for the 0-percent-traffic ACA candidate (TLS VerifyFull)."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{32}$", var.runtime_postgres_connection_secret_version))
+    error_message = "runtime_postgres_connection_secret_version must be an explicit 32-hex Key Vault version."
+  }
+}

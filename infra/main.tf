@@ -216,6 +216,16 @@ resource "azurerm_container_app" "main" {
     key_vault_secret_id = azurerm_key_vault_secret.postgres_connection.versionless_id
   }
 
+  # Candidate-only runtime SQL secret: a NEW versioned Key Vault reference.
+  # Do not mutate the existing app-scoped postgres-connection secret because
+  # stable revisions still depend on its original (legacy) versionless ref.
+  # The value is provisioned externally with SSL Mode=VerifyFull, not via TF_VAR.
+  secret {
+    name                = "pg-${substr(var.runtime_postgres_connection_secret_version, 0, 16)}"
+    identity            = azurerm_user_assigned_identity.app.id
+    key_vault_secret_id = "${azurerm_key_vault.main.vault_uri}secrets/postgres-runtime-connection/${var.runtime_postgres_connection_secret_version}"
+  }
+
   # Existing revision keeps using tenant-proof-key with its approved stable version.
   # This application-scoped secret MUST NOT be rotated in place during a stage.
   secret {
@@ -262,7 +272,7 @@ resource "azurerm_container_app" "main" {
       }
       env {
         name        = "ConnectionStrings__Default"
-        secret_name = "postgres-connection"
+        secret_name = "pg-${substr(var.runtime_postgres_connection_secret_version, 0, 16)}"
       }
       env {
         name        = "Security__TenantProofKey"
