@@ -44,7 +44,7 @@ jobs:
       TF_VAR_prefix: ${{ vars.AZURE_PREFIX }}
       TF_VAR_location: ${{ vars.AZURE_LOCATION }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # Environment-level OIDC trust is broad without a main-only guard.
       # Do not acquire either federated Azure identity on unapproved refs.
       - name: Reject unapproved GitHub release source before OIDC
@@ -263,7 +263,7 @@ jobs:
             --other-client-id "$ACR_PUSH_CLIENT_ID" \
             --expected-tenant-id "$ARM_TENANT_ID" \
             --expected-subscription-id "$ARM_SUBSCRIPTION_ID"
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
       - name: Initialize remote Terraform state
         run: |
           terraform -chdir=infra init -input=false \
