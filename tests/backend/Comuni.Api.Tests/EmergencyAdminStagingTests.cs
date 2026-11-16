@@ -255,7 +255,17 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
         Assert.Equal(HttpStatusCode.Forbidden, (await compromised.GetAsync("/api/v1/context")).StatusCode);
 
         var staged = await Stage(org);
-        Assert.Equal(0, staged.Code);
+        Assert.True(staged.Code == 0,
+            "Owner-only staging failed with redacted diagnostic: " +
+            staged.Output
+                .Replace(Issuer, "[issuer]", StringComparison.Ordinal)
+                .Replace(Old, "[old-sub]", StringComparison.Ordinal)
+                .Replace(New, "[new-sub]", StringComparison.Ordinal)
+                .Replace(Ticket, "[ticket]", StringComparison.Ordinal)
+                .Replace(FirstReviewer, "[reviewer]", StringComparison.Ordinal)
+                .Replace(SecondReviewer, "[reviewer]", StringComparison.Ordinal)
+                .Replace(Reason, "[reason]", StringComparison.Ordinal)
+                .Replace(org.ToString("D"), "[organization]", StringComparison.Ordinal));
         foreach (var privateValue in new[] { Issuer, Old, New, Ticket, FirstReviewer, SecondReviewer,
             Reason, org.ToString("D") })
             Assert.DoesNotContain(privateValue, staged.Output);
