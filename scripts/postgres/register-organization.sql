@@ -119,8 +119,8 @@ BEGIN
 
     -- New tenant has no users or activated service. First Admin OIDC is a
     -- separate owner-approved step (bootstrap-initial-admin.sql).
-    INSERT INTO platform.organizations (id, name, is_suspended)
-    VALUES (v_org, v_name, FALSE);
+    INSERT INTO platform.organizations (id, name, is_suspended, is_activated)
+    VALUES (v_org, v_name, FALSE, FALSE);
     INSERT INTO platform.organization_modules (organization_id, module_key, enabled)
     VALUES (v_org, 'protocol', FALSE);
     INSERT INTO platform.audit_events

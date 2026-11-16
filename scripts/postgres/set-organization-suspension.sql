@@ -56,6 +56,7 @@ DECLARE
     v_reason text := current_setting('comuni.lifecycle_reason', true);
     v_org uuid;
     v_current_suspended boolean;
+    v_current_activated boolean;
     v_target_suspended boolean;
     v_event_action text;
 BEGIN
@@ -93,10 +94,16 @@ BEGIN
         ELSE 'platform.organization.reactivated' END;
 
     -- Both concurrent calls for one tenant serialize on its organization row.
-    SELECT is_suspended INTO v_current_suspended
+    SELECT is_suspended, is_activated
+    INTO v_current_suspended, v_current_activated
     FROM platform.organizations WHERE id = v_org FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Organization not found';
+    END IF;
+    -- A pending organization is never silently made active by reactivation,
+    -- nor assigned a suspended state bypassing the approval gate.
+    IF NOT v_current_activated THEN
+        RAISE EXCEPTION 'Pending organization requires approved first activation';
     END IF;
     IF v_current_suspended = v_target_suspended THEN
         -- Idempotent exact target state; no duplicate audit event.
