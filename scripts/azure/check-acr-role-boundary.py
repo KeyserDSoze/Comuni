@@ -85,7 +85,9 @@ def preflight(args):
     require(args.registry_name == expected_registry and
             args.registry_host == expected_registry + ".azurecr.io",
             "registry does not match the Terraform-managed identity")
-    require(uuid(args.deployer_client_id), "invalid OIDC deployer client ID")
+    require(uuid(args.deployer_client_id) and uuid(args.infra_client_id)
+            and args.deployer_client_id.casefold() != args.infra_client_id.casefold(),
+            "registry build and infrastructure OIDC clients must be distinct")
 
     group = args.prefix + "-rg"
     registry = az_json(
@@ -139,6 +141,7 @@ def main():
     parser.add_argument("--registry-name", required=True)
     parser.add_argument("--registry-host", required=True)
     parser.add_argument("--deployer-client-id", required=True)
+    parser.add_argument("--infra-client-id", required=True)
     args = parser.parse_args()
     try:
         preflight(args)
