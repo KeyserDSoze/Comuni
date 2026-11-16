@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 
 APP_ADDRESS = "azurerm_container_app.main"
 POSTGRES_ADDRESS = "azurerm_postgresql_flexible_server.main"
+REGISTRY_ADDRESS = "azurerm_container_registry.main"
+SOURCE_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+REGISTRY_NAME = re.compile(r"[a-z0-9]{5,50}\Z")
 AZURE_POSTGRES_HOST = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.postgres\.database\.azure\.com\Z"
 )
@@ -166,6 +169,30 @@ def managed_postgres_fqdn(plan):
     return fqdn
 
 
+def managed_acr_login_server(plan):
+    """Only the managed ACR in Terraform planned_values is a trusted image source.
+
+    Never trust a registry host copied from template.container.image, runtime
+    app registry alone, or an operator-controlled Terraform variable.
+    """
+    planned = plan.get("planned_values") if isinstance(plan, dict) else None
+    root = planned.get("root_module") if isinstance(planned, dict) else None
+    resources = root.get("resources") if isinstance(root, dict) else None
+    require(isinstance(resources, list), "missing managed ACR plan metadata")
+    matching = [resource for resource in resources if isinstance(resource, dict)
+                and resource.get("address") == REGISTRY_ADDRESS]
+    require(len(matching) == 1 and matching[0].get("type") ==
+            "azurerm_container_registry",
+            "missing or ambiguous authorized container registry")
+    values = matching[0].get("values")
+    require(isinstance(values, dict), "invalid managed container registry metadata")
+    name, host = values.get("name"), values.get("login_server")
+    require(isinstance(name, str) and bool(REGISTRY_NAME.fullmatch(name))
+            and isinstance(host, str) and host == name + ".azurecr.io",
+            "invalid managed container registry identity")
+    return host
+
+
 def validate(plan, args):
     require(bool(VERSION.fullmatch(args.runtime_secret_version)),
             "candidate runtime PostgreSQL requires explicit pinned Key Vault version")
@@ -186,8 +213,13 @@ def validate(plan, args):
                 "invalid or missing revision suffix")
     require(args.stable_revision != args.candidate_revision,
             "candidate cannot equal stable revision")
+    require(bool(SOURCE_COMMIT.fullmatch(args.source_commit_sha)),
+            "source commit must be an exact lowercase 40-hex Git SHA")
+    require(args.candidate_revision == "r" + args.source_commit_sha[:12],
+            "candidate revision must derive from the approved source commit")
 
     expected_postgres_host = managed_postgres_fqdn(plan)
+    managed_registry_host = managed_acr_login_server(plan)
     changes = plan.get("resource_changes", []) if isinstance(plan, dict) else []
     require(isinstance(changes, list), "missing Terraform changes")
     # The approved 0%-traffic stage is NOT a general infrastructure release.
@@ -256,6 +288,8 @@ def validate(plan, args):
             "existing ACA registry must use the approved managed identity")
     require(after.get("registry") == existing_registry,
             "staging cannot modify app-scoped registry credentials or source")
+    require(existing_registry[0]["server"] == managed_registry_host,
+            "existing ACA image registry must match the managed ACR")
 
     environment_id = before.get("container_app_environment_id")
     require(isinstance(environment_id, str) and bool(environment_id)
@@ -342,6 +376,9 @@ def validate(plan, args):
             isinstance(containers[0], dict),
             "expected single API + SPA container")
     validate_hosted_oidc_environment(containers[0].get("env"))
+    require(containers[0].get("image") ==
+            managed_registry_host + "/comuni:" + args.source_commit_sha,
+            "candidate image must match the managed ACR and approved Git commit")
     proof = named(containers[0].get("env", []), "Security__TenantProofKey")
     proof_id = named(containers[0].get("env", []), "Security__TenantProofKeyId")
     require(proof.get("secret_name") == candidate_name and not proof.get("value"),
@@ -421,6 +458,7 @@ def main():
     )
     parser.add_argument("--stable-revision", required=True)
     parser.add_argument("--candidate-revision", required=True)
+    parser.add_argument("--source-commit-sha", required=True)
     parser.add_argument("--stable-secret-version", required=True)
     parser.add_argument("--candidate-secret-version", required=True)
     parser.add_argument("--candidate-key-id", required=True)
