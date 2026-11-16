@@ -131,6 +131,20 @@ public sealed class OidcApiFactory : WebApplicationFactory<Program>, IAsyncLifet
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    // Synthetic RS256 compact JWT whose payload is authored verbatim to test
+    // duplicate JSON names before an identity library materializes claims.
+    internal string RawSignedToken(string rawPayload)
+    {
+        static string B64(byte[] bytes) =>
+            Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var header = B64(Encoding.UTF8.GetBytes(
+            """{"alg":"RS256","typ":"JWT","kid":"test-oidc-rsa-key"}"""));
+        var message = header + "." + B64(Encoding.UTF8.GetBytes(rawPayload));
+        var signature = _rsa.SignData(Encoding.ASCII.GetBytes(message),
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        return message + "." + B64(signature);
+    }
+
     internal HttpClient Authenticated(string token)
     {
         var client = CreateClient();
