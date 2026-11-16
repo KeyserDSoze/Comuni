@@ -289,6 +289,12 @@ resource "azurerm_container_app" "main" {
         name  = "Security__TenantProofKeyId"
         value = var.tenant_proof_key_id
       }
+      # Non-secret provenance metadata. Plan gate compares the FULL 40-hex
+      # SHA with the workflow's trusted GITHUB_SHA, not only revision r<12>.
+      env {
+        name  = "Release__SourceCommitSha"
+        value = var.source_commit_sha
+      }
       # Disabled unless explicitly selected in the approved manual stage.
       # Never pass inventory DB credentials via TF_VAR or a plain env value.
       env {
