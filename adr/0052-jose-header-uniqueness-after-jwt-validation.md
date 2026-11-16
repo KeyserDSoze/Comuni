@@ -1,0 +1,27 @@
+# ADR 0052 — Unicità fail-closed dell'header JOSE nel JWS validato
+
+- Stato: Accepted per il JwtBearer attuale e per i test offline su firma sintetica, non certificazione di un Identity Provider reale.
+- Data: 2026-11-16.
+- Issue: #60, follow-up di #58 (ADR 0051) e #57 (ADR 0050); collegato a #2/#5.
+- Fonti: [RFC 7515 §4 — JOSE Header](https://www.rfc-editor.org/rfc/rfc7515#section-4), [RFC 7515 §10.12 — JSON Security Considerations](https://www.rfc-editor.org/rfc/rfc7515#section-10.12), [RFC 7519 §4 — JWT Claims](https://www.rfc-editor.org/rfc/rfc7519#section-4), [Microsoft — JwtBearerEvents.OnTokenValidated](https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.authentication.jwtbearer.jwtbearerevents.ontokenvalidated).
+
+## Motivazione
+
+La #58 ha confermato in CI che un parser di JWT compatti validamente firmati può ridurre nomi JSON duplicati nel **payload**, rendendoli invisibili ai controlli del `ClaimsPrincipal`. L'header JOSE è soggetto allo stesso problema: contiene `alg`, `kid`, `typ` e altri parametri che sono letti **prima** della verifica firma dal token handler. L'RFC 7515 §4 consente ai parser di scegliere un comportamento last-duplicate-name-wins esplicito, oppure di negare i duplicati; tuttavia, un sistema multi-organization con credenziali utente e metadati municipal sensibili deve adottare un unico comportamento **fail-closed** senza assumere quale occorrenza possa sopravvivere a un parser.
+
+La suite RED #60 include token HS256 soltanto Testing e RS256 firmati con una chiave finta/JWKS statico, con duplicati identici o divergenti `alg/kid/typ`, anche tramite escape `\\u0061lg` e dentro JSON annidato; verifica la condizione del `SecurityToken` materializzato e, quando accettato dal handler, l'esito API. Il guard #58, prima di questo incremento, non controllava il segmento JOSE e quindi giudicava validi i token con header duplicati.
+
+## Decisione
+
+1. **Firma resta del framework.** Conservare `JwtBearer` con RS256/JWKS, issuer/audience/lifetime verificati in hosted e HS256 consentito unicamente a `Development/Testing`. Non leggere mai un header Authorization separatamente come fonte attendibile, non creare un ulteriore parser della firma o un percorso di fallback algoritmo. Il guard è chiamato da `AuthenticationConfiguration.Apply` **solo in `OnTokenValidated`**, dopo la decisione crittografica del framework, prima di autorizzazione e accesso tenant/RLS. Se il framework rigetta il token prima, resta rigettato.
+2. **Validazione indipendente di due segmenti:** da `JsonWebToken.EncodedToken` o `JwtSecurityToken.RawData` il guard prende il JWS compact completo, verifica esattamente tre segmenti e rianalizza **il primo (JOSE header) e il secondo (payload)** con `System.Text.Json.JsonDocument`. Ogni segmento deve essere un oggetto JSON valido e i nomi delle proprietà devono essere univoci per oggetto, inclusi nested e array, confrontati con `StringComparer.Ordinal` **dopo** la decodifica degli escape. `alg` e `\\u0061lg` collidono; `alg` e `Alg` rimangono diversi secondo JSON case-sensitive. Qualunque duplicato (anche identico) provoca fallimento dell'autenticazione, senza consultare membership SQL.
+3. **Protezione risorse:** header decoded max **8 KiB**, payload decoded max **64 KiB**, profondità JSON max **32**, rifiuto commenti/trailing commas/JSON malformato/tipo root diverso da object; il controllo dei length è effettuato *prima* di allocare bytes decoded. Risposte e log di errore non contengono raw token, issuer, subject, tenant, parametri JOSE o stringhe del payload. Non è un'operazione di canonicalizzazione/normalizzazione né una nuova autorità di firma: rifiuta solamente strutture non conformi. I limiti sono un contratto da verificare con l'IdP prima del go-live, non un bypass configurabile dinamicamente.
+4. **Difesa in profondità:** le policy e la protezione RLS firmata continuano a usare `VerifiedPrincipalIdentity` (ADR 0050), controlli di tenant esistente/attivo e membership PostgreSQL issuer-bound, mai il claim `role` JWT o un body/header query scelto dal client. I JWT strutturalmente corretti continuano ad avere risposta 200 **soltanto** se le policy autorizzano.
+5. **TDD e condizioni di chiusura:** test RED xUnit backend con header JOSE duplicati e RSA/HS256 sintetici, GREEN modifica minima nel guard senza alterare `AuthenticationConfiguration` o gli algoritmi; test endpoint HTTP 401 per token invalidi e 200 per quelli validi. Richiesti 7/7 job CI sul commit finale `main`: xUnit/PostgreSQL17, React/Playwright, Terraform/Python, CodeQL, SCA e Docker.
+6. **Rischi residui:** non è stato eseguito alcun sign-in OIDC produttivo, provisioning IdP/MFA, test SPID/CIE, network Azure o Key Vault; non è una certificazione di conformità. Non sono cambiati Terraform State, password SQL, database o revisioni ACA. Le issue #2/#5 restano aperte per l'identità e la verifica in ambiente reale e la #49 per il retirement della password legacy SQL.
+
+## Alternative escluse
+
+- Affidarsi alla scelta ultimo/primo valore del parser JWT per i duplicati JOSE, inclusi quelli identici: la piattaforma sceglie rigetto coerente anziché interpretare input ambiguo.
+- Analizzare l'header HTTP separatamente prima della validazione e usarlo per scegliere algoritmo/chiave: duplicherebbe un trust boundary critico senza benefici comprovati.
+- Rimuovere i limiti size/depth per accettare token IdP non conformi: aumenterebbe costo parsing e rischi di denial-of-service; un IdP reale deve essere integrato/validato esplicitamente.
