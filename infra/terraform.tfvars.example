@@ -56,3 +56,14 @@ tags = {
 # NEVER put the connection string/role password in tfvars or TF_VAR_*.
 # Future rotations must retain all app-scoped stable secrets until retired
 # under a separate approved plan; the stage gate blocks removal.
+
+# Candidate runtime PostgreSQL secret (#50, ADR 0043): REQUIRED metadata only.
+# Runtime login connection string MUST be externally provisioned in Key Vault
+# as 'postgres-runtime-connection' at an approved exact 32-hex version.
+# It must use the real Azure PostgreSQL FQDN, 'comuni_app_runtime', and
+# 'SSL Mode=VerifyFull;Trust Server Certificate=false'. Never place password,
+# connection string, TLS certificates or other secret bytes in tfvars/state.
+# runtime_postgres_connection_secret_version = "dddddddddddddddddddddddddddddddd"  # synthetic example
+# In the protected GitHub environment use RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION.
+# Existing 'postgres-connection' is versionless and STILL holds a runtime password
+# in historical/current Terraform state; do not rotate or overwrite it in place.

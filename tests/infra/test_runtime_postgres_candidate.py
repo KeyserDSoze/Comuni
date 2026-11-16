@@ -168,7 +168,7 @@ class RuntimePostgresCandidateSecretTests(unittest.TestCase):
                 'case " $* " in *" --name postgres-runtime-connection "*) ;; *) exit 4;; esac\n'
                 'case " $* " in *" --vault-name comuni-itn-001-kv "*) ;; *) exit 5;; esac\n'
                 'case " $* " in *"attributes.enabled"*) ;; *) exit 6;; esac\n'
-                'printf "%s\\n" "${TEST_ENABLED:-true}"\n'
+                'printf "%s\\n" "${TEST_ENABLED-true}"\n'
             )
             path.chmod(0o700)
             env = {**os.environ, "PATH": folder + os.pathsep + os.environ.get("PATH", "")}
