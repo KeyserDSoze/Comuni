@@ -629,3 +629,21 @@ Dopo l'identity guard del builder #71 e Docker login OAuth2 #73, `resolve-pushed
 **Autenticazione:** la sessione OIDC del build principal ottiene tramite `az account get-access-token --resource https://containerregistry.azure.net` un token Entra effimero. `POST /oauth2/exchange` ottiene il refresh token ACR; `POST /oauth2/token` richiede un Bearer limitato a `repository:comuni:pull,push`. Nessun accesso alla API ARM di registry, nessun `az acr login` e nessun ruolo `Owner`/`Contributor` necessario per completare queste chiamate lato codice. Tutte le risposte e i token sono solo in memoria, HTTPS senza redirect, e gli errori non stampano dati sensibili. Un fallimento, anche di un solo PATCH o read-back, **blocca** lo stage e deve essere valutato dall'owner: **non eseguire automaticamente unlock**. Non tornare alla CLI Azure con permessi più ampi.
 
 **Prima del primo deploy Azure autorizzato:** con uno o più manifest/tag di prova su un registry separato, verificare che un principal Entra federato dotato di `AcrPush` sul solo registry e senza privilegi ARM di admin possa acquisire i due token ACR, leggere tag/manifest, eseguire PATCH tag+manifest e verificarne la persistenza con GET; documentare esiti e rollback approvato. Il lock su registry reale **modifica metadati di quell'oggetto**: non è un test puramente read-only, quindi richiede risorsa di prova e autorizzazione owner e non deve toccare una revisione stable esistente. Controllare anche `docker push/pull`, log e FIC, oltre al certificato HTTPS, rete e IAM. Il fallimento di permessi non si risolve aggiungendo Owner/Contributor al builder; #72/#74 rimangono aperte fino alle prove. Nessun apply live fatto in questo incremento. Specifiche: [Get Tag](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry/get-tag-properties?view=rest-registry-dataplane-2021-07-01), [Update Tag](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry/update-tag-attributes?view=rest-registry-dataplane-2021-07-01), [Update Manifest](https://learn.microsoft.com/en-us/rest/api/registry-dataplane/container-registry/update-manifest-properties?view=rest-registry-dataplane-2021-07-01).
+
+## #75 — Runbook di verifica manuale read-only dei lock ACR (ADR 0064)
+
+Il comando seguente va eseguito **solo da operatore autorizzato in un ambiente test** dopo aver verificato la sessione OIDC Azure, il registry previsto e un tag/manifest di test **già bloccati**. Non eseguirlo automaticamente per alterare immagini di produzione:
+
+```bash
+python3 scripts/azure/check-acr-readonly-lock.py \
+  --registry-name "$ACR_NAME" \
+  --registry-host "$ACR_LOGIN_SERVER" \
+  --tenant-id "$AZURE_TENANT_ID" \
+  --source-commit-sha "$APPROVED_COMMIT_SHA" \
+  --candidate-image-digest "$APPROVED_OCI_DIGEST" \
+  --image "$ACR_LOGIN_SERVER/comuni@$APPROVED_OCI_DIGEST"
+```
+
+Gli argomenti non includono token, password né credenziali. La sessione Microsoft Entra dell'operatore deve esistere già; il tool usa `az account get-access-token --resource https://containerregistry.azure.net` con output catturato e token ACR **solo `repository:comuni:pull`**. Le sole richieste alle proprietà di contenuto sono `GET /acr/v1/comuni/_tags/<SHA>` e `GET /acr/v1/comuni/_manifests/<digest>`; l'autenticazione aggiunge due `POST /oauth2` a endpoint fissi. Il tool verifica digest del tag e lock `write=false,delete=false,read=true` su entrambi. Non effettua `PATCH`, `unlock`, `terraform apply`, `docker push` o `az acr update`. Una risposta 401/403, host/tenant non validi, tag non corrispondente o lock mancante **bloccano** la verifica e richiedono diagnosi owner senza grant amministrativi automatici.
+
+La **prova reale** in ACR che il builder con `AcrPush` minimo possa fare PATCH e che il lock sia persistente è ancora criterio di #74/#72 e richiede immagini di test e change approval, non ottenibile dalla CI fake. Inoltre un controllo read-only positivo descrive soltanto uno snapshot: non costituisce protezione da un registry admin che sblocchi successivamente.
