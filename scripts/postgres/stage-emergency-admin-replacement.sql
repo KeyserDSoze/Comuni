@@ -55,22 +55,42 @@
 
 BEGIN;
 
--- psql quotes each operator input as a literal, and the setting is LOCAL
--- to this transaction. Quoting prevents injection; it does NOT prevent
--- server-side statement logging of SQL literals. Real identities are blocked
--- pending the logging-safe channel tracked in #86.
+-- The *client-side* psql \copy command runs a fixed, reviewed local program.
+-- The helper reads only the allowlisted environment variables, then streams
+-- one base64(JSON) record to COPY STDIN. Base64 is NOT encryption: the pipe
+-- and the temporary session table are sensitive. No secret occurs in SQL text.
+-- Operation requires a trusted checkout and working directory at repo root.
+-- Never run \copy with input-derived program name, path, SQL or arguments.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py emergency' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.emergency_org', :'emergency_org', true) AS org,
-    set_config('comuni.emergency_old_issuer', :'emergency_old_issuer', true) AS old_issuer,
-    set_config('comuni.emergency_old_subject', :'emergency_old_subject', true) AS old_subject,
-    set_config('comuni.emergency_new_issuer', :'emergency_new_issuer', true) AS new_issuer,
-    set_config('comuni.emergency_new_subject', :'emergency_new_subject', true) AS new_subject,
-    set_config('comuni.emergency_ticket', :'emergency_ticket', true) AS ticket,
-    set_config('comuni.emergency_security_reviewer', :'emergency_security_reviewer', true)
-        AS security_reviewer,
-    set_config('comuni.emergency_municipal_reviewer', :'emergency_municipal_reviewer', true)
-        AS municipal_reviewer,
-    set_config('comuni.emergency_reason', :'emergency_reason', true) AS reason
+    set_config('comuni.emergency_org',
+               secret ->> 'COMUNI_EMERGENCY_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.emergency_old_issuer',
+               secret ->> 'COMUNI_EMERGENCY_OLD_IDENTITY_ISSUER', true) AS old_issuer,
+    set_config('comuni.emergency_old_subject',
+               secret ->> 'COMUNI_EMERGENCY_OLD_SUBJECT', true) AS old_subject,
+    set_config('comuni.emergency_new_issuer',
+               secret ->> 'COMUNI_EMERGENCY_NEW_IDENTITY_ISSUER', true) AS new_issuer,
+    set_config('comuni.emergency_new_subject',
+               secret ->> 'COMUNI_EMERGENCY_NEW_SUBJECT', true) AS new_subject,
+    set_config('comuni.emergency_ticket',
+               secret ->> 'COMUNI_EMERGENCY_INCIDENT_TICKET', true) AS ticket,
+    set_config('comuni.emergency_security_reviewer',
+               secret ->> 'COMUNI_EMERGENCY_SECURITY_REVIEWER', true) AS security_reviewer,
+    set_config('comuni.emergency_municipal_reviewer',
+               secret ->> 'COMUNI_EMERGENCY_MUNICIPAL_REVIEWER', true) AS municipal_reviewer,
+    set_config('comuni.emergency_reason',
+               secret ->> 'COMUNI_EMERGENCY_REASON_CODE', true) AS reason
+FROM private_json
 \gset
 
 DO $emergency$
