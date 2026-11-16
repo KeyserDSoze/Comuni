@@ -73,7 +73,8 @@ test('Superadmin visualizza solamente metadata minimali con paginazione', async 
   await expect(page.getByRole('button', { name: 'Carica altri Comuni' })).toBeVisible();
   await page.getByRole('button', { name: 'Carica altri Comuni' }).click();
   await expect(table.getByText('Comune Beta')).toBeVisible();
-  await expect(table.getByText('Sospeso')).toBeVisible();
+  // Inventory's compatibility flag includes both suspended and pending.
+  await expect(table.getByText('Non operativo')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Carica altri Comuni' })).toHaveCount(0);
   expect(trace.requests).toHaveLength(2);
   expect(trace.requests[0]).toContain('limit=10');
