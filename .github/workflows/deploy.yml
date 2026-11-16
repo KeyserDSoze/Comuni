@@ -124,7 +124,7 @@ jobs:
             --tenant-id "$ARM_TENANT_ID"
           # Tag only the build/push operation; never deploy by mutable tag.
           TAG="${REGISTRY_HOST}/comuni:${GITHUB_SHA}"
-          docker build -t "$TAG" .
+          docker build --platform linux/amd64 -t "$TAG" .
           PUSH_OUTPUT="$(mktemp)"
           trap 'rm -f -- "$PUSH_OUTPUT"' EXIT
           docker push "$TAG" > "$PUSH_OUTPUT"
