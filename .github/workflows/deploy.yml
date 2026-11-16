@@ -24,8 +24,6 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
-      TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       TF_VAR_tenant_proof_key_id: ${{ vars.TENANT_PROOF_KEY_ID }}
       # Metadata only: the connection string itself must be supplied directly
       # by an approved operator to Key Vault (TLS VerifyFull).
@@ -300,6 +298,10 @@ jobs:
           echo "TF_VAR_source_commit_sha=$GITHUB_SHA" >> "$GITHUB_ENV"
       - name: Plan and stage candidate at zero traffic (no automatic promotion)
         env:
+          # Sensitive SQL values exist only in the infra plan/apply step,
+          # never in the registry build, Trivy or attestation process.
+          TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
           STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
           STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
           CANDIDATE_TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
