@@ -16,10 +16,10 @@ WORKFLOWS = {
 # Tag refs verified via GitHub API, annotated tags dereferenced to commit.
 REVIEWED = {
     "actions/checkout": "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-    "actions/setup-dotnet": "67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
-    "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+    "actions/setup-dotnet": "26b0ec14cb23fa6904739307f278c14f94c95bf1",
+    "actions/setup-node": "a0853c24544627f65ddf259abe73b1d18a591444",
     "hashicorp/setup-terraform": "dfe3c3f87815947d99a8997f908cb6525fc44e9e",
-    "azure/login": "7184910d9eb2b1c5e48f7073824a90609bb9b6d6",
+    "azure/login": "a641126d1b8aa4d1fa005f4f92df94a3a4c4c906",
     "github/codeql-action/init": "33d7b85da1a04171e211befe2c739303b9a4c066",
     "github/codeql-action/analyze": "33d7b85da1a04171e211befe2c739303b9a4c066",
     "aquasecurity/setup-trivy": "81e514348e19b6112ce2a7e3ecbafe19c1e1f567",
@@ -124,6 +124,26 @@ class ImmutableActionsContractTests(unittest.TestCase):
                                  workflow)
                 self.assertNotIn("hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd",
                                  workflow)
+
+    def test_node24_setup_dotnet_node_and_azure_login_all_pinned(self):
+        # SHA/tag verified using upstream Git refs and action.yml runtime node24.
+        expected = {
+            "actions/setup-dotnet": (3, 0, "v5"),
+            "actions/setup-node": (2, 0, "v5"),
+            "azure/login": (0, 3, "v3"),
+        }
+        for action, (ci_count, deploy_count, major) in expected.items():
+            with self.subTest(action=action):
+                value = action + "@" + REVIEWED[action] + " # " + major
+                self.assertEqual(ci_count, WORKFLOWS["ci.yml"].count(value))
+                self.assertEqual(deploy_count, WORKFLOWS["deploy.yml"].count(value))
+        for workflow in WORKFLOWS.values():
+            for old in (
+                "actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
+                "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+                "azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6",
+            ):
+                self.assertNotIn(old, workflow)
 
     def test_no_mixed_codeql_digests_or_unreviewed_release_login(self):
         self.assertEqual(REVIEWED["github/codeql-action/init"],
