@@ -149,9 +149,7 @@ app.UseWhen(
 app.Use(async (context, next) =>
 {
     if (!context.Request.Path.StartsWithSegments("/api") ||
-        context.User.Identity?.IsAuthenticated != true ||
-        !Guid.TryParse(context.User.FindFirst("organization_id")?.Value, out var tenantId) ||
-        tenantId == Guid.Empty)
+        !VerifiedPrincipalIdentity.TryMunicipal(context.User, out _, out _, out _))
     {
         await next(context);
         return;
@@ -207,9 +205,7 @@ app.MapGet("/api/v1/platform/organizations", async (
         after = cursor;
     }
 
-    var issuer = context.User.FindFirst("iss")?.Value;
-    var subject = context.User.FindFirst("sub")?.Value;
-    if (string.IsNullOrEmpty(issuer) || string.IsNullOrEmpty(subject))
+    if (!VerifiedPrincipalIdentity.TryPlatform(context.User, out var issuer, out var subject))
         return Results.Forbid();
 
     try
@@ -239,8 +235,11 @@ app.MapGet("/api/v1/context", async (
     var organization = await organizations.FindAsync(current.OrganizationId, ct);
     if (organization is null) return Results.NotFound();
     var enabledModules = await organizations.EnabledModulesAsync(current.OrganizationId, ct);
-    var subject = user.FindFirst("sub")?.Value ?? string.Empty;
-    var roles = await memberships.ActiveRolesAsync(current.OrganizationId, subject, user.FindFirst("iss")?.Value, ct);
+    if (!VerifiedPrincipalIdentity.TryMunicipal(
+            user, out var claimedOrganization, out var subject, out var issuer) ||
+        claimedOrganization != current.OrganizationId)
+        return Results.Forbid();
+    var roles = await memberships.ActiveRolesAsync(current.OrganizationId, subject, issuer, ct);
     return Results.Ok(new
     {
         organizationId = organization.Id,

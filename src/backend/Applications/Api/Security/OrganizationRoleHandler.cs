@@ -9,21 +9,15 @@ public sealed class OrganizationRoleHandler(IOrganizationMembershipStore members
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context, OrganizationRoleRequirement requirement)
     {
-        var principal = context.User;
-        if (principal.Identity?.IsAuthenticated != true ||
-            !Guid.TryParse(principal.FindFirst("organization_id")?.Value, out var organizationId) ||
-            organizationId == Guid.Empty)
-            return;
-
-        var subject = principal.FindFirst("sub")?.Value;
-        if (string.IsNullOrWhiteSpace(subject))
+        if (!VerifiedPrincipalIdentity.TryMunicipal(
+                context.User, out var organizationId, out var subject, out var issuer))
             return;
 
         // A valid JWT and membership are insufficient for a suspended organization.
         if (!await organizations.IsOperationalAsync(organizationId, CancellationToken.None))
             return;
 
-        var roles = await memberships.ActiveRolesAsync(organizationId, subject, principal.FindFirst("iss")?.Value, CancellationToken.None);
+        var roles = await memberships.ActiveRolesAsync(organizationId, subject, issuer, CancellationToken.None);
         if (roles.Any(role => requirement.AllowedRoles.Contains(role, StringComparer.Ordinal)))
             context.Succeed(requirement);
     }

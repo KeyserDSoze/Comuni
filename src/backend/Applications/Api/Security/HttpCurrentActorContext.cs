@@ -4,21 +4,18 @@ namespace Comuni.Api.Security;
 
 public sealed class HttpCurrentActorContext(IHttpContextAccessor accessor) : ICurrentActorContext
 {
-    public string ActorSubject
-    {
-        get
-        {
-            var user = accessor.HttpContext?.User;
-            return user?.Identity?.IsAuthenticated == true
-                ? user.FindFirst("sub")?.Value ?? string.Empty
-                : string.Empty;
-        }
-    }
+    // An audit actor MUST be the same single, validated identity used for
+    // tenant authorization. A duplicate sub/issuer cannot become audit metadata.
+    public string ActorSubject =>
+        VerifiedPrincipalIdentity.TryMunicipal(
+            accessor.HttpContext?.User, out _, out var subject, out _)
+            ? subject : string.Empty;
 
     public string? IdentityIssuer =>
-        accessor.HttpContext?.User.Identity?.IsAuthenticated == true
-            ? accessor.HttpContext.User.FindFirst("iss")?.Value : null;
+        VerifiedPrincipalIdentity.TryMunicipal(
+            accessor.HttpContext?.User, out _, out _, out var issuer)
+            ? issuer : null;
 
-    // ASP.NET Core allocates TraceIdentifier for the server request; do not trust X-Correlation-Id.
+    // Server-generated request id; no X-Correlation-Id header is trusted.
     public string CorrelationId => accessor.HttpContext?.TraceIdentifier ?? string.Empty;
 }

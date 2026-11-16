@@ -30,14 +30,9 @@ public sealed record ApiProtectionSettings(int PermitLimit, int WindowSeconds)
 
     public static string PartitionKey(HttpContext context)
     {
-        var user = context.User;
-        if (user.Identity?.IsAuthenticated == true &&
-            Guid.TryParse(user.FindFirst("organization_id")?.Value, out var organizationId) &&
-            organizationId != Guid.Empty &&
-            !string.IsNullOrWhiteSpace(user.FindFirst("sub")?.Value))
-        {
-            return $"tenant:{organizationId:N}:{user.FindFirst("sub")!.Value}";
-        }
+        if (VerifiedPrincipalIdentity.TryMunicipal(
+                context.User, out var organizationId, out var subject, out _))
+            return $"tenant:{organizationId:N}:{subject}";
 
         // Never trust X-Forwarded-For without a configured, trusted proxy boundary.
         return $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";

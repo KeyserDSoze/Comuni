@@ -18,15 +18,8 @@ public sealed class PlatformOperatorHandler(
         AuthorizationHandlerContext context, PlatformOperatorRequirement requirement)
     {
         if (!issuerPolicy.RequiresOidcBinding ||
-            context.User.Identity?.IsAuthenticated != true ||
-            context.User.HasClaim(claim => claim.Type == "organization_id"))
-            return;
-
-        var issuer = context.User.FindFirst("iss")?.Value;
-        var subject = context.User.FindFirst("sub")?.Value;
-        if (!MembershipIssuerPolicy.IsTrustedFormat(issuer) ||
-            subject is not { Length: > 0 and <= 160 } ||
-            subject != subject.Trim() || subject.Any(char.IsControl))
+            !VerifiedPrincipalIdentity.TryPlatform(context.User, out var issuer, out var subject) ||
+            !MembershipIssuerPolicy.IsTrustedFormat(issuer))
             return;
 
         if (await operators.IsActiveAsync(issuer!, subject, CancellationToken.None))

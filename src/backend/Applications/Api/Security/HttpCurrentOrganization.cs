@@ -12,9 +12,9 @@ public sealed class HttpCurrentOrganization(IHttpContextAccessor httpContextAcce
     {
         get
         {
-            var user = httpContextAccessor.HttpContext?.User;
-            if (user?.Identity?.IsAuthenticated != true) return Guid.Empty;
-            return Guid.TryParse(user.FindFirst("organization_id")?.Value, out var id) ? id : Guid.Empty;
+            return VerifiedPrincipalIdentity.TryMunicipal(
+                httpContextAccessor.HttpContext?.User, out var id, out _, out _)
+                ? id : Guid.Empty;
         }
     }
 }
