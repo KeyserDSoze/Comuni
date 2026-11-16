@@ -127,9 +127,24 @@ variable "authentication_browser_scope" {
   default     = ""
 }
 
-variable "image" {
-  description = "Fully qualified immutable container image, e.g. registry.azurecr.io/comuni:<commit-sha>"
+variable "source_commit_sha" {
+  description = "Full 40-hex GitHub source commit of the staged ACA image, non-secret; must match the approved workflow SHA."
   type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.source_commit_sha))
+    error_message = "source_commit_sha must be exactly 40 lowercase hexadecimal characters."
+  }
+}
+
+variable "image" {
+  description = "OCI manifest digest URI for the approved image, e.g. registry.azurecr.io/comuni@sha256:<64-hex> (never a mutable tag)."
+  type        = string
+  nullable    = false
+  validation {
+    condition     = can(regex("^[a-z0-9]{5,50}\\.azurecr\\.io/comuni@sha256:[0-9a-f]{64}$", var.image))
+    error_message = "image must be a managed ACR comuni@sha256 digest URI, never a tag."
+  }
 }
 
 variable "tags" {
