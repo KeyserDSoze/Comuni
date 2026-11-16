@@ -19,6 +19,8 @@ STABLE_VERSION = "a" * 32
 CANDIDATE_VERSION = "b" * 32
 STABLE_REVISION = "stable001"
 CANDIDATE_REVISION = "r123456789abc"
+SOURCE_COMMIT_SHA = "123456789abc" + "d" * 28
+MANAGED_REGISTRY = "synthetic.azurecr.io"
 CANDIDATE_KEY_ID = "rotate2026"
 RUNTIME_POSTGRES_VERSION = "d" * 32
 VAULT_URI = "https://comuni-itn-001-kv.vault.azure.net/"
@@ -43,7 +45,7 @@ def fixture_plan():
     }
     shared = {
         "identity": [{"type": "UserAssigned", "identity_ids": [identity_id]}],
-        "registry": [{"server": "synthetic.azurecr.io", "identity": identity_id}],
+        "registry": [{"server": MANAGED_REGISTRY, "identity": identity_id}],
         "container_app_environment_id": "/subscriptions/synthetic/containerAppEnvironment",
     }
     ingress_settings = {"external_enabled": True, "target_port": 8080, "transport": "auto"}
@@ -61,6 +63,7 @@ def fixture_plan():
             "revision_suffix": CANDIDATE_REVISION,
             "min_replicas": 1,
             "container": [{
+                "image": MANAGED_REGISTRY + "/comuni:" + SOURCE_COMMIT_SHA,
                 "env": [
                     {"name": "ASPNETCORE_ENVIRONMENT", "value": "Production"},
                     {"name": "Authentication__Mode", "value": "Oidc"},
@@ -94,6 +97,10 @@ def fixture_plan():
                 "name": "comuni-itn-001-pg",
                 "fqdn": "comuni-itn-001-pg.postgres.database.azure.com",
             },
+        }, {
+            "address": "azurerm_container_registry.main",
+            "type": "azurerm_container_registry",
+            "values": {"name": "synthetic", "login_server": MANAGED_REGISTRY},
         }]}},
         "format_version": "1.2",
         "resource_changes": [{
