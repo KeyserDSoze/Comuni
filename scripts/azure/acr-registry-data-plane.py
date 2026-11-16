@@ -18,6 +18,7 @@ TENANT = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z", re.I)
 TOKEN = re.compile(r"[A-Za-z0-9._~-]{16,16000}\Z")
 API_VERSION = "2021-07-01"
 SCOPE = "repository:comuni:pull,push"
+READ_ONLY_SCOPE = "repository:comuni:pull"
 MAX_BODY = 65536
 TIMEOUT = 20
 
@@ -65,19 +66,24 @@ def checked_token(value):
 
 
 class ACRClient:
-    def __init__(self, registry_name, registry_host, tenant_id):
+    def __init__(self, registry_name, registry_host, tenant_id, *, read_only=False):
         require(isinstance(registry_name, str) and
                 bool(REGISTRY_NAME.fullmatch(registry_name)) and
                 registry_host == registry_name + ".azurecr.io",
                 "unapproved managed Azure registry")
         require(isinstance(tenant_id, str) and bool(TENANT.fullmatch(tenant_id)),
                 "invalid approved Entra tenant")
+        require(type(read_only) is bool, "invalid ACR access policy")
+        self.read_only = read_only
         self.host = registry_host
         self.tenant = tenant_id
         self.token = None
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def _request(self, method, path, *, fields=None, json_body=None, authenticated=False):
+        if self.read_only and path not in ("/oauth2/exchange", "/oauth2/token"):
+            require(method == "GET" and fields is None and json_body is None,
+                    "read-only ACR client cannot modify repository metadata")
         require(path in ("/oauth2/exchange", "/oauth2/token") or
                 path.startswith("/acr/v1/comuni/_tags/") or
                 path.startswith("/acr/v1/comuni/_manifests/"),
@@ -119,7 +125,8 @@ class ACRClient:
         access_info = self._request(
             "POST", "/oauth2/token",
             fields={"grant_type": "refresh_token", "service": self.host,
-                    "scope": SCOPE, "refresh_token": refresh})
+                    "scope": READ_ONLY_SCOPE if self.read_only else SCOPE,
+                    "refresh_token": refresh})
         self.token = checked_token(access_info.get("access_token"))
 
     def _properties(self, method, path, kind, reference, update=False):
@@ -167,6 +174,7 @@ class ACRClient:
         return digest
 
     def lock(self, sha, approved_digest):
+        require(not self.read_only, "read-only ACR client cannot lock objects")
         tag, manifest = tag_path(sha), manifest_path(approved_digest)
         self.tag_digest(sha, expected_digest=approved_digest)
         updated_tag = self._properties("PATCH", tag, "tag", sha, update=True)
@@ -179,3 +187,16 @@ class ACRClient:
                 "ACR tag changed after protected manifest update")
         manifest_readback = self._properties("GET", manifest, "manifest", approved_digest)
         self._require_locked(manifest_readback["changeableAttributes"])
+    def verify_locked(self, sha, approved_digest):
+        """Read-only audit of both immutable objects and the approved push digest."""
+        require(isinstance(approved_digest, str)
+                and bool(DIGEST.fullmatch(approved_digest)),
+                "invalid approved OCI manifest digest")
+        tag = self._properties("GET", tag_path(sha), "tag", sha)
+        require(tag["digest"] == approved_digest,
+                "registry tag digest differs from approved Docker push")
+        self._require_locked(tag["changeableAttributes"])
+        manifest = self._properties("GET", manifest_path(approved_digest),
+                                    "manifest", approved_digest)
+        self._require_locked(manifest["changeableAttributes"])
+
