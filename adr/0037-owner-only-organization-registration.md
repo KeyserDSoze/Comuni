@@ -26,3 +26,8 @@ Le API e le policy già negano operazioni sulle organization non presenti e gli 
 - Usare nome come chiave univoca o inventare codice ISTAT: nominativi simili/duplicati e assenza di catalogo ufficiale attendibile. Rifiutato; prima di popolamento reale serve fonte istituzionale e regola di identificazione approvata.
 
 La registrazione **non** prova che il Comune sia legalmente aderente o che l'operatore abbia ricevuto mandato; il parametro reviewer non sostituisce un processo reale a quattro occhi. Non sono stati effettuati deployment Azure, autenticazione IdP reale, onboarding di enti reali o test su dati personali. Lo schema attuale non modella ancora `created/active/suspended` a tre stati, catalogo moduli esteso o UI Superadmin CRUD; #3/#4/#5/#10 restano aperte.
+
+
+## Evoluzione con ADR 0038 (#44) — stato created distinto da active
+
+Questo ADR documenta il primo comando di registrazione. **L'ADR 0038 ne estende ora il lifecycle:** dopo la migration 0013, `register-organization.sql` inserisce anche `is_activated=FALSE`, rendendo il Comune **created e non operativo**, anche dopo l'aggiunta del primo Admin OIDC con #31. L'owner deve eseguire la separata procedura `activate-organization.sql` dopo un nuovo change approvato prima dell'accesso con membership. Solo da active può seguire la sospensione/riattivazione #33. Il default migration TRUE mantiene gli enti legacy operativi; il Down rifiuta pending per evitare attivazioni automatiche. L'affermazione storica secondo cui manca uno stato created distinto è quindi superata dall'ADR 0038, **non** dalla sola registrazione #43.
