@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  attestations: write
 
 jobs:
   deploy:
@@ -114,6 +115,30 @@ jobs:
             --registry-host "$REGISTRY_HOST" \
             --push-output-file "$PUSH_OUTPUT" \
             --github-env "$GITHUB_ENV"
+      # GitHub-issued Sigstore attestation: repository, signer workflow,
+      # source commit, main ref, and approved OCI manifest digest.
+      # Store the signed bundle in GitHub's attestations API (no untested ACR
+      # OCI referrer dependency); require a separate verification before plan.
+      - name: Sign build provenance for verified OCI image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ vars.ACR_LOGIN_SERVER }}/comuni
+          subject-digest: ${{ env.CANDIDATE_IMAGE_DIGEST }}
+          push-to-registry: false
+          create-storage-record: false
+      - name: Verify signed provenance before any Terraform plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_HOST: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          set -euo pipefail
+          python3 scripts/azure/verify-image-provenance.py \
+            --image "$TF_VAR_image" \
+            --candidate-image-digest "$CANDIDATE_IMAGE_DIGEST" \
+            --source-commit-sha "$GITHUB_SHA" \
+            --registry-host "$REGISTRY_HOST" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-ref "$GITHUB_REF"
       - name: Plan and stage candidate at zero traffic (no automatic promotion)
         env:
           STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
