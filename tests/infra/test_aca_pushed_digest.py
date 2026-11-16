@@ -1,17 +1,23 @@
-"""Offline TDD for content-addressed ACA image release (issue #64).
+"""ACR digest integrity tests (#64/#74), now backed by mocked REST data-plane.
 
-The GitHub workflow must prove that the digest produced by its own Docker push
-matches ACR tag metadata, then hand a digest-only URI to Terraform. No Azure
-access or real credentials: fake 'az' is isolated on PATH.
+The receipt from the actual Docker push is independent of the ACR tag
+properties returned over OAuth2 HTTPS. No Azure or registry access in tests.
 """
+import contextlib
+import importlib.util
+import io
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 import unittest
 
 from test_staged_rollout import SOURCE_COMMIT_SHA, MANAGED_REGISTRY
+from test_acr_registry_data_plane_rest import HTTPS, reply, tag_object
 
 ROOT = Path(__file__).resolve().parents[2]
 RESOLVE = ROOT / "scripts/azure/resolve-pushed-image-digest.py"
@@ -19,22 +25,12 @@ DEPLOY = (ROOT / ".github/workflows/deploy.yml").read_text()
 DIGEST = "sha256:" + "a" * 64
 OTHER = "sha256:" + "b" * 64
 ACR = "synthetic"
+TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 SENTINEL = "private-credential-never-echo-me"
-FAKE_AZ = '''#!/usr/bin/env python3
-import os
-import sys
 
-expected = [
-    "acr", "manifest", "show-metadata", "--registry", os.environ["FAKE_ACR_NAME"],
-    "--name", "comuni:" + os.environ["FAKE_SHA"],
-    "--query", "digest", "--output", "tsv", "--only-show-errors",
-]
-if sys.argv[1:] != expected:
-    print("wrong mocked registry/repository request", file=sys.stderr)
-    sys.exit(73)
-print(os.environ.get("FAKE_DIGEST", ""))
-sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
-'''
+spec = importlib.util.spec_from_file_location("resolve_pushed", RESOLVE)
+resolver = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(resolver)
 
 
 def push_receipt(digest=DIGEST, tag=SOURCE_COMMIT_SHA):
@@ -46,36 +42,38 @@ def push_receipt(digest=DIGEST, tag=SOURCE_COMMIT_SHA):
 def run_resolve(*, output=None, remote=DIGEST, sha=SOURCE_COMMIT_SHA,
                 registry=ACR, host=MANAGED_REGISTRY, az_exit=0,
                 fake_az=True, missing_push=False):
-    with tempfile.TemporaryDirectory() as temp:
-        root = Path(temp)
-        (root / "az").write_text(FAKE_AZ, encoding="utf-8")
-        (root / "az").chmod(0o700)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
         receipt = root / "push.txt"
         if not missing_push:
-            receipt.write_text(output if output is not None else push_receipt(),
-                               encoding="utf-8")
+            receipt.write_text(output if output is not None else push_receipt())
         envfile = root / "github-env"
-        envfile.write_text("EXISTING_VALUE=preserve\n", encoding="utf-8")
-        env = os.environ.copy()
-        env.update({
-            "PATH": str(root) + os.pathsep + env.get("PATH", ""),
-            "FAKE_ACR_NAME": ACR,
-            "FAKE_SHA": SOURCE_COMMIT_SHA,
-            "FAKE_DIGEST": remote,
-            "FAKE_EXIT": str(az_exit),
-        })
-        if not fake_az:
-            env["FAKE_SHA"] = "not-the-requested-repository"
-        result = subprocess.run(
-            [sys.executable, str(RESOLVE),
-             "--source-commit-sha", sha,
-             "--registry-name", registry,
-             "--registry-host", host,
-             "--push-output-file", str(receipt),
-             "--github-env", str(envfile)],
-            env=env, capture_output=True, text=True, check=False,
-        )
-        return result, envfile.read_text(encoding="utf-8")
+        envfile.write_text("EXISTING_VALUE=preserve\n")
+
+        def token_cli(argv, **kwargs):
+            return SimpleNamespace(returncode=az_exit or (1 if not fake_az else 0),
+                                   stdout="eyJ.AADTEST.SIGNATURE", stderr=SENTINEL)
+
+        response = tag_object(remote)
+        network = HTTPS([reply({"refresh_token": "eyJ.ACRREFRESH.SIGNATURE"}),
+                         reply({"access_token": "eyJ.ACRACCESS.SIGNATURE"}),
+                         reply(response)])
+        opener = mock.Mock()
+        opener.open = network.open
+        argv = ["resolve-pushed-image-digest.py", "--source-commit-sha", sha,
+                "--registry-name", registry, "--registry-host", host,
+                "--tenant-id", TENANT,
+                "--push-output-file", str(receipt), "--github-env", str(envfile)]
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(resolver._acr.subprocess, "run",
+                               side_effect=token_cli), \
+             mock.patch.object(resolver._acr.urllib.request, "build_opener",
+                               return_value=opener), \
+             mock.patch.object(sys, "argv", argv), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = resolver.main()
+        return SimpleNamespace(returncode=status, stdout=out.getvalue(),
+                               stderr=err.getvalue()), envfile.read_text()
 
 
 class ApprovedImageDigestTests(unittest.TestCase):
@@ -84,13 +82,13 @@ class ApprovedImageDigestTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0,
                             "untrusted push/registry digest accepted")
         self.assertEqual(envfile, "EXISTING_VALUE=preserve\n")
-        self.assertNotIn(SENTINEL, result.stdout + result.stderr)
-        self.assertNotIn("sha256:", result.stdout + result.stderr)
+        for private in (SENTINEL, "sha256:", TENANT, "eyJ."):
+            self.assertNotIn(private, result.stdout + result.stderr)
 
     def test_real_push_receipt_matching_acr_writes_digest_pinned_image(self):
         result, envfile = run_resolve()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "")
+        self.assertEqual("", result.stdout)
         self.assertEqual(
             envfile,
             "EXISTING_VALUE=preserve\n"
@@ -99,11 +97,10 @@ class ApprovedImageDigestTests(unittest.TestCase):
         )
 
     def test_rejects_tag_rewritten_in_acr_after_push(self):
-        self.reject(remote=OTHER)
-        self.reject(remote="")
-        self.reject(remote="\n" + DIGEST + "\n" + OTHER)
-        self.reject(remote=SENTINEL)
-        self.reject(remote="sha256:" + "A" * 64)
+        for remote in (OTHER, "", "\n" + DIGEST + "\n" + OTHER,
+                       SENTINEL, "sha256:" + "A" * 64):
+            with self.subTest(response_length=len(remote)):
+                self.reject(remote=remote)
 
     def test_rejects_missing_untrusted_or_ambiguous_push_receipt(self):
         cases = (
@@ -123,16 +120,18 @@ class ApprovedImageDigestTests(unittest.TestCase):
 
     def test_rejects_wrong_registry_or_source_sha(self):
         cases = (
-            {"sha": "b" * 40}, {"sha": ""}, {"sha": SOURCE_COMMIT_SHA.upper()},
+            {"sha": "b" * 40}, {"sha": ""},
+            {"sha": SOURCE_COMMIT_SHA.upper()},
             {"registry": "different"}, {"registry": "../synthetic"},
-            {"host": "evil.azurecr.io"}, {"host": "synthetic.azurecr.io/other"},
+            {"host": "evil.azurecr.io"},
+            {"host": "synthetic.azurecr.io/other"},
             {"host": "synthetic.azurecr.io:443"}, {"host": SENTINEL},
         )
         for kwargs in cases:
             with self.subTest(kwargs=list(kwargs.keys())):
                 self.reject(**kwargs)
 
-    def test_rejects_cli_failure_or_wrong_repository_query(self):
+    def test_rejects_azure_token_failure_or_wrong_repository_query(self):
         self.reject(az_exit=1)
         self.reject(fake_az=False)
 
@@ -140,6 +139,7 @@ class ApprovedImageDigestTests(unittest.TestCase):
         self.assertIn("scripts/azure/resolve-pushed-image-digest.py", DEPLOY)
         self.assertIn('--candidate-image-digest "$CANDIDATE_IMAGE_DIGEST"', DEPLOY)
         self.assertIn('"$GITHUB_SHA"', DEPLOY)
+        self.assertIn('--tenant-id "$ARM_TENANT_ID"', DEPLOY)
         self.assertNotIn('echo "TF_VAR_image=$IMAGE"', DEPLOY)
         self.assertLess(DEPLOY.index("resolve-pushed-image-digest.py"),
                         DEPLOY.index("terraform -chdir=infra plan"))
