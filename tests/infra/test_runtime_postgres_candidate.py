@@ -28,13 +28,7 @@ SECRET_URI = VAULT_URI + "secrets/postgres-runtime-connection/" + VERSION
 
 
 def runtime_plan():
-    plan = fixture_plan()
-    after = plan["resource_changes"][0]["change"]["after"]
-    after["secret"].append({"name": SECRET_NAME, "key_vault_secret_id": SECRET_URI})
-    after["template"][0]["container"][0]["env"].append(
-        {"name": "ConnectionStrings__Default", "secret_name": SECRET_NAME}
-    )
-    return plan
+    return fixture_plan()
 
 
 def gate(plan, version=VERSION, *, include_version=True):

@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import unittest
 
-from test_staged_rollout import fixture_plan, STABLE_REVISION, CANDIDATE_REVISION, STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, VAULT_URI
+from test_staged_rollout import fixture_plan, STABLE_REVISION, CANDIDATE_REVISION, STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, VAULT_URI, RUNTIME_POSTGRES_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
 TF = (ROOT / "infra/main.tf").read_text()
@@ -45,6 +45,7 @@ def check(plan, enabled=False, version=""):
         "--stable-secret-version", STABLE_VERSION,
         "--candidate-secret-version", CANDIDATE_VERSION,
         "--candidate-key-id", CANDIDATE_KEY_ID,
+        "--runtime-secret-version", RUNTIME_POSTGRES_VERSION,
         "--inventory-enabled", str(enabled).lower(),
         "--inventory-secret-version", version,
     ]

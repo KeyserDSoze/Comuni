@@ -20,6 +20,7 @@ CANDIDATE_VERSION = "b" * 32
 STABLE_REVISION = "stable001"
 CANDIDATE_REVISION = "r123456789abc"
 CANDIDATE_KEY_ID = "rotate2026"
+RUNTIME_POSTGRES_VERSION = "d" * 32
 VAULT_URI = "https://comuni-itn-001-kv.vault.azure.net/"
 
 
@@ -32,6 +33,10 @@ def fixture_plan():
         "name": "tp-" + CANDIDATE_VERSION[:16],
         "key_vault_secret_id": VAULT_URI + "secrets/tenant-proof-key/" + CANDIDATE_VERSION,
     }
+    runtime_connection = {
+        "name": "pg-" + RUNTIME_POSTGRES_VERSION[:16],
+        "key_vault_secret_id": VAULT_URI + "secrets/postgres-runtime-connection/" + RUNTIME_POSTGRES_VERSION,
+    }
     before = {
         "revision_mode": "Single",
         "secret": [old_secret],
@@ -39,7 +44,7 @@ def fixture_plan():
     }
     after = {
         "revision_mode": "Multiple",
-        "secret": [old_secret, candidate_secret],
+        "secret": [old_secret, candidate_secret, runtime_connection],
         "template": [{
             "revision_suffix": CANDIDATE_REVISION,
             "min_replicas": 1,
@@ -47,6 +52,7 @@ def fixture_plan():
                 "env": [
                     {"name": "Security__TenantProofKey", "secret_name": candidate_secret["name"]},
                     {"name": "Security__TenantProofKeyId", "value": CANDIDATE_KEY_ID},
+                    {"name": "ConnectionStrings__Default", "secret_name": runtime_connection["name"]},
                 ],
             }],
         }],
@@ -104,7 +110,8 @@ class StagedRolloutTests(unittest.TestCase):
              "--stable-revision", stable, "--candidate-revision", candidate,
              "--stable-secret-version", STABLE_VERSION,
              "--candidate-secret-version", CANDIDATE_VERSION,
-             "--candidate-key-id", CANDIDATE_KEY_ID],
+             "--candidate-key-id", CANDIDATE_KEY_ID,
+             "--runtime-secret-version", RUNTIME_POSTGRES_VERSION],
             input=json.dumps(plan), capture_output=True, text=True, check=False,
         )
 
