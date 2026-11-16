@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
   attestations: write
 
@@ -53,6 +54,12 @@ jobs:
           [[ "$GITHUB_REPOSITORY" == "KeyserDSoze/Comuni" ]] || exit 1
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || exit 1
           [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || exit 1
+      # A green run on some other commit, a skipped job or a pending CI is
+      # insufficient. This read-only gate runs BEFORE either Azure OIDC login.
+      - name: Require complete CI 7/7 on exact release commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/azure/check-release-ci.py
       - name: Login Azure infrastructure identity for RBAC preflight
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
