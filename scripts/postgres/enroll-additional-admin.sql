@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 
--- OWNER-ONLY OFFLINE second OIDC Admin enrollment (#80 / ADR 0069).
+-- OWNER-ONLY OFFLINE additional OIDC Admin enrollment (#80/#83; ADR 0069/0071).
 -- The existing first Admin is NEVER disabled, transferred or replaced.
 -- Independent human issuer+sub verification and change approval are required
 -- before invoking this script with a private schema-owner connection.
@@ -60,6 +60,7 @@ DECLARE
     v_suspended boolean;
     v_admin_count bigint;
     v_valid_count bigint;
+    v_attested_revoked_count bigint;
     v_existing_issuer text;
     v_existing_active boolean;
     v_matching_audits bigint;
@@ -107,20 +108,38 @@ BEGIN
         RAISE EXCEPTION 'Enrollment organization does not exist';
     END IF;
     IF NOT v_activated OR v_suspended THEN
-        RAISE EXCEPTION 'Only an operational organization can add an Admin';
-    END IF;
-
+        RAISE EXCEPTION 'Only an operational organiza    -- Inactive Admins are historical only if their owner-only revocation
+    -- is independently represented by exactly one matching append-only audit.
+    -- No unsigned disable, legacy issuer, or unhealthy active Admin is tolerated.
     SELECT count(*),
            count(*) FILTER (
-               WHERE is_active = TRUE AND identity_issuer IS NOT NULL
-                 AND length(identity_issuer) <= 512
-                 AND identity_issuer ~
-                     '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$')
-      INTO v_admin_count, v_valid_count
-      FROM platform.organization_memberships
-     WHERE organization_id = v_org AND role = 'Admin';
-    IF v_admin_count = 0 OR v_valid_count <> v_admin_count THEN
-        RAISE EXCEPTION 'A healthy existing OIDC Admin roster is required';
+               WHERE m.is_active = TRUE AND m.identity_issuer IS NOT NULL
+                 AND length(m.identity_issuer) <= 512
+                 AND m.identity_issuer ~
+                     '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$'),
+           count(*) FILTER (
+               WHERE m.is_active = FALSE AND m.identity_issuer IS NOT NULL
+                 AND length(m.identity_issuer) <= 512
+                 AND m.identity_issuer ~
+                     '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$'
+                 AND (SELECT count(*) FROM platform.audit_events a
+                      WHERE a.organization_id = v_org
+                        AND a.action = 'platform.membership.admin.revoked'
+                        AND a.resource_type = 'platform.membership'
+                        AND a.resource_id = md5(
+                            v_org::text || '|Admin|' || m.subject || '|' || m.identity_issuer
+                        )::uuid
+                        AND a.correlation_id ~
+                            '^admin-revoke:[A-Za-z0-9][A-Za-z0-9._:/-]{7,109}$'
+                        AND a.actor_subject LIKE 'db-owner:%') = 1)
+      INTO v_admin_count, v_valid_count, v_attested_revoked_count
+      FROM platform.organization_memberships m
+     WHERE m.organization_id = v_org AND m.role = 'Admin';
+    IF v_valid_count < 1 OR v_admin_count <> v_valid_count + v_attested_revoked_count THEN
+        RAISE EXCEPTION 'An active OIDC Admin and fully audited revoked history are required';
+    END IF;
+
+in roster is required';
     END IF;
 
     v_resource_id := md5(v_org::text || '|Admin|' || v_subject || '|' || v_issuer)::uuid;
@@ -140,6 +159,18 @@ BEGIN
         RAISE EXCEPTION 'Approval reference already belongs to another enrollment';
     END IF;
 
+    -- Reusing a bootstrap or revocation ticket must not create a new grant.
+    IF EXISTS (
+        SELECT 1 FROM platform.audit_events
+        WHERE organization_id = v_org AND resource_type = 'platform.membership'
+          AND ((action = 'platform.membership.admin.initialized'
+                AND correlation_id = 'bootstrap:' || v_ticket)
+            OR (action = 'platform.membership.admin.revoked'
+                AND correlation_id = 'admin-revoke:' || v_ticket))
+    ) THEN
+        RAISE EXCEPTION 'The approval reference belongs to another Admin change';
+    END IF;
+
     SELECT identity_issuer, is_active INTO v_existing_issuer, v_existing_active
     FROM platform.organization_memberships
     WHERE organization_id = v_org AND role = 'Admin' AND subject = v_subject;
@@ -155,6 +186,15 @@ BEGIN
     IF v_matching_audits <> 0 OR EXISTS (
         SELECT 1 FROM platform.organization_memberships
         WHERE organization_id = v_org AND subject = v_subject
+    ) OR EXISTS (
+        -- If a historical target was illicitly deleted, its audit fingerprint
+        -- must not become a fresh Admin grant.
+        SELECT 1 FROM platform.audit_events
+        WHERE organization_id = v_org AND resource_type = 'platform.membership'
+          AND resource_id = v_resource_id
+          AND action IN ('platform.membership.admin.initialized',
+                         'platform.membership.admin.added',
+                         'platform.membership.admin.revoked')
     ) THEN
         RAISE EXCEPTION 'Unapproved or conflicting subject enrollment';
     END IF;
