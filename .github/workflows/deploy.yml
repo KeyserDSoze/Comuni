@@ -89,13 +89,28 @@ jobs:
       # Candidate revisions must get a unique suffix for each immutable commit.
       - name: Pin candidate revision suffix to source commit
         run: echo "TF_VAR_candidate_revision_suffix=r${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
-      - name: Build and push immutable image
+      - name: Build, push and verify digest-pinned image
+        env:
+          REGISTRY_NAME: ${{ vars.ACR_NAME }}
+          REGISTRY_HOST: ${{ vars.ACR_LOGIN_SERVER }}
         run: |
-          az acr login --name "${{ vars.ACR_NAME }}"
-          IMAGE="${{ vars.ACR_LOGIN_SERVER }}/comuni:${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "TF_VAR_image=$IMAGE" >> "$GITHUB_ENV"
+          set -euo pipefail
+          umask 077
+          az acr login --name "$REGISTRY_NAME"
+          # Tag only the build/push operation; never deploy by mutable tag.
+          TAG="${REGISTRY_HOST}/comuni:${GITHUB_SHA}"
+          docker build -t "$TAG" .
+          PUSH_OUTPUT="$(mktemp)"
+          trap 'rm -f -- "$PUSH_OUTPUT"' EXIT
+          docker push "$TAG" > "$PUSH_OUTPUT"
+          # Compare the digest reported by OUR push with the ACR tag metadata.
+          # Only this verifier may publish TF_VAR_image/CANDIDATE_IMAGE_DIGEST.
+          python3 scripts/azure/resolve-pushed-image-digest.py \
+            --source-commit-sha "$GITHUB_SHA" \
+            --registry-name "$REGISTRY_NAME" \
+            --registry-host "$REGISTRY_HOST" \
+            --push-output-file "$PUSH_OUTPUT" \
+            --github-env "$GITHUB_ENV"
       - name: Plan and stage candidate at zero traffic (no automatic promotion)
         env:
           STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
@@ -124,6 +139,7 @@ jobs:
             --stable-revision "$STABLE_REVISION_SUFFIX" \
             --candidate-revision "$TF_VAR_candidate_revision_suffix" \
             --source-commit-sha "$GITHUB_SHA" \
+            --candidate-image-digest "$CANDIDATE_IMAGE_DIGEST" \
             --stable-secret-version "$STABLE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID" \
