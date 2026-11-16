@@ -194,6 +194,62 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
     }
 
     [Fact]
+    public async Task Registration_precedes_separate_owner_verified_first_Oidc_Admin_bootstrap()
+    {
+        var id = Guid.NewGuid();
+        Assert.Equal(0, (await RegisterAsync(id.ToString(),
+            name: "Comune d'Acqua")).Code);
+        var database = new NpgsqlConnectionStringBuilder(OwnerConnection);
+        var start = new ProcessStartInfo("psql")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[]
+        {
+            "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", database.Host,
+            "-p", database.Port.ToString(), "-U", database.Username,
+            "-d", database.Database, "-f", Script("bootstrap-initial-admin.sql")
+        }) start.ArgumentList.Add(arg);
+        start.Environment["PGPASSWORD"] = database.Password;
+        start.Environment["COMUNI_BOOTSTRAP_ORGANIZATION_ID"] = id.ToString();
+        start.Environment["COMUNI_BOOTSTRAP_IDENTITY_ISSUER"] = "https://identity.example.test/tenant/v2.0";
+        start.Environment["COMUNI_BOOTSTRAP_SUBJECT"] = "municipal-first-admin";
+        start.Environment["COMUNI_BOOTSTRAP_CHANGE_TICKET"] = "CHANGE-2026-ADMIN43";
+        start.Environment["COMUNI_BOOTSTRAP_APPROVER"] = "independent-reviewer";
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("psql could not bootstrap Admin");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await process.WaitForExitAsync(timeout.Token);
+        var output = await stdout + await stderr;
+        Assert.Equal(0, process.ExitCode);
+        Assert.DoesNotContain("municipal-first-admin", output);
+        Assert.DoesNotContain("identity.example.test", output);
+
+        await using var db = new NpgsqlConnection(OwnerConnection);
+        await db.OpenAsync();
+        await using var query = new NpgsqlCommand("""
+            SELECT COUNT(*), COUNT(*) FILTER (WHERE identity_issuer =
+                'https://identity.example.test/tenant/v2.0' AND is_active)
+            FROM platform.organization_memberships
+            WHERE organization_id=@id AND role='Admin'
+            """, db);
+        query.Parameters.AddWithValue("id", id);
+        await using var row = await query.ExecuteReaderAsync();
+        Assert.True(await row.ReadAsync());
+        Assert.Equal(1, row.GetInt64(0));
+        Assert.Equal(1, row.GetInt64(1));
+        var state = await StateAsync(id);
+        Assert.Equal(1L, state.Organizations);
+        Assert.Equal(0L, state.EnabledModules);
+        Assert.Equal(1L, state.Audit);
+        Assert.Equal("Comune d'Acqua", state.Name);
+    }
+
+    [Fact]
     public async Task Suspended_tenant_retry_does_not_reactivate_or_reenable_protocol()
     {
         var id = Guid.NewGuid();
