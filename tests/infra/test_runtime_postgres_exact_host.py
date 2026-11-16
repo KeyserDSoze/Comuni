@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from test_staged_rollout import fixture_plan, STABLE_REVISION, CANDIDATE_REVISION
-from test_staged_rollout import STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, RUNTIME_POSTGRES_VERSION, SOURCE_COMMIT_SHA
+from test_staged_rollout import STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID, RUNTIME_POSTGRES_VERSION, SOURCE_COMMIT_SHA, SOURCE_IMAGE_DIGEST
 from test_live_revision_verification import (
     APP, RG, STABLE, CANDIDATE, IMAGE, KEY_ID, VERSION,
     valid_revisions, valid_traffic, MOCK_AZ
@@ -36,6 +36,7 @@ def plan_gate(plan):
         "--stable-revision", STABLE_REVISION,
         "--candidate-revision", CANDIDATE_REVISION,
         "--source-commit-sha", SOURCE_COMMIT_SHA,
+        "--candidate-image-digest", SOURCE_IMAGE_DIGEST,
         "--stable-secret-version", STABLE_VERSION,
         "--candidate-secret-version", CANDIDATE_VERSION,
         "--candidate-key-id", CANDIDATE_KEY_ID,
