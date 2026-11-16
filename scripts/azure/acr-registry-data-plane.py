@@ -169,7 +169,9 @@ class ACRClient:
     def lock(self, sha, approved_digest):
         tag, manifest = tag_path(sha), manifest_path(approved_digest)
         self.tag_digest(sha, expected_digest=approved_digest)
-        self._properties("PATCH", tag, "tag", sha, update=True)
+        updated_tag = self._properties("PATCH", tag, "tag", sha, update=True)
+        require(updated_tag["digest"] == approved_digest,
+                "ACR tag changed while being protected")
         self._properties("PATCH", manifest, "manifest", approved_digest, update=True)
         readback = self._properties("GET", tag, "tag", sha)
         self._require_locked(readback["changeableAttributes"])
