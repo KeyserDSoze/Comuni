@@ -271,6 +271,39 @@ public sealed class OrganizationActivationTests(ApiFactory factory) : IClassFixt
     }
 
     [Fact]
+    public async Task Pending_cannot_be_marked_suspended_and_runtime_cannot_force_activation_by_SQL()
+    {
+        var id = Guid.NewGuid();
+        Assert.Equal(0, (await Register(id)).Code);
+
+        await using (var owner = new NpgsqlConnection(Owner))
+        {
+            await owner.OpenAsync();
+            await using var unsafeSuspend = new NpgsqlCommand(
+                "UPDATE platform.organizations SET is_suspended=TRUE WHERE id=@id", owner);
+            unsafeSuspend.Parameters.AddWithValue("id", id);
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                () => unsafeSuspend.ExecuteNonQueryAsync());
+            Assert.Equal("23514", exception.SqlState); // lifecycle CHECK constraint
+        }
+
+        var runtime = Environment.GetEnvironmentVariable("TEST_RUNTIME_DATABASE_CONNECTION")
+            ?? throw new InvalidOperationException("Restricted PostgreSQL login missing");
+        await using (var db = new NpgsqlConnection(runtime))
+        {
+            await db.OpenAsync();
+            await using var unsafeActivate = new NpgsqlCommand(
+                "UPDATE platform.organizations SET is_activated=TRUE WHERE id=@id", db);
+            unsafeActivate.Parameters.AddWithValue("id", id);
+            var exception = await Assert.ThrowsAsync<PostgresException>(
+                () => unsafeActivate.ExecuteNonQueryAsync());
+            Assert.Equal("42501", exception.SqlState);
+        }
+
+        Assert.Equal((false, false, false, 0L, 0L), await ReadAsync(id));
+    }
+
+    [Fact]
     public async Task Platform_inventory_compatibility_marks_pending_as_not_operational()
     {
         var id = Guid.NewGuid();
