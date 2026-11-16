@@ -30,7 +30,7 @@ Generare e configurare in `docker/.env` anche `TENANT_PROOF_KEY` (minimo 32 byte
 
 ## Verifica locale delle chiavi tenant versionate
 
-`Security__TenantProofKeyId` è facoltativo; quando manca, il signer emette prove legacy a quattro campi (soltanto in presenza di un record DB `legacy` autorizzato). Per provare il nuovo protocollo usare un database migrato, effettuare lo staging con `TENANT_PROOF_KEY_ID` e `TENANT_PROOF_KEY` nell'ambiente del processo owner e lanciare `psql -f scripts/postgres/stage-tenant-proof-key.sql`. Impostare poi entrambe le variabili `Security__TenantProofKeyId`/`Security__TenantProofKey` nell'API. Non fare test con segreti di produzione. La CI copre staging ripetuto, revoca, unit tests del signer e verifier sotto PostgreSQL 17.
+**Soltanto in Development/Testing**, `Security__TenantProofKeyId` è facoltativo; quando manca, il signer demo emette prove legacy a quattro campi (soltanto in presenza di un record DB `legacy` autorizzato). **In Production e in ogni ambiente ospitato**, il controllo #47 richiede invece un ID esplicito, valido e diverso da `legacy` prima dell'avvio dell'API; il verifier PostgreSQL può continuare ad accettare vecchie prove legacy nel grace approvato finché l'owner non le ritira. Per provare il nuovo protocollo usare un database migrato, effettuare lo staging con `TENANT_PROOF_KEY_ID` e `TENANT_PROOF_KEY` nell'ambiente del processo owner e lanciare `psql -f scripts/postgres/stage-tenant-proof-key.sql`. Impostare poi entrambe le variabili `Security__TenantProofKeyId`/`Security__TenantProofKey` nell'API. Non fare test con segreti di produzione. La CI copre staging ripetuto, revoca, unit tests del signer e verifier sotto PostgreSQL 17.
 
 ## Login browser OIDC (ADR 0020, issue #26)
 

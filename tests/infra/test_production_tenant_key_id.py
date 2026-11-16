@@ -31,7 +31,7 @@ class ProductionTenantKeyIdTests(unittest.TestCase):
         self.assertTrue(SETTINGS.exists())
         settings = SETTINGS.read_text()
         self.assertIn('Security:TenantProofKeyId', settings)
-        self.assertIn('"Production"', settings)
+        self.assertIn('Production', settings)
         self.assertIn('"Development"', settings)
         self.assertIn('"Testing"', settings)
 

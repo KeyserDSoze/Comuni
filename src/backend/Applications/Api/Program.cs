@@ -24,7 +24,7 @@ var browserOidc = BrowserOidcSettings.Read(builder.Configuration, authentication
 var platformInventory = PlatformInventorySettings.Read(
     builder.Configuration, authentication.Mode, connection, builder.Environment.EnvironmentName);
 var tenantProofKey = builder.Configuration["Security:TenantProofKey"];
-var tenantProofSigner = new TenantProofSigner(tenantProofKey ?? string.Empty, builder.Configuration["Security:TenantProofKeyId"]);
+var tenantProofSigner = TenantProofSigningSettings.Read(builder.Configuration, builder.Environment.EnvironmentName);
 
 builder.Services.AddSingleton(tenantProofSigner);
 builder.Services.AddHttpContextAccessor();

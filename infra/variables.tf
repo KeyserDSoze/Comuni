@@ -74,12 +74,12 @@ variable "tenant_proof_secret_version" {
 }
 
 variable "tenant_proof_key_id" {
-  description = "Version of the HMAC tenant proof signer; empty means legacy compatibility. Provision and authorize this ID in PostgreSQL BEFORE switching API replicas."
+  description = "Required non-legacy HMAC tenant signing key ID. Provision and authorize its paired key in PostgreSQL BEFORE staging a new API revision."
   type        = string
-  default     = ""
+  nullable    = false
   validation {
-    condition     = var.tenant_proof_key_id == "" || can(regex("^[a-z][a-z0-9_-]{0,31}$", var.tenant_proof_key_id))
-    error_message = "tenant_proof_key_id must be blank or 1-32 lowercase ASCII letters, numbers, underscores or hyphens, starting with a letter."
+    condition     = var.tenant_proof_key_id != "legacy" && can(regex("^[a-z][a-z0-9_-]{0,31}$", var.tenant_proof_key_id))
+    error_message = "tenant_proof_key_id must be an explicit non-legacy ID of 1-32 lowercase ASCII letters, numbers, underscores or hyphens, beginning with a letter."
   }
 }
 
