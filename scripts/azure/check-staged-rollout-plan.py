@@ -366,6 +366,12 @@ def validate(plan, args):
                     "new ACA secret must use the approved managed identity")
 
     template = one_block(after, "template")
+    # A malicious init container can run even when the sole primary image
+    # matches the approved SHA; never allow a second workload image in stage.
+    init_containers = template.get("init_container", [])
+    require(init_containers is None or
+            (isinstance(init_containers, list) and len(init_containers) == 0),
+            "candidate cannot add init-container images during staging")
     require(template.get("revision_suffix") == args.candidate_revision,
             "unexpected candidate revision suffix")
     require(isinstance(template.get("min_replicas"), int) and
