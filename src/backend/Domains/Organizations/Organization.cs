@@ -15,6 +15,10 @@ public sealed class Organization
     public Guid Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public bool IsSuspended { get; private set; }
+    // Legacy/domain-created organizations are already operational. The
+    // owner-only registration script explicitly starts pending (FALSE).
+    public bool IsActivated { get; private set; } = true;
+    public bool IsOperational => IsActivated && !IsSuspended;
 
     public void Suspend() => IsSuspended = true;
     public void Reactivate() => IsSuspended = false;

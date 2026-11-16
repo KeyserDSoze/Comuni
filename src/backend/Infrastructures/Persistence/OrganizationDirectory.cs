@@ -11,7 +11,7 @@ public sealed class OrganizationDirectory(ComuniDbContext db) : IOrganizationDir
 
     public Task<bool> IsOperationalAsync(Guid organizationId, CancellationToken cancellationToken) =>
         db.Organizations.AsNoTracking()
-            .AnyAsync(o => o.Id == organizationId && !o.IsSuspended, cancellationToken);
+            .AnyAsync(o => o.Id == organizationId && o.IsActivated && !o.IsSuspended, cancellationToken);
 
     public async Task<IReadOnlyList<string>> EnabledModulesAsync(Guid organizationId, CancellationToken cancellationToken)
     {
