@@ -92,9 +92,14 @@ class ImmutableActionsContractTests(unittest.TestCase):
             with self.subTest(action=action):
                 original = WORKFLOWS[work]
                 reference = action + "@" + REVIEWED[action]
-                self.assertNotEqual(EXPECTED[work],
-                                    checked_uses(original.replace(reference, "",
-                                                                  1)))
+                self.assertIn(reference, original)
+                with self.assertRaises(ValueError):
+                    checked_uses(original.replace(reference, action + "@v4", 1))
+                removed = "".join(
+                    line for line in original.splitlines(keepends=True)
+                    if reference not in line
+                )
+                self.assertNotEqual(EXPECTED[work], checked_uses(removed))
         self.assertEqual(
             {"actions/checkout": 1},
             checked_uses(
