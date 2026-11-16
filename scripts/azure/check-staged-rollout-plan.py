@@ -182,6 +182,40 @@ def validate(plan, args):
     require(after.get("revision_mode") == "Multiple",
             "candidate requires multiple-revision mode")
 
+    # A Container App has revision-scoped templates but app-scoped identities,
+    # registry credentials, ingress and secrets. Do not mutate these under a
+    # zero-traffic stage: they may affect the currently serving stable revision.
+    assigned = one_block(before, "identity")
+    assigned_ids = assigned.get("identity_ids")
+    require(assigned.get("type") == "UserAssigned"
+            and isinstance(assigned_ids, list) and len(assigned_ids) == 1
+            and isinstance(assigned_ids[0], str) and bool(assigned_ids[0]),
+            "existing ACA must use one approved user-assigned identity")
+    managed_identity = assigned_ids[0]
+    require(after.get("identity") == before.get("identity"),
+            "staging cannot change the app-scoped managed identity")
+
+    existing_registry = before.get("registry")
+    require(isinstance(existing_registry, list) and len(existing_registry) == 1
+            and isinstance(existing_registry[0], dict)
+            and existing_registry[0].get("identity") == managed_identity
+            and isinstance(existing_registry[0].get("server"), str)
+            and bool(existing_registry[0]["server"]),
+            "existing ACA registry must use the approved managed identity")
+    require(after.get("registry") == existing_registry,
+            "staging cannot modify app-scoped registry credentials or source")
+
+    environment_id = before.get("container_app_environment_id")
+    require(isinstance(environment_id, str) and bool(environment_id)
+            and after.get("container_app_environment_id") == environment_id,
+            "staging cannot change the Container Apps environment")
+
+    before_ingress = one_block(before, "ingress")
+    after_ingress = one_block(after, "ingress")
+    require({k: v for k, v in before_ingress.items() if k != "traffic_weight"}
+            == {k: v for k, v in after_ingress.items() if k != "traffic_weight"},
+            "staging cannot modify shared ingress settings outside traffic weights")
+
     before_secrets = before.get("secret", [])
     after_secrets = after.get("secret", [])
     stable_before = named(before_secrets, STABLE_SECRET)
@@ -200,7 +234,7 @@ def validate(plan, args):
         require(isinstance(existing, dict) and isinstance(existing.get("name"), str),
                 "invalid existing secret")
         current = named(after_secrets, existing["name"])
-        require(existing.get("key_vault_secret_id") == current.get("key_vault_secret_id"),
+        require(existing == current,
                 "staging may not change or remove an existing app-scoped secret")
 
     candidate_name = "tp-" + args.candidate_secret_version[:16]
@@ -241,6 +275,9 @@ def validate(plan, args):
                 "invalid candidate secret definition")
         require(item["name"] in existing_names or item["name"] in allowed_new,
                 "unexpected new application secret in stage")
+        if item["name"] not in existing_names:
+            require(item.get("identity") == managed_identity,
+                    "new ACA secret must use the approved managed identity")
 
     template = one_block(after, "template")
     require(template.get("revision_suffix") == args.candidate_revision,
