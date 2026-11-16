@@ -72,6 +72,17 @@ public sealed class AuthenticationConfiguration
     {
         options.MapInboundClaims = false;
         options.SaveToken = false;
+        // JwtBearer has already checked signature, issuer, audience and
+        // lifetime when this callback fires. Some identity token parsers
+        // collapse duplicate JSON property names before claims are created.
+        // Reject the original validated payload, not the already collapsed
+        // ClaimsPrincipal, without logging tokens or identity data.
+        options.Events.OnTokenValidated = context =>
+        {
+            if (!JwtPayloadDuplicatePropertyGuard.IsAcceptable(context.SecurityToken))
+                context.Fail("JWT payload structure is invalid.");
+            return Task.CompletedTask;
+        };
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
