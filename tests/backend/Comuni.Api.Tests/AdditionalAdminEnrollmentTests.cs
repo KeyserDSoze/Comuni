@@ -203,6 +203,7 @@ public sealed class AdditionalAdminEnrollmentTests
         }
         Assert.NotEqual(0, (await Add(inactive)).Code);
         var legacy = await Seed();
+        Assert.Equal(8, negativeIndex);
         await using (var conn = new NpgsqlConnection(Owner))
         {
             await conn.OpenAsync();
@@ -226,6 +227,7 @@ public sealed class AdditionalAdminEnrollmentTests
     {
         var org = await Seed();
         Assert.Equal(0, (await Bootstrap(org)).Code);
+        var negativeIndex = 0;
         foreach (var attempt in new[]
         {
             Add(org, issuer: "http://identity.example.test"),
@@ -235,11 +237,12 @@ public sealed class AdditionalAdminEnrollmentTests
             Add(org, ticket: null),
             Add(org, reviewer: null),
             Add(org, ticket: "bad ticket"),
-            Add(org, subject: "x'); DROP TABLE platform.organizations; --\n")
+            Add(org, subject: "x'); DROP\nTABLE platform.organizations; --")
         })
         {
             var denied = await attempt;
-            Assert.NotEqual(0, denied.Code);
+            Assert.NotEqual(0, denied.Code); // case must fail closed
+            negativeIndex++;
         }
         await using (var conn = new NpgsqlConnection(Owner))
         {
