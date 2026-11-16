@@ -134,6 +134,7 @@ jobs:
             --source-commit-sha "$GITHUB_SHA" \
             --registry-name "$REGISTRY_NAME" \
             --registry-host "$REGISTRY_HOST" \
+            --tenant-id "$ARM_TENANT_ID" \
             --push-output-file "$PUSH_OUTPUT" \
             --github-env "$GITHUB_ENV"
       # Lock only the freshly pushed SHA tag and matching OCI manifest.
@@ -148,6 +149,7 @@ jobs:
           python3 scripts/azure/lock-approved-image.py \
             --registry-name "$REGISTRY_NAME" \
             --registry-host "$REGISTRY_HOST" \
+            --tenant-id "$ARM_TENANT_ID" \
             --image "$TF_VAR_image" \
             --candidate-image-digest "$CANDIDATE_IMAGE_DIGEST" \
             --source-commit-sha "$GITHUB_SHA"
