@@ -56,7 +56,9 @@
 BEGIN;
 
 -- psql quotes each operator input as a literal, and the setting is LOCAL
--- to this transaction. No operator-supplied value is SQL or echoed to stdout.
+-- to this transaction. Quoting prevents injection; it does NOT prevent
+-- server-side statement logging of SQL literals. Real identities are blocked
+-- pending the logging-safe channel tracked in #86.
 SELECT
     set_config('comuni.emergency_org', :'emergency_org', true) AS org,
     set_config('comuni.emergency_old_issuer', :'emergency_old_issuer', true) AS old_issuer,
