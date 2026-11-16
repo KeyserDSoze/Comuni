@@ -7,10 +7,20 @@ Only non-secret GitHub environment entries are written on full success.
 Never echo source files, CLI errors, manifest metadata or credentials.
 """
 import argparse
+import importlib.util
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
+
+
+_spec = importlib.util.spec_from_file_location(
+    "acr_registry_data_plane", Path(__file__).with_name("acr-registry-data-plane.py"))
+_acr = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_acr)
+ACRClient = _acr.ACRClient
+ACRRejected = _acr.ACRRejected
 
 SOURCE_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 REGISTRY_NAME = re.compile(r"[a-z0-9]{5,50}\Z")
@@ -47,22 +57,6 @@ def pushed_digest(path, source_sha):
     return candidates[0]
 
 
-def verified_digest(registry, source_sha):
-    # The Azure CLI may emit sensitive diagnostics: capture but NEVER relay
-    # stdout/stderr on failure, including subprocess exceptions.
-    result = subprocess.run(
-        ["az", "acr", "manifest", "show-metadata",
-         "--registry", registry, "--name", "comuni:" + source_sha,
-         "--query", "digest", "--output", "tsv", "--only-show-errors"],
-        capture_output=True, text=True, check=False, timeout=30,
-    )
-    require(result.returncode == 0, "ACR digest metadata could not be verified")
-    candidate = result.stdout.strip()
-    require(bool(DIGEST.fullmatch(candidate)),
-            "ACR returned a missing or invalid manifest digest")
-    return candidate
-
-
 def resolve(args):
     require(isinstance(args.source_commit_sha, str) and
             bool(SOURCE_COMMIT.fullmatch(args.source_commit_sha)),
@@ -73,7 +67,9 @@ def resolve(args):
     require(args.registry_host == args.registry_name + ".azurecr.io",
             "ACR host must match the approved managed registry")
     push_digest = pushed_digest(args.push_output_file, args.source_commit_sha)
-    remote_digest = verified_digest(args.registry_name, args.source_commit_sha)
+    client = ACRClient(args.registry_name, args.registry_host, args.tenant_id)
+    client.authenticate()
+    remote_digest = client.tag_digest(args.source_commit_sha, expected_digest=push_digest)
     require(push_digest == remote_digest,
             "ACR manifest digest differs from Docker's push receipt")
 
@@ -92,14 +88,15 @@ def main():
     parser.add_argument("--source-commit-sha", required=True)
     parser.add_argument("--registry-name", required=True)
     parser.add_argument("--registry-host", required=True)
+    parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--push-output-file", required=True)
     parser.add_argument("--github-env", required=True)
     args = parser.parse_args()
     try:
         resolve(args)
-    except (ResolutionRejected, OSError, UnicodeError, ValueError,
+    except (ResolutionRejected, ACRRejected, OSError, UnicodeError, ValueError,
             subprocess.TimeoutExpired) as error:
-        reason = str(error) if isinstance(error, ResolutionRejected) else "digest verification failed"
+        reason = str(error) if isinstance(error, (ResolutionRejected, ACRRejected)) else "digest verification failed"
         print("Candidate image rejected: " + reason, file=sys.stderr)
         return 1
     return 0
