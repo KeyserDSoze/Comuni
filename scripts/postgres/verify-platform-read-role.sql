@@ -66,7 +66,7 @@ BEGIN
         FROM pg_attribute
         WHERE attrelid = 'platform.platform_organization_inventory'::regclass
           AND attnum > 0 AND NOT attisdropped
-    ) IS DISTINCT FROM ARRAY['id', 'name', 'is_suspended', 'protocol_enabled']
+    ) IS DISTINCT FROM ARRAY['id', 'name', 'is_suspended', 'protocol_enabled', 'lifecycle_status']
     THEN
         RAISE EXCEPTION 'Platform inventory view has unexpected columns';
     END IF;

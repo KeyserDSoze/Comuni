@@ -104,7 +104,7 @@ def _require_status(origin, path, token, expected, opener):
 
 def _validate_row(row):
     if not isinstance(row, dict) or set(row) != {
-        "id", "name", "isSuspended", "protocolEnabled"
+        "id", "name", "isSuspended", "protocolEnabled", "lifecycleStatus"
     }:
         raise SmokeRejected("Platform inventory exposed unexpected fields")
     identity = _canonical_uuid(row["id"])
@@ -116,6 +116,10 @@ def _validate_row(row):
         raise SmokeRejected("Platform inventory contains invalid municipality name")
     if type(row["isSuspended"]) is not bool or type(row["protocolEnabled"]) is not bool:
         raise SmokeRejected("Platform inventory flags are invalid")
+    if type(row["lifecycleStatus"]) is not str or row["lifecycleStatus"] not in ("created", "active", "suspended"):
+        raise SmokeRejected("Platform lifecycle status is invalid")
+    if row["isSuspended"] != (row["lifecycleStatus"] != "active"):
+        raise SmokeRejected("Platform lifecycle compatibility flag is inconsistent")
     # Only the ID survives validation. Never retain/print organization names.
     return identity
 

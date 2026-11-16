@@ -124,7 +124,8 @@ Risposta `200`:
       "id": "11111111-1111-1111-1111-111111111111",
       "name": "Comune di esempio",
       "isSuspended": false,
-      "protocolEnabled": false
+      "protocolEnabled": false,
+      "lifecycleStatus": "active"
     }
   ],
   "nextCursor": null
@@ -167,4 +168,8 @@ La creazione iniziale di una organization avviene **esclusivamente** mediante `s
 
 Il lifecycle della organization è governato dal backend PostgreSQL e **non** da parametri del browser. Il nuovo `is_activated` produce tre stati validi: `created` = `is_activated=false,is_suspended=false`; `active` = `true,false`; `suspended` = `true,true`. Tutte le route tenant-scoped (`/context`, Protocollo, amministrazione moduli/membership/audit) richiedono **is_activated=true AND is_suspended=false**, oltre a membership e JWT validati: un Comune `created` è **403 anche dopo il bootstrap del primo Admin OIDC**. La nuova migration 0013 assegna `is_activated=true` ai Comuni legacy per non interromperne i permessi già esistenti.
 
-Nessun nuovo endpoint HTTP di onboarding/activation: `register-organization.sql` crea `created`; `bootstrap-initial-admin.sql` associa issuer+sub OIDC come passo separato; `activate-organization.sql` è owner-only e può marcare `active` dopo approvazione esterna. `set-organization-suspension.sql` non può usare `reactivate` su pending. Dopo activation nessun modulo viene acceso automaticamente. L'inventario Superadmin esistente mantiene **quattro campi**: `isSuspended=true` è un compat field per **non operativo** (`created` oppure `suspended`), non prova quale dei due. La PWA visualizza *Non operativo / Not operational*. Un futuro endpoint per stato lifecycle dettagliato richiede review di #10. Non aggiungere un client selector `organizationId` per scavalcare il gate.
+Nessun nuovo endpoint HTTP di onboarding/activation: `register-organization.sql` crea `created`; `bootstrap-initial-admin.sql` associa issuer+sub OIDC come passo separato; `activate-organization.sql` è owner-only e può marcare `active` dopo approvazione esterna. `set-organization-suspension.sql` non può usare `reactivate` su pending. Dopo activation nessun modulo viene acceso automaticamente. Con la #45/ADR 0039 l'inventario Superadmin include il quinto campo read-only `lifecycleStatus` (`created`/`active`/`suspended`). `isSuspended=true` rimane compatibilmente **non operativo** per `created` oppure `suspended`, mentre la PWA mostra *Creato / Attivo / Sospeso* (Created / Active / Suspended). Nessun accesso aggiuntivo ai dati dei Comuni. Non aggiungere un client selector `organizationId` per scavalcare il gate.
+
+## #45 — Contratto inventory lifecycleStatus (ADR 0039)
+
+La vista protetta espone cinque colonne nell'ordine `id,name,is_suspended,protocol_enabled,lifecycle_status`. L'API restituisce cinque campi JSON per organization e mantiene `isSuspended` con la semantica precedente: `false` solo per `active`; `true` per `created` e `suspended`. Il nuovo `lifecycleStatus` è un enum **read-only** derivato da PostgreSQL, non un parametro mutabile dal client. Il limite 1–25, il cursor UUID, i 401/403/503, la query whitelist, i permessi SQL separati e l'audit restano invariati. Il payload è additivo, ma i vecchi client che validano **esattamente quattro chiavi** non lo accettano: effettuare deploy API+frontend coordinato e invalidazione cache **prima** di abilitare il flag (default OFF), senza promettere compatibilità con SPA cached o consumer esterni. Rollback dell'API tramite feature OFF e change owner-reviewed; dettagli in `docs/deployment.md`.
