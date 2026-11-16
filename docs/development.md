@@ -144,3 +144,7 @@ Il file `infra/main.tf` continua intenzionalmente a contenere `azurerm_key_vault
 ## #56 — Non conservare i piani Terraform di stage nel workspace (ADR 0049)
 
 Per rilasci manuali della sola ACA, il workflow crea il piano con `umask 077`, rifiuta piano/symlink preesistenti, verifica via pipe il JSON del piano senza stamparlo e registra prima del comando `plan` un `trap EXIT` che elimina il file binario dopo successo o errore. Non salvare `deploy.tfplan` come Artifact né usarlo per debugging in issue/log: il contenuto può includere password PostgreSQL tratte dal Terraform State. Si tratta di cleanup locale **non di secure erase**. Ogni operazione reale di handoff o ripulitura delle copie storiche dello State richiede un procedimento distinto con operatori autorizzati (#49/#55).
+
+## #57 — Test dei claim identitari non ambigui (ADR 0050)
+
+Ogni `ClaimsPrincipal` che raggiunge un'API comunale deve contenere un unico `organization_id`, un unico `sub` e un unico `iss`; per la piattaforma non deve esistere alcun `organization_id`. I duplicati (anche identici) negano l'autorizzazione prima delle query PostgreSQL e il contesto audit restituisce valori vuoti invece di usare `FindFirst`. Il controllo è centrale in `VerifiedPrincipalIdentity` e viene riutilizzato da policy, middleware transazionale, context e rate limiter. Testare con `UnambiguousPrincipalTests.cs` e la CI PostgreSQL; non dedurre l'abilitazione di un ruolo dal solo JWT. Non sono richiesti nuovi `TF_VAR`, migration o alterazioni di `infra/main.tf`.
