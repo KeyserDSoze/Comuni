@@ -48,13 +48,13 @@ def fixture_plan():
     }
     ingress_settings = {"external_enabled": True, "target_port": 8080, "transport": "auto"}
     before = {
-        **shared,
+        **copy.deepcopy(shared),
         "revision_mode": "Single",
         "secret": [old_secret],
         "ingress": [{**ingress_settings, "traffic_weight": [{"latest_revision": True, "percentage": 100}]}],
     }
     after = {
-        **shared,
+        **copy.deepcopy(shared),
         "revision_mode": "Multiple",
         "secret": [old_secret, candidate_secret, runtime_connection],
         "template": [{
