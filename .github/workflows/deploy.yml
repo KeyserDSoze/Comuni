@@ -115,7 +115,13 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          az acr login --name "$REGISTRY_NAME"
+          # Entra OIDC token -> ACR OAuth2 refresh token -> Docker stdin.
+          # Avoid az acr login: AcrPush is data-plane only, not an ARM
+          # registry configuration permission.
+          python3 scripts/azure/login-acr-oauth.py \
+            --registry-name "$REGISTRY_NAME" \
+            --registry-host "$REGISTRY_HOST" \
+            --tenant-id "$ARM_TENANT_ID"
           # Tag only the build/push operation; never deploy by mutable tag.
           TAG="${REGISTRY_HOST}/comuni:${GITHUB_SHA}"
           docker build -t "$TAG" .
