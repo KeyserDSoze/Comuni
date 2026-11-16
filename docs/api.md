@@ -181,3 +181,8 @@ L'operazione `scripts/postgres/enroll-additional-admin.sql` è **owner-only e of
 ## Revoca di un Admin OIDC — solo offline, nessuna nuova API (#81)
 
 La revoca `scripts/postgres/revoke-admin.sql` è consentita soltanto allo schema owner PostgreSQL, previo change verificato esternamente (ADR 0070). Non sono disponibili endpoint HTTP per revocare/riattivare Admin; `PUT /api/v1/admin/memberships/{role}` continua a limitarsi a Reader/Officer. La membership Admin viene soltanto marcata inattiva con audit transazionale, senza modificare il token firmato o emettere un nuovo token. La policy API esistente rivalida membership da PostgreSQL a ogni nuova richiesta: un JWT OIDC ancora valido ma con Admin inattivo riceve 403 per `/api/v1/context` e `/api/v1/admin/*`, mentre gli altri Admin autorizzati conservano l'accesso. L'ultimo Admin attivo non può essere revocato da questa procedura.
+
+## Sostituzione Admin dopo revoca — owner-only, nessun endpoint HTTP (#83)
+
+L'enrollment `scripts/postgres/enroll-additional-admin.sql` (ADR 0071) accetta ora un **nuovo** `issuer+sub` quando il Comune è attivo, permane un altro Admin OIDC attivo e le vecchie revoche owner-only hanno audit coerente ed univoco. È **solo procedura PostgreSQL owner con change a quattro occhi esterno**, non API/browser e non diritto conferito al Superadmin o all'Admin comunale. Non riattiva membership Admin revocate e non permette a `PUT /api/v1/admin/memberships/{role}` di gestire `Admin` (resta Reader/Officer soltanto). Le API `/api/v1/context` e `/api/v1/admin/*` continuano a valutare le membership vere ad ogni nuova richiesta: l'ex Admin riceve 403, il nuovo soggetto con token OIDC valido e binding server-side può ricevere 200.
+
