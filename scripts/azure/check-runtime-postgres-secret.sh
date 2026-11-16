@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Only Key Vault version METADATA, not the runtime PostgreSQL connection value.
 # The container app uses the exact version inside a NEW candidate-only ACA secret.
-# Never use az keyvault secret show, print a URI or enable shell tracing.
+# Do not query secret values, print a URI or enable shell tracing.
 if [[ $# -ne 2 || ! "$1" =~ ^[a-z][a-z0-9-]{2,23}$ ||
       ! "$2" =~ ^[a-fA-F0-9]{32}$ ]]; then
   echo "Runtime PostgreSQL stage rejected: invalid vault/version metadata." >&2
