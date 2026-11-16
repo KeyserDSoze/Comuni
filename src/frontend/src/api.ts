@@ -88,6 +88,7 @@ export interface PlatformOrganization {
   name: string;
   isSuspended: boolean;
   protocolEnabled: boolean;
+  lifecycleStatus: 'created' | 'active' | 'suspended';
 }
 
 export interface PlatformOrganizationsPage {
@@ -130,16 +131,21 @@ export async function getPlatformOrganizations(
   const items: PlatformOrganization[] = [];
   for (const item of result.organizations) {
     if (typeof item !== 'object' || item === null || Array.isArray(item) ||
-        Object.keys(item).length !== 4 ||
+        Object.keys(item).length !== 5 ||
         !('id' in item) || typeof item.id !== 'string' || !guidD.test(item.id) ||
         !('name' in item) || typeof item.name !== 'string' ||
         item.name.length < 1 || item.name.length > 200 ||
         !('isSuspended' in item) || typeof item.isSuspended !== 'boolean' ||
-        !('protocolEnabled' in item) || typeof item.protocolEnabled !== 'boolean') {
+        !('protocolEnabled' in item) || typeof item.protocolEnabled !== 'boolean' ||
+        !('lifecycleStatus' in item) ||
+        !(item.lifecycleStatus === 'created' || item.lifecycleStatus === 'active' ||
+          item.lifecycleStatus === 'suspended') ||
+        item.isSuspended !== (item.lifecycleStatus !== 'active')) {
       throw new Error('Invalid municipality metadata');
     }
     items.push({ id: item.id, name: item.name,
-      isSuspended: item.isSuspended, protocolEnabled: item.protocolEnabled });
+      isSuspended: item.isSuspended, protocolEnabled: item.protocolEnabled,
+      lifecycleStatus: item.lifecycleStatus });
   }
   return { organizations: items, nextCursor: result.nextCursor };
 }

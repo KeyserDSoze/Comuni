@@ -547,7 +547,8 @@ export function App() {
                         <tr key={item.id}>
                           <td className="px-4 py-3 font-medium">{item.name}</td>
                           <td className="px-4 py-3 font-mono text-xs">{item.id}</td>
-                          <td className="px-4 py-3">{item.isSuspended ? t('inventorySuspended') : t('inventoryActive')}</td>
+                          <td className="px-4 py-3">{item.lifecycleStatus === 'created' ? t('inventoryCreated') :
+                             item.lifecycleStatus === 'suspended' ? t('inventorySuspended') : t('inventoryActive')}</td>
                           <td className="px-4 py-3">{item.protocolEnabled ? t('moduleActive') : t('moduleInactive')}</td>
                         </tr>
                       ))}

@@ -40,7 +40,7 @@ public sealed class PlatformInventoryStore(string platformReadConnection)
 
         var items = new List<PlatformOrganizationItem>(pageSize + 1);
         await using (var select = new NpgsqlCommand("""
-            SELECT id, name, is_suspended, protocol_enabled
+            SELECT id, name, is_suspended, protocol_enabled, lifecycle_status
             FROM platform.platform_organization_inventory
             WHERE (@after IS NULL OR id > @after)
             ORDER BY id
@@ -57,7 +57,7 @@ public sealed class PlatformInventoryStore(string platformReadConnection)
             {
                 items.Add(new PlatformOrganizationItem(
                     rows.GetGuid(0), rows.GetString(1),
-                    rows.GetBoolean(2), rows.GetBoolean(3)));
+                    rows.GetBoolean(2), rows.GetBoolean(3), rows.GetString(4)));
             }
         }
 

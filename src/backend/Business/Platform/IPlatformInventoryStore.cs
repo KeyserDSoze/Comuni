@@ -5,7 +5,7 @@ namespace Comuni.Business.Platform;
 /// organization-scoped records in the platform inventory projection.
 /// </summary>
 public sealed record PlatformOrganizationItem(
-    Guid Id, string Name, bool IsSuspended, bool ProtocolEnabled);
+    Guid Id, string Name, bool IsSuspended, bool ProtocolEnabled, string LifecycleStatus);
 
 public sealed record PlatformInventoryPage(
     IReadOnlyList<PlatformOrganizationItem> Organizations, Guid? NextCursor);
