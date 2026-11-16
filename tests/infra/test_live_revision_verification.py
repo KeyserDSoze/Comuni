@@ -22,6 +22,7 @@ IMAGE = "comuni.azurecr.io/comuni:" + ("a" * 40)
 KEY_ID = "rotate2026"
 VERSION = "b" * 32
 RUNTIME_POSTGRES_VERSION = "d" * 32
+POSTGRES_HOST = "comuni-itn-001-pg.postgres.database.azure.com"
 
 
 def revision(suffix, *, image, key_id="legacy", secret="tenant-proof-key"):
@@ -51,6 +52,8 @@ def valid_revisions():
     candidate["properties"]["template"]["containers"][0]["env"].append(
         {"name": "ConnectionStrings__Default",
          "secretRef": "pg-" + RUNTIME_POSTGRES_VERSION[:16]})
+    candidate["properties"]["template"]["containers"][0]["env"].append(
+        {"name": "RuntimePostgres__ExpectedHost", "value": POSTGRES_HOST})
     return [stable, candidate]
 
 
@@ -83,6 +86,14 @@ elif args[:4] == ["containerapp", "ingress", "traffic", "show"]:
     print(os.environ["AZ_TRAFFIC"])
 elif args[:2] == ["containerapp", "show"]:
     print(os.environ.get("AZ_MODE", "Multiple"))
+elif args[:3] == ["postgres", "flexible-server", "show"]:
+    if os.environ.get("AZ_POSTGRES_FAIL") == "1":
+        sys.exit(3)
+    if "--name" not in args or args[args.index("--name") + 1] != "comuni-itn-001-pg":
+        sys.exit(4)
+    if "--query" not in args or args[args.index("--query") + 1] != "fullyQualifiedDomainName":
+        sys.exit(5)
+    print(os.environ.get("AZ_POSTGRES_HOST", "comuni-itn-001-pg.postgres.database.azure.com"))
 else:
     sys.exit(88)
 """
@@ -90,7 +101,8 @@ else:
 
 class LiveRevisionVerificationTests(unittest.TestCase):
     def call(self, revisions=None, traffic=None, mode="Multiple", *, az_fail=False,
-             fail_once=False, candidate=CANDIDATE, image=IMAGE, attempts="1"):
+             fail_once=False, candidate=CANDIDATE, image=IMAGE, attempts="1",
+             postgres_host=POSTGRES_HOST, postgres_fail=False):
         with tempfile.TemporaryDirectory() as folder:
             fake_az = Path(folder) / "az"
             fake_az.write_text(MOCK_AZ, encoding="utf-8")
@@ -103,6 +115,8 @@ class LiveRevisionVerificationTests(unittest.TestCase):
                 "AZ_REVISIONS": json.dumps(valid_revisions() if revisions is None else revisions),
                 "AZ_TRAFFIC": json.dumps(valid_traffic() if traffic is None else traffic),
                 "AZ_MODE": mode, "AZ_FAIL": "1" if az_fail else "0",
+                "AZ_POSTGRES_HOST": postgres_host,
+                "AZ_POSTGRES_FAIL": "1" if postgres_fail else "0",
                 "AZ_FAIL_ONCE": "1" if fail_once else "0",
                 "AZ_FAIL_MARKER": str(Path(folder) / "first-failure"),
             }
@@ -193,6 +207,43 @@ class LiveRevisionVerificationTests(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertNotIn("example-dont-echo", result.stdout + result.stderr)
 
+    def test_post_stage_checks_exact_managed_postgres_identity_from_azure(self):
+        result, calls = self.call()
+        self.assertEqual(0, result.returncode, result.stderr)
+        pg_calls = [x for x in calls if x[:3] == ["postgres", "flexible-server", "show"]]
+        self.assertEqual(1, len(pg_calls))
+        self.assertIn("fullyQualifiedDomainName", pg_calls[0])
+
+        for postgres_host in (
+            "other-pg.postgres.database.azure.com",
+            "malformed.example.test", "",
+        ):
+            result, _ = self.call(postgres_host=postgres_host)
+            self.assertNotEqual(0, result.returncode)
+            self.assertNotIn(postgres_host, result.stdout + result.stderr)
+        result, _ = self.call(postgres_fail=True)
+        self.assertNotEqual(0, result.returncode)
+
+    def test_candidate_rejects_spoofed_missing_secret_ref_or_duplicate_expected_host(self):
+        for kind in ("wrong", "missing", "duplicate", "secret"):
+            revisions = valid_revisions()
+            env = revisions[1]["properties"]["template"]["containers"][0]["env"]
+            if kind == "wrong":
+                env[-1]["value"] = "other-pg.postgres.database.azure.com"
+            elif kind == "missing":
+                env.pop()
+            elif kind == "duplicate":
+                env.append(dict(env[-1]))
+            else:
+                env[-1] = {
+                    "name": "RuntimePostgres__ExpectedHost",
+                    "secretRef": "postgres-connection",
+                }
+            result, _ = self.call(revisions=revisions)
+            self.assertNotEqual(0, result.returncode)
+            self.assertNotIn("other-pg.postgres.database.azure.com",
+                             result.stdout + result.stderr)
+
     def test_rejects_missing_or_misdirected_candidate_label(self):
         p = valid_traffic()
         p[1].pop("label")
@@ -259,6 +310,8 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         self.assertIn("--candidate-key-id", WORKFLOW)
         self.assertIn("--candidate-secret-version", WORKFLOW)
         self.assertIn("--runtime-secret-version", WORKFLOW)
+        self.assertIn("postgres", VERIFY.read_text())
+        self.assertIn("fullyQualifiedDomainName", VERIFY.read_text())
         self.assertNotIn("az containerapp ingress traffic set", WORKFLOW)
         self.assertNotIn("az containerapp revision deactivate", WORKFLOW)
 

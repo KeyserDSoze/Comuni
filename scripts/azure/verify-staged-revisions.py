@@ -18,6 +18,9 @@ SUFFIX = re.compile(r"[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\Z")
 CANDIDATE = re.compile(r"r[0-9a-f]{12}\Z")
 KEY_ID = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
 VERSION = re.compile(r"[0-9a-fA-F]{32}\Z")
+POSTGRES_HOST = re.compile(
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.postgres\.database\.azure\.com\Z"
+)
 IMAGE = re.compile(r"[a-z0-9][a-z0-9.-]*(?:/[a-z0-9._-]+)+:[0-9a-f]{40}\Z")
 
 
@@ -72,7 +75,7 @@ def ready(revision):
     )
 
 
-def candidate_metadata(revision, args):
+def candidate_metadata(revision, args, trusted_postgres_host):
     props = revision["properties"]
     template = props.get("template")
     required(isinstance(template, dict), "Invalid candidate template")
@@ -110,6 +113,12 @@ def candidate_metadata(revision, args):
         == "tp-" + args.candidate_secret_version[:16]
         and not secret.get("value"),
         "Candidate RLS secret reference mismatch",
+    )
+    expected_host = one_env("RuntimePostgres__ExpectedHost")
+    required(
+        expected_host.get("value") == trusted_postgres_host
+        and not expected_host.get("secretRef"),
+        "Candidate runtime PostgreSQL host does not match the authorized server",
     )
     runtime_connection = one_env("ConnectionStrings__Default")
     required(
@@ -152,6 +161,19 @@ def check(args):
         output="tsv",
     )
     required(mode == "Multiple", "Azure app must be in Multiple revision mode")
+    # Read the approved server from Azure Resource Manager (not from the
+    # connection secret or a caller-supplied expected-host argument).
+    postgres_server = args.app[:-4] + "-pg"
+    trusted_postgres_host = az_metadata(
+        "postgres", "flexible-server", "show",
+        "--name", postgres_server, "--resource-group", args.resource_group,
+        "--query", "fullyQualifiedDomainName", output="tsv",
+    )
+    required(
+        bool(POSTGRES_HOST.fullmatch(trusted_postgres_host))
+        and trusted_postgres_host == postgres_server + ".postgres.database.azure.com",
+        "Managed PostgreSQL identity unavailable or invalid",
+    )
     revisions = az_metadata(
         "containerapp", "revision", "list",
         "--name", args.app, "--resource-group", args.resource_group,
@@ -166,7 +188,7 @@ def check(args):
     candidate = one_revision(revisions, candidate_name)
     ready(stable)
     ready(candidate)
-    candidate_metadata(candidate, args)
+    candidate_metadata(candidate, args, trusted_postgres_host)
     verify_traffic(traffic, stable_name, args.candidate_revision)
 
 
@@ -183,7 +205,8 @@ def parse_args():
     parser.add_argument("--attempts", type=int, default=12)
     parser.add_argument("--interval-seconds", type=int, default=10)
     args = parser.parse_args()
-    required(APP_NAME.fullmatch(args.app) and "--" not in args.app,
+    required(APP_NAME.fullmatch(args.app) and "--" not in args.app
+             and args.app.endswith("-app"),
              "Invalid Container App name")
     required(RESOURCE_GROUP.fullmatch(args.resource_group),
              "Invalid Azure resource group")
