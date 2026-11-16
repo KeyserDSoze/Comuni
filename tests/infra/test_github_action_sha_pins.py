@@ -15,10 +15,10 @@ WORKFLOWS = {
 }
 # Tag refs verified via GitHub API, annotated tags dereferenced to commit.
 REVIEWED = {
-    "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
+    "actions/checkout": "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
     "actions/setup-dotnet": "67a3573c9a986a3f9c594539f4ab511d57bb3ce9",
     "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
-    "hashicorp/setup-terraform": "b9cd54a3c349d3f38e8881555d616ced269862dd",
+    "hashicorp/setup-terraform": "dfe3c3f87815947d99a8997f908cb6525fc44e9e",
     "azure/login": "7184910d9eb2b1c5e48f7073824a90609bb9b6d6",
     "github/codeql-action/init": "33d7b85da1a04171e211befe2c739303b9a4c066",
     "github/codeql-action/analyze": "33d7b85da1a04171e211befe2c739303b9a4c066",
@@ -104,9 +104,26 @@ class ImmutableActionsContractTests(unittest.TestCase):
             {"actions/checkout": 1},
             checked_uses(
                 "steps:\n  - uses : actions/checkout@" +
-                REVIEWED["actions/checkout"] + " # reviewed v4\n",
+                REVIEWED["actions/checkout"] + " # reviewed v5\n",
             ),
         )
+
+    def test_node24_checkout_and_terraform_are_pinned_in_every_job(self):
+        # Verified upstream Git tag commits, whose action.yml runtime is node24.
+        checkout = "actions/checkout@" + REVIEWED["actions/checkout"]
+        terraform = "hashicorp/setup-terraform@" + REVIEWED["hashicorp/setup-terraform"]
+        self.assertEqual(7, sum(text.count("uses: " + checkout)
+                                for text in WORKFLOWS.values()))
+        self.assertEqual(2, sum(text.count("uses: " + terraform)
+                                for text in WORKFLOWS.values()))
+        for name, workflow in WORKFLOWS.items():
+            with self.subTest(workflow=name):
+                self.assertIn(checkout + " # v5", workflow)
+                self.assertIn(terraform + " # v4", workflow)
+                self.assertNotIn("actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+                                 workflow)
+                self.assertNotIn("hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd",
+                                 workflow)
 
     def test_no_mixed_codeql_digests_or_unreviewed_release_login(self):
         self.assertEqual(REVIEWED["github/codeql-action/init"],
