@@ -116,7 +116,7 @@ jobs:
           set -euo pipefail
           umask 077
           # Entra OIDC token -> ACR OAuth2 refresh token -> Docker stdin.
-          # Avoid az acr login: AcrPush is data-plane only, not an ARM
+          # Avoid registry control-plane login: AcrPush is data-plane only, not an ARM
           # registry configuration permission.
           python3 scripts/azure/login-acr-oauth.py \
             --registry-name "$REGISTRY_NAME" \
