@@ -93,7 +93,7 @@ def verify_release_ci():
     opener = urllib.request.build_opener(NoRedirect())
     query = urllib.parse.urlencode({
         "head_sha": sha, "branch": "main", "event": "push",
-        "status": "completed", "per_page": "100",
+        "per_page": "100",
     })
     runs_data = github_get(opener, API + "/workflows/ci.yml/runs?" + query, token)
     runs = runs_data.get("workflow_runs")
