@@ -63,7 +63,21 @@ def fixture_plan():
             ],
         }],
     }
+    # The exact host trust anchor comes from Terraform's MANAGED PostgreSQL
+    # Flexible Server planned values, not the external Key Vault secret.
+    after["template"][0]["container"][0]["env"].append(
+        {"name": "RuntimePostgres__ExpectedHost",
+         "value": "comuni-itn-001-pg.postgres.database.azure.com"}
+    )
     return {
+        "planned_values": {"root_module": {"resources": [{
+            "address": "azurerm_postgresql_flexible_server.main",
+            "type": "azurerm_postgresql_flexible_server",
+            "values": {
+                "name": "comuni-itn-001-pg",
+                "fqdn": "comuni-itn-001-pg.postgres.database.azure.com",
+            },
+        }]}},
         "format_version": "1.2",
         "resource_changes": [{
             "address": "azurerm_container_app.main",

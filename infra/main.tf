@@ -274,6 +274,13 @@ resource "azurerm_container_app" "main" {
         name        = "ConnectionStrings__Default"
         secret_name = "pg-${substr(var.runtime_postgres_connection_secret_version, 0, 16)}"
       }
+      # Trusted server identity metadata is derived from the actual managed
+      # Flexible Server resource, NEVER from the Key Vault connection value
+      # or an operator-provided TF_VAR/HTTP header.
+      env {
+        name  = "RuntimePostgres__ExpectedHost"
+        value = azurerm_postgresql_flexible_server.main.fqdn
+      }
       env {
         name        = "Security__TenantProofKey"
         secret_name = "tp-${substr(var.tenant_proof_secret_version, 0, 16)}"

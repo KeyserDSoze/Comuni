@@ -48,6 +48,16 @@ public static class RuntimePostgresConnectionSettings
             throw new InvalidOperationException(
                 "ConnectionStrings:Default requires PostgreSQL TLS certificate and hostname verification.");
 
+        // This is independent ARM/Terraform metadata, not part of the
+        // Key Vault connection secret. An attacker-controlled *different*
+        // Azure PostgreSQL server has a perfectly valid TLS certificate.
+        var expectedHost = configuration["RuntimePostgres:ExpectedHost"];
+        if (string.IsNullOrWhiteSpace(expectedHost) ||
+            !AzurePostgresHost.IsMatch(expectedHost) ||
+            !string.Equals(settings.Host, expectedHost, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "RuntimePostgres:ExpectedHost does not match the authorized Azure PostgreSQL server.");
+
         if (settings.Username != "comuni_app_runtime" ||
             string.IsNullOrWhiteSpace(settings.Password) ||
             string.IsNullOrWhiteSpace(settings.Database) ||

@@ -27,14 +27,6 @@ OTHER = "other-pg.postgres.database.azure.com"
 
 def plan_with_approved_db_host():
     p = fixture_plan()
-    p["planned_values"] = {"root_module": {"resources": [{
-        "address": "azurerm_postgresql_flexible_server.main",
-        "type": "azurerm_postgresql_flexible_server",
-        "values": {"fqdn": HOST, "name": "comuni-itn-001-pg"}
-    }]}}
-    p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"].append(
-        {"name": "RuntimePostgres__ExpectedHost", "value": HOST}
-    )
     return p
 
 
@@ -66,7 +58,7 @@ class ExpectedHostPlanTests(unittest.TestCase):
         p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][-1]["value"] = OTHER
         wrong.append(p)
         p = copy.deepcopy(good)
-        p["resource_changes"][0]["change"]["after"]["template"][0]["env"] = []
+        p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"][-1]["value"] = ""
         wrong.append(p)
         p = copy.deepcopy(good)
         p["resource_changes"][0]["change"]["after"]["template"][0]["container"][0]["env"].pop()

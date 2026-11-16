@@ -18,7 +18,10 @@ public sealed class RuntimePostgresConnectionSettingsTests
 
     private static IConfiguration Config(string? value) =>
         new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["ConnectionStrings:Default"] = value }).Build();
+            new Dictionary<string, string?> {
+                ["ConnectionStrings:Default"] = value,
+                ["RuntimePostgres:ExpectedHost"] = "comuni-itn-001-pg.postgres.database.azure.com"
+            }).Build();
 
     private static string Read(string? value, string environmentName) =>
         RuntimePostgresConnectionSettings.Read(Config(value), environmentName);
