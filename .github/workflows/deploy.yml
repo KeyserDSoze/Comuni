@@ -26,6 +26,9 @@ jobs:
       TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
       TF_VAR_postgres_runtime_password: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       TF_VAR_tenant_proof_key_id: ${{ vars.TENANT_PROOF_KEY_ID }}
+      # Metadata only: the connection string itself must be supplied directly
+      # by an approved operator to Key Vault (TLS VerifyFull).
+      TF_VAR_runtime_postgres_connection_secret_version: ${{ vars.RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION }}
       # Only opt-in metadata. No platform-reader password or connection URI is
       # passed to Terraform; Key Vault resolves the pinned value in the API.
       TF_VAR_platform_inventory_enabled: ${{ inputs.enable_platform_inventory }}
@@ -69,6 +72,11 @@ jobs:
           AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
           STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
         run: bash scripts/azure/check-tenant-proof-secret.sh "${AZURE_PREFIX}-kv" "$STABLE_TENANT_PROOF_SECRET_VERSION"
+      - name: Validate pinned candidate runtime PostgreSQL connection secret (metadata only)
+        env:
+          AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
+          RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION: ${{ vars.RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION }}
+        run: bash scripts/azure/check-runtime-postgres-secret.sh "${AZURE_PREFIX}-kv" "$RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION"
       - name: Validate approved platform inventory Key Vault version (metadata only)
         env:
           AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
@@ -94,6 +102,7 @@ jobs:
           STABLE_TENANT_PROOF_SECRET_VERSION: ${{ vars.STABLE_TENANT_PROOF_SECRET_VERSION }}
           CANDIDATE_TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
           CANDIDATE_TENANT_PROOF_KEY_ID: ${{ vars.TENANT_PROOF_KEY_ID }}
+          RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION: ${{ vars.RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION }}
           PLATFORM_INVENTORY_ENABLED: ${{ inputs.enable_platform_inventory }}
           PLATFORM_INVENTORY_SECRET_VERSION: ${{ vars.PLATFORM_INVENTORY_SECRET_VERSION }}
         run: |
@@ -105,6 +114,7 @@ jobs:
             --stable-secret-version "$STABLE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID" \
+            --runtime-secret-version "$RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION" \
             --inventory-enabled "$PLATFORM_INVENTORY_ENABLED" \
             --inventory-secret-version "$PLATFORM_INVENTORY_SECRET_VERSION"
           terraform -chdir=infra apply -input=false -auto-approve deploy.tfplan
@@ -114,6 +124,7 @@ jobs:
           STABLE_REVISION_SUFFIX: ${{ vars.STABLE_REVISION_SUFFIX }}
           CANDIDATE_TENANT_PROOF_KEY_ID: ${{ vars.TENANT_PROOF_KEY_ID }}
           CANDIDATE_TENANT_PROOF_SECRET_VERSION: ${{ vars.TENANT_PROOF_SECRET_VERSION }}
+          RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION: ${{ vars.RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION }}
         run: |
           python3 scripts/azure/verify-staged-revisions.py \
             --app "${AZURE_PREFIX}-app" \
@@ -122,5 +133,6 @@ jobs:
             --candidate-revision "$TF_VAR_candidate_revision_suffix" \
             --expected-image "$TF_VAR_image" \
             --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID" \
-            --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION"
+            --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
+            --runtime-secret-version "$RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION"
 
