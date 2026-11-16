@@ -123,6 +123,7 @@ jobs:
           terraform -chdir=infra show -json deploy.tfplan | python3 scripts/azure/check-staged-rollout-plan.py \
             --stable-revision "$STABLE_REVISION_SUFFIX" \
             --candidate-revision "$TF_VAR_candidate_revision_suffix" \
+            --source-commit-sha "$GITHUB_SHA" \
             --stable-secret-version "$STABLE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-secret-version "$CANDIDATE_TENANT_PROOF_SECRET_VERSION" \
             --candidate-key-id "$CANDIDATE_TENANT_PROOF_KEY_ID" \
