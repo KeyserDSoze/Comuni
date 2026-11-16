@@ -71,6 +71,14 @@ class ExpectedHostPlanTests(unittest.TestCase):
         p["planned_values"]["root_module"]["resources"][0]["values"]["fqdn"] = OTHER
         wrong.append(p)
         p = copy.deepcopy(good)
+        p["resource_changes"].append({
+            "address": "azurerm_postgresql_flexible_server.main",
+            "type": "azurerm_postgresql_flexible_server",
+            "change": {"actions": ["update"], "before": {"fqdn": HOST},
+                       "after": {"fqdn": OTHER}}
+        })
+        wrong.append(p)
+        p = copy.deepcopy(good)
         del p["planned_values"]
         wrong.append(p)
         p = copy.deepcopy(good)

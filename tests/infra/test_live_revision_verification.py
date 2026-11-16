@@ -194,13 +194,13 @@ class LiveRevisionVerificationTests(unittest.TestCase):
             revisions = valid_revisions()
             candidate = revisions[1]["properties"]["template"]["containers"][0]["env"]
             if change == "stable":
-                candidate[-1]["secretRef"] = "postgres-connection"
+                candidate[-2]["secretRef"] = "postgres-connection"
             elif change == "inline":
-                candidate[-1] = {"name": "ConnectionStrings__Default", "value": "Password=example-dont-echo"}
+                candidate[-2] = {"name": "ConnectionStrings__Default", "value": "Password=example-dont-echo"}
             elif change == "missing":
-                candidate.pop()
+                candidate.pop(-2)
             else:
-                candidate.append(dict(candidate[-1]))
+                candidate.append(dict(candidate[-2]))
             cases.append(revisions)
         for revisions in cases:
             result, _ = self.call(revisions=revisions)
