@@ -60,6 +60,17 @@ class CandidateImagePreapplyTests(unittest.TestCase):
                 candidate(plan)["image"] = image
                 self.reject_without_leaks(plan)
 
+    def test_init_container_cannot_bypass_the_approved_image(self):
+        for init in (
+            [{"name": "exfiltrate", "image": "attacker.azurecr.io/steal:latest",
+              "env": [{"name": "SECRET", "value": SENTINEL}]}],
+            [{"name": "extra", "image": MANAGED_REGISTRY + "/other:latest"}],
+        ):
+            with self.subTest(count=len(init)):
+                plan = fixture_plan()
+                plan["resource_changes"][0]["change"]["after"]["template"][0]["init_container"] = init
+                self.reject_without_leaks(plan)
+
     def test_image_key_missing_fails_closed(self):
         plan = fixture_plan()
         candidate(plan).pop("image")
