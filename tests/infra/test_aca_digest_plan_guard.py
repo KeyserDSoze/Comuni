@@ -93,6 +93,24 @@ class DigestPinnedCandidateGateTests(unittest.TestCase):
             with self.subTest(approved_type=type(approved).__name__):
                 self.assert_rejected(plan, approved_digest=approved)
 
+    def test_candidate_full_source_commit_must_match_approved_runner_sha(self):
+        for mutation in ("removed", "different_tail", "inline_secret", "duplicate"):
+            with self.subTest(mutation=mutation):
+                plan = digest_plan()
+                env = candidate(plan)["env"]
+                item = next(entry for entry in env
+                            if entry.get("name") == "Release__SourceCommitSha")
+                if mutation == "removed":
+                    env.remove(item)
+                elif mutation == "different_tail":
+                    item["value"] = SOURCE_COMMIT_SHA[:12] + "f" * 28
+                elif mutation == "inline_secret":
+                    item.pop("value")
+                    item["secret_name"] = "postgres-connection"
+                else:
+                    env.append(dict(item))
+                self.assert_rejected(plan)
+
     def test_unrelated_security_controls_still_reject_on_digest_plan(self):
         for mutation in ("oidc", "db", "init_container", "registry", "stable_weight"):
             with self.subTest(mutation=mutation):
