@@ -52,6 +52,22 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # Read-only RBAC preflight before any image push or Terraform plan.
+      # The Container App UAI must keep AcrPull (legacy RBAC), while the
+      # GitHub OIDC release service principal must be distinct and have AcrPush.
+      # Never silently switch ACR to ABAC or auto-grant privileged roles.
+      - name: Verify Azure ACR role boundary before any image push
+        env:
+          AZURE_PREFIX: ${{ vars.AZURE_PREFIX }}
+          REGISTRY_NAME: ${{ vars.ACR_NAME }}
+          REGISTRY_HOST: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          set -euo pipefail
+          python3 scripts/azure/check-acr-role-boundary.py \
+            --prefix "$AZURE_PREFIX" \
+            --registry-name "$REGISTRY_NAME" \
+            --registry-host "$REGISTRY_HOST" \
+            --deployer-client-id "$ARM_CLIENT_ID"
       - uses: hashicorp/setup-terraform@v3
       - name: Initialize remote Terraform state
         run: |
