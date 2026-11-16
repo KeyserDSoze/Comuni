@@ -29,7 +29,8 @@ public sealed class RuntimePostgresConnectionSettingsTests
         Assert.DoesNotContain(Secret, ex.Message);
         Assert.DoesNotContain("comuni-itn-001-pg", ex.Message);
         Assert.DoesNotContain("Password=", ex.Message);
-        Assert.DoesNotContain(value ?? "not-provided-synthetic", ex.Message);
+        if (!string.IsNullOrEmpty(value))
+            Assert.DoesNotContain(value, ex.Message);
     }
 
     [Theory]

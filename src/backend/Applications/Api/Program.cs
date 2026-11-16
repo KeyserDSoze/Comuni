@@ -17,8 +17,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var authentication = AuthenticationConfiguration.Read(
     builder.Configuration, builder.Environment.EnvironmentName);
-var connection = builder.Configuration.GetConnectionString("Default")
-    ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
+var connection = RuntimePostgresConnectionSettings.Read(
+    builder.Configuration, builder.Environment.EnvironmentName);
 var protection = ApiProtectionSettings.Read(builder.Configuration);
 var browserOidc = BrowserOidcSettings.Read(builder.Configuration, authentication.Mode, builder.Environment.EnvironmentName);
 var platformInventory = PlatformInventorySettings.Read(
