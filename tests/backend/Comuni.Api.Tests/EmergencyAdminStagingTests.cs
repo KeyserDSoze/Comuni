@@ -319,6 +319,40 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
     }
 
     [Fact]
+    public async Task Compromised_identity_with_another_membership_must_not_leave_residual_access()
+    {
+        var org = await Seed(administrators: [Old]);
+        Assert.Equal(0, (await Lifecycle(org)).Code);
+        await using (var db = new NpgsqlConnection(Owner))
+        {
+            await db.OpenAsync();
+            await using var cmd = new NpgsqlCommand("""
+                INSERT INTO platform.organization_memberships
+                    (organization_id,subject,identity_issuer,role,is_active)
+                VALUES (@id,@sub,@issuer,'Reader',TRUE)
+                """, db);
+            cmd.Parameters.AddWithValue("id", org);
+            cmd.Parameters.AddWithValue("sub", Old);
+            cmd.Parameters.AddWithValue("issuer", Issuer);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        // A transfer of Admin alone would leave a compromised Reader
+        // authorized after an independent reactivation. Reject the entire
+        // change instead of silently assuming all old access was revoked.
+        Assert.NotEqual(0, (await Stage(org)).Code);
+        Assert.Equal((true, true, 1L, 0L, 0L, 0L, 1L, 0L), await State(org));
+        await using var check = new NpgsqlConnection(Owner);
+        await check.OpenAsync();
+        await using var query = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.organization_memberships
+            WHERE organization_id=@id AND subject=@sub AND is_active
+            """, check);
+        query.Parameters.AddWithValue("id", org);
+        query.Parameters.AddWithValue("sub", Old);
+        Assert.Equal(2L, (long)(await query.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task Concurrent_change_for_one_tenant_serializes_and_cannot_cross_tenants()
     {
         var org = await Seed(administrators: [Old]);
