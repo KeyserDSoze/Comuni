@@ -14,6 +14,7 @@ APP_ADDRESS = "azurerm_container_app.main"
 POSTGRES_ADDRESS = "azurerm_postgresql_flexible_server.main"
 REGISTRY_ADDRESS = "azurerm_container_registry.main"
 SOURCE_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 REGISTRY_NAME = re.compile(r"[a-z0-9]{5,50}\Z")
 AZURE_POSTGRES_HOST = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.postgres\.database\.azure\.com\Z"
@@ -217,6 +218,8 @@ def validate(plan, args):
             "source commit must be an exact lowercase 40-hex Git SHA")
     require(args.candidate_revision == "r" + args.source_commit_sha[:12],
             "candidate revision must derive from the approved source commit")
+    require(bool(OCI_DIGEST.fullmatch(args.candidate_image_digest)),
+            "candidate requires an externally verified OCI manifest digest")
 
     expected_postgres_host = managed_postgres_fqdn(plan)
     managed_registry_host = managed_acr_login_server(plan)
@@ -382,9 +385,12 @@ def validate(plan, args):
             isinstance(containers[0], dict),
             "expected single API + SPA container")
     validate_hosted_oidc_environment(containers[0].get("env"))
+    # Digest is received separately from the Docker push + authenticated ACR
+    # match in the workflow. A mutable tag is never deployable, even if it
+    # bears the same source commit SHA.
     require(containers[0].get("image") ==
-            managed_registry_host + "/comuni:" + args.source_commit_sha,
-            "candidate image must match the managed ACR and approved Git commit")
+            managed_registry_host + "/comuni@" + args.candidate_image_digest,
+            "candidate image must match the approved OCI digest in managed ACR")
     proof = named(containers[0].get("env", []), "Security__TenantProofKey")
     proof_id = named(containers[0].get("env", []), "Security__TenantProofKeyId")
     require(proof.get("secret_name") == candidate_name and not proof.get("value"),
@@ -465,6 +471,7 @@ def main():
     parser.add_argument("--stable-revision", required=True)
     parser.add_argument("--candidate-revision", required=True)
     parser.add_argument("--source-commit-sha", required=True)
+    parser.add_argument("--candidate-image-digest", required=True)
     parser.add_argument("--stable-secret-version", required=True)
     parser.add_argument("--candidate-secret-version", required=True)
     parser.add_argument("--candidate-key-id", required=True)
