@@ -120,6 +120,22 @@ class OidcIdentityHandoffTests(unittest.TestCase):
         self.assertIn('"$GITHUB_REF" == "refs/heads/main"', content)
         self.assertIn('"$GITHUB_EVENT_NAME" == "workflow_dispatch"', content)
 
+    def test_postgres_passwords_exist_only_in_infra_terraform_stage_not_build_env(self):
+        job_environment = DEPLOY[:DEPLOY.index("    steps:\n")]
+        build_phase = DEPLOY[DEPLOY.index("name: Login Azure ACR build/push identity"):
+                             DEPLOY.index("name: Login Azure infrastructure identity for Terraform stage")]
+        plan_phase = DEPLOY[DEPLOY.index("name: Plan and stage candidate at zero traffic"):]
+        for variable, secret in (
+            ("TF_VAR_postgres_admin_password", "POSTGRES_ADMIN_PASSWORD"),
+            ("TF_VAR_postgres_runtime_password", "POSTGRES_RUNTIME_PASSWORD"),
+        ):
+            self.assertNotIn(variable + ":", job_environment)
+            self.assertNotIn(variable + ":", build_phase)
+            self.assertIn(variable + ": ${{ secrets." + secret + " }}", plan_phase)
+        self.assertIn('docker logout "$REGISTRY_HOST" >/dev/null 2>&1', build_phase)
+        self.assertNotIn('docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true',
+                         build_phase)
+
     def test_workflow_uses_three_separate_login_boundaries_and_no_secret_fallback(self):
         self.assertEqual(3, DEPLOY.count("uses: azure/login@v2"))
         self.assertEqual(3, DEPLOY.count("scripts/azure/check-azure-oidc-session.py"))
