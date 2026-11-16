@@ -18,7 +18,7 @@ APP = "comuni-itn-001-app"
 RG = "comuni-itn-001-rg"
 STABLE = "stable001"
 CANDIDATE = "r123456789abc"
-IMAGE = "comuni.azurecr.io/comuni:" + ("a" * 40)
+IMAGE = "comuni.azurecr.io/comuni@sha256:" + ("a" * 64)
 KEY_ID = "rotate2026"
 VERSION = "b" * 32
 RUNTIME_POSTGRES_VERSION = "d" * 32
@@ -149,6 +149,13 @@ class LiveRevisionVerificationTests(unittest.TestCase):
         self.assertFalse(any("set" in c or "update" in c for c in calls))
         self.assertNotIn(VERSION, result.stdout + result.stderr)
         self.assertNotIn(IMAGE, result.stdout + result.stderr)
+
+    def test_post_stage_verifier_refuses_tag_even_if_revisions_agree(self):
+        tag = "comuni.azurecr.io/comuni:" + ("a" * 40)
+        revisions = valid_revisions()
+        revisions[1]["properties"]["template"]["containers"][0]["image"] = tag
+        result, _ = self.call(revisions=revisions, image=tag)
+        self.assertNotEqual(0, result.returncode)
 
     def test_rejects_missing_candidate_or_stable_and_duplicate_names(self):
         for revisions in [
