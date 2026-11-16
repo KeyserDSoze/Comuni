@@ -178,7 +178,7 @@ public sealed class TenantProofRetirementGuardTests
         var after = await ReadAsync(target);
         Assert.NotNull(after.Revoked);
 
-        Assert.Equal(0, (await RetireAsync(target, successor, "3600")).ExitCode);
+        Assert.Equal(0, (await RetireAsync(target, successor, "60")).ExitCode);
         Assert.Equal(after, await ReadAsync(target));
         await tx.CommitAsync();
     }

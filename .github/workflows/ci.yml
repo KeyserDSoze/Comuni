@@ -70,6 +70,7 @@ jobs:
           TENANT_PROOF_KEY_ID: ci-rotate-v2
           TENANT_PROOF_KEY: ci-versioned-key-staging-only-2026-11
           TENANT_PROOF_RETIRE_KEY_ID: ci-rotate-v2
+          TENANT_PROOF_REPLACEMENT_KEY_ID: legacy
           TENANT_PROOF_GRACE_SECONDS: "0"
         run: |
           psql -h 127.0.0.1 -U comuni -d comuni_test -f scripts/postgres/stage-tenant-proof-key.sql

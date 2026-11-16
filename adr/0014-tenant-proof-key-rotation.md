@@ -35,3 +35,7 @@ La configurazione API `Security:TenantProofKeyId` (vuota = legacy) determina la 
 ## Threat model e residui
 
 Il runtime SQL resta privo di SELECT/UPDATE sulla tabella delle chiavi, non può creare nuovi MAC per altri tenant e le proof sono sempre transaction-local. Una proof valida carpita può essere ripetuta fino alla scadenza **o prima della revoca**, un'API compromessa può creare prove, l'owner/superuser bypassa RLS. Il confronto HMAC in plpgsql non è dichiarato constant-time. La finestra di grace, la sincronizzazione dell'orologio e le transazioni lunghe sono rischi operativi da verificare. Questo incremento **non** certifica sicurezza su Azure né conformità GDPR/AgID.
+
+## Evoluzione — ADR 0040 / issue #46
+
+Il percorso di ritiro ordinario richiede ora un **ID sostitutivo esplicito** e una guardia transazionale serializzata (chiave sana per tutta grace+300 s). Il comportamento precedente che consentiva di revocare l'ultimo ID senza verificare il successore è stato eliminato dal runner owner-only. Si mantiene l'eccezione soltanto tramite processo *break-glass* separato, fuori dallo script ordinario; il verificatore RLS e la semantica delle proof restano invariati. Il controllo DB non sostituisce smoke live su Key Vault/API, approvazioni, backup o test Azure, quindi #19 rimane aperta.
