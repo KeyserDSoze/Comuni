@@ -92,6 +92,7 @@ def run_stage(fail="", stale=False, symlink=False):
             "CANDIDATE_TENANT_PROOF_SECRET_VERSION": "b" * 32,
             "CANDIDATE_TENANT_PROOF_KEY_ID": "candidate2026",
             "RUNTIME_POSTGRES_CONNECTION_SECRET_VERSION": "d" * 32,
+            "CANDIDATE_IMAGE_DIGEST": "sha256:" + "a" * 64,
             "PLATFORM_INVENTORY_ENABLED": "false",
             "PLATFORM_INVENTORY_SECRET_VERSION": "",
         })
