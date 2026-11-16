@@ -77,7 +77,7 @@ public sealed class EmergencyAdminStagingTests(OidcApiFactory factory) : IClassF
         Set("COMUNI_LIFECYCLE_REASON_CODE", "security-incident");
         if (logStatements)
             psi.Environment["PGOPTIONS"] =
-                "-c log_statement=all -c log_parameter_max_length=0 -c log_parameter_max_length_on_error=0";
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         using var process = Process.Start(psi) ??
             throw new InvalidOperationException("psql could not start.");
         var stdout = process.StandardOutput.ReadToEndAsync();
