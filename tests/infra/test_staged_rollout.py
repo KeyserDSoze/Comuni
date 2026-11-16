@@ -73,6 +73,7 @@ def fixture_plan():
                     {"name": "Security__TenantProofKey", "secret_name": candidate_secret["name"]},
                     {"name": "Security__TenantProofKeyId", "value": CANDIDATE_KEY_ID},
                     {"name": "ConnectionStrings__Default", "secret_name": runtime_connection["name"]},
+                    {"name": "Release__SourceCommitSha", "value": SOURCE_COMMIT_SHA},
                 ],
             }],
         }],
