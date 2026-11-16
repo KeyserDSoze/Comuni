@@ -393,3 +393,25 @@ La route `GET /api/v1/admin/audit` già presente (#41) ora scrive un evento `pla
 Prima del rollout in un ambiente autorizzato, verificare con Comuni **sintetici** che ogni GET 200 aggiunga un solo evento `platform.audit.consulted` al proprio tenant con sub e correlation attendibili; 400/401/403 non devono scriverne. Verificare che senza tenant proof HMAC o senza transaction la lettura+INSERT non avvenga, che con rollback non restino eventi, che non compaia mai l'evento della richiesta corrente nella sua risposta e che il successivo GET possa mostrarlo. Testare anche la consultazione con Protocollo disabilitato; non deve dipendere dalle feature del dominio. Osservare volume di eventi generati da ricarichi UI (una consultazione per GET effettivo). Documentare eventuale controllo di abuso prima dell'ambiente live.
 
 **Rollback:** un deploy precedente con la route read-only non crea eventi di consultazione, ma non elimina gli eventi append-only già persistiti. Nessuna riscrittura retroattiva, modifica DBA o azzeramento dell'audit. Nessuna verifica Azure/IdP live è stata effettuata qui; gli obiettivi retention, tamper-evidence e backup/restore sono ancora aperti nelle epiche #4/#5.
+
+
+## #43 — Registrazione iniziale di un nuovo Comune, owner-only e auditata (ADR 0037)
+
+**Solo dopo le migrazioni** e la verifica esterna dell'identità istituzionale del Comune, del mandato, della change approvata, del ticket e di un reviewer indipendente, un runner **privato** con PostgreSQL owner/TLS adeguati può eseguire `scripts/postgres/register-organization.sql`. Non invocarlo dalla API, dalla PWA, da `comuni_app_runtime`, da una pipeline pubblica senza rete privata o come parte di un `terraform apply`. Variabili d'ambiente *solo nel runner autorizzato*:
+
+- `COMUNI_REGISTER_ORGANIZATION_ID`: UUID scelto e registrato nel change, nel formato canonico.
+- `COMUNI_REGISTER_ORGANIZATION_NAME`: denominazione istituzionale con 3–200 caratteri senza control/whitespace esterna; **non sostituisce il codice ISTAT** o la verifica ufficiale.
+- `COMUNI_REGISTER_CHANGE_TICKET`: identificativo del change autorizzato, almeno 8 caratteri.
+- `COMUNI_REGISTER_APPROVER`: riferimento all'approvatore indipendente verificato **fuori dal DB**.
+
+Con variabili già configurate dal gestore segreti del runner, senza stampare valori o abilitare shell tracing:
+
+```bash
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full" \
+  -X -q -v ON_ERROR_STOP=1 \
+  -f scripts/postgres/register-organization.sql
+```
+
+Il processo deve abortire se **una** delle tre scritture fallisce: `platform.organizations` (`is_suspended=false`), `platform.organization_modules` (`protocol.enabled=false`) ed evento audit append-only `platform.organization.registered`. Il numero iniziale di membership è **zero**. Un identico replay è idempotente senza aggiornare il nome, la sospensione, i moduli o la membership; riuso UUID con altro nome/ticket e record preesistenti senza audit precedente vengono rifiutati. Non impostare `psql -a`/`-e` o `set -x`, non mettere denominazioni/ticket in issue o log pubblici.
+
+**Passi separati post-registrazione:** approvare issuer/subject OIDC reali, eseguire lo script owner `bootstrap-initial-admin.sql` (#31) con ticket distinto, poi verificare con un token OIDC realmente valido che l'Admin può accedere **solo** al suo Comune e che il Protocollo rimane disabilitato fino alla decisione di attivazione del modulo. La CI verifica la sequenza solo con identità sintetiche e PostgreSQL disposable, non con IdP/Azure reali. In caso di errore non cancellare automaticamente la organization o il suo audit: intervenire tramite change approvato, conservando audit append-only; eventualmente sospendere con la procedura owner `set-organization-suspension.sql` (#33). Onboarding legale, modello `created/active/suspended`, UI di gestione Superadmin e richiesta adesione restano scope delle epiche #3/#10.

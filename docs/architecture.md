@@ -148,3 +148,10 @@ L'API restituisce soltanto `id/action/resourceType/occurredAt` sugli **ultimi 25
 ## #42 — Read + audit insert nello stesso tenant transaction (ADR 0036)
 
 La route esistente `GET /api/v1/admin/audit` passa ora dal Business `MunicipalAuditService`, che genera `platform.audit.consulted` con l'attore e la correlazione del server, all'Infrastructure `OrganizationAuditReader.ListRecentAndRecordAsync`. Il repository rifiuta il mismatch di organization/risorsa/azione e **pretende una transaction SQL già aperta** dal middleware con tenant-proof HMAC. Prima legge max 25 metadata in ordine fisso, poi inserisce l'evento append-only e salva; il middleware fa commit solo se HTTP 2xx/3xx. Il frontend mostra una breve informativa IT/EN senza esporre attore/correlation/risorsa. Nessuna nuova API, servizio, database, query cross-org o privilegio SQL.
+
+
+## #43 — Prima registrazione Comune separata dal Core runtime (ADR 0037)
+
+Il Core multi-organization usa un unico PostgreSQL: `platform.organizations`, `platform.organization_modules`, `platform.organization_memberships` e audit condividono lo stesso database. La registrazione di un **nuovo** tenant è un comando PostgreSQL **owner-only offline** e non un endpoint API, per non attribuire privilegi globali al login `comuni_app_runtime` in attesa del workflow Superadmin autorizzato (#10). Il comando crea atomicamente una organization attiva a livello DB ma **inaccessibile** (membership vuote), la riga `protocol=false` e un evento audit. Un advisory lock transaction-local sul UUID serializza tentativi concorrenti; retry con ID, nome e ticket identici non riscrive stato/moduli/membership, mentre conflitti vengono rifiutati. Dopo il controllo esterno della registrazione, l'owner può eseguire separatamente il bootstrap iniziale del primo Admin OIDC (#31), senza modificare moduli.
+
+Il nome non è un codice ISTAT né una garanzia di unicità legale; il workflow amministrativo esterno deve verificare identità e adesione dell'ente. Non esiste ancora uno stato `created` distinto e il CRUD Superadmin rimane in #3/#10.
