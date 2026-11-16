@@ -108,7 +108,10 @@ BEGIN
         RAISE EXCEPTION 'Enrollment organization does not exist';
     END IF;
     IF NOT v_activated OR v_suspended THEN
-        RAISE EXCEPTION 'Only an operational organiza    -- Inactive Admins are historical only if their owner-only revocation
+        RAISE EXCEPTION 'Only an operational organization can add an Admin';
+    END IF;
+
+    -- Inactive Admins are historical only if their owner-only revocation
     -- is independently represented by exactly one matching append-only audit.
     -- No unsigned disable, legacy issuer, or unhealthy active Admin is tolerated.
     SELECT count(*),
@@ -137,9 +140,6 @@ BEGIN
      WHERE m.organization_id = v_org AND m.role = 'Admin';
     IF v_valid_count < 1 OR v_admin_count <> v_valid_count + v_attested_revoked_count THEN
         RAISE EXCEPTION 'An active OIDC Admin and fully audited revoked history are required';
-    END IF;
-
-in roster is required';
     END IF;
 
     v_resource_id := md5(v_org::text || '|Admin|' || v_subject || '|' || v_issuer)::uuid;
