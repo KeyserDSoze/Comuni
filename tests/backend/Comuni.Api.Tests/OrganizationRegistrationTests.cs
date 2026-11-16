@@ -86,7 +86,7 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
     }
 
     [Fact]
-    public async Task Owner_registers_exactly_one_active_empty_tenant_with_protocol_disabled_and_audit()
+    public async Task Owner_registers_exactly_one_pending_empty_tenant_with_protocol_disabled_and_audit()
     {
         var id = Guid.NewGuid();
         var result = await RegisterAsync(id.ToString("D"));
@@ -257,7 +257,10 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
         await using var db = new NpgsqlConnection(OwnerConnection);
         await db.OpenAsync();
         await using var change = new NpgsqlCommand(
-            "UPDATE platform.organizations SET is_suspended=TRUE WHERE id=@id", db);
+            // Simulate a legitimately activated-and-then-suspended organization.
+            // A pending municipality cannot be suspended directly: SQL
+            // lifecycle constraint now enforces created -> active -> suspended.
+            "UPDATE platform.organizations SET is_activated=TRUE,is_suspended=TRUE WHERE id=@id", db);
         change.Parameters.AddWithValue("id", id);
         await change.ExecuteNonQueryAsync();
 
