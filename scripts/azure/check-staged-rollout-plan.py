@@ -138,23 +138,38 @@ def validate(plan, args):
     expected_postgres_host = managed_postgres_fqdn(plan)
     changes = plan.get("resource_changes", []) if isinstance(plan, dict) else []
     require(isinstance(changes, list), "missing Terraform changes")
-    # The plan gate is followed by unattended apply. Never permit a destructive
-    # change anywhere in the stack, even if the Container App stage itself is safe.
+    # The approved 0%-traffic stage is NOT a general infrastructure release.
+    # Terraform apply follows this gate without a second review: only the ONE
+    # Container App is allowed to change. Passwords, database, network, Key
+    # Vault, RBAC, identities, ACR and state-removal actions must remain NO-OP.
+    # Even external state drift requires a separate audited change procedure.
+    drift = plan.get("resource_drift", []) if isinstance(plan, dict) else []
+    require(isinstance(drift, list) and not drift,
+            "infrastructure drift requires separate review before candidate staging")
+    output_changes = plan.get("output_changes", {}) if isinstance(plan, dict) else {}
+    require(isinstance(output_changes, dict),
+            "invalid Terraform output changes")
+    for output in output_changes.values():
+        require(isinstance(output, dict) and output.get("actions") == ["no-op"],
+                "Terraform output changes require separate review")
+
+    addresses = set()
     for item in changes:
         require(isinstance(item, dict) and isinstance(item.get("change"), dict),
                 "unrecognized planned resource change")
-        actions = item["change"].get("actions", [])
-        require(isinstance(actions, list) and "delete" not in actions,
-                "destructive infrastructure changes require a separate approved procedure")
-        # The legacy stable PostgreSQL connection is currently managed by
-        # Terraform with a versionless ACA reference. Never publish or rotate
-        # that Key Vault secret in an unattended candidate staging plan.
-        if item.get("address") == POSTGRES_ADDRESS:
-            require(actions == ["no-op"],
-                    "managed PostgreSQL changes require separate approved procedure")
-        if item.get("address") == "azurerm_key_vault_secret.postgres_connection":
-            require(actions == ["no-op"],
-                    "legacy stable runtime PostgreSQL credential must remain unchanged")
+        address = item.get("address")
+        require(isinstance(address, str) and bool(address) and address not in addresses,
+                "missing or duplicated Terraform resource address")
+        addresses.add(address)
+        actions = item["change"].get("actions")
+        require(isinstance(actions, list), "invalid Terraform action list")
+        if address == APP_ADDRESS:
+            require(item.get("type") == "azurerm_container_app" and actions == ["update"],
+                    "only an existing Container App update may stage a candidate")
+        else:
+            require(isinstance(item.get("type"), str) and bool(item["type"])
+                    and actions == ["no-op"],
+                    "non-Container App resources must be unchanged during staging")
     app_changes = [item for item in changes
                    if isinstance(item, dict) and item.get("address") == APP_ADDRESS]
     require(len(app_changes) == 1, "a single existing container-app change is required")
