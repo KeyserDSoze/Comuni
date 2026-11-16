@@ -8,7 +8,7 @@ import unittest
 
 from test_aca_stage_immutable_infrastructure import check
 from test_staged_rollout import (
-    fixture_plan, SOURCE_COMMIT_SHA, MANAGED_REGISTRY, DEPLOY, TERRAFORM,
+    fixture_plan, SOURCE_COMMIT_SHA, SOURCE_IMAGE_DIGEST, MANAGED_REGISTRY, DEPLOY, TERRAFORM,
 )
 
 SENTINEL = "synthetic-secret-that-must-never-appear-in-the-gate-output"
@@ -31,20 +31,20 @@ class CandidateImagePreapplyTests(unittest.TestCase):
 
     def test_positive_existing_municipal_image_in_managed_acr(self):
         plan = fixture_plan()
-        self.assertEqual(MANAGED_REGISTRY + "/comuni:" + SOURCE_COMMIT_SHA,
+        self.assertEqual(MANAGED_REGISTRY + "/comuni@" + SOURCE_IMAGE_DIGEST,
                          candidate(plan)["image"])
         self.assertEqual(0, check(plan).returncode)
 
     def test_different_registry_tag_digest_and_repository_fail_before_apply(self):
-        valid = MANAGED_REGISTRY + "/comuni:" + SOURCE_COMMIT_SHA
+        valid = MANAGED_REGISTRY + "/comuni@" + SOURCE_IMAGE_DIGEST
         cases = [
-            "attacker.azurecr.io/comuni:" + SOURCE_COMMIT_SHA,
+            "attacker.azurecr.io/comuni@" + SOURCE_IMAGE_DIGEST,
             MANAGED_REGISTRY + "/comuni:latest",
             MANAGED_REGISTRY + "/comuni:" + "f" * 40,
             MANAGED_REGISTRY + "/comuni:" + SOURCE_COMMIT_SHA.upper(),
-            MANAGED_REGISTRY + "/other:" + SOURCE_COMMIT_SHA,
-            MANAGED_REGISTRY + "/team/comuni:" + SOURCE_COMMIT_SHA,
-            MANAGED_REGISTRY + "/comuni@" + "sha256:" + "a" * 64,
+            MANAGED_REGISTRY + "/other@" + SOURCE_IMAGE_DIGEST,
+            MANAGED_REGISTRY + "/team/comuni@" + SOURCE_IMAGE_DIGEST,
+            MANAGED_REGISTRY + "/comuni@" + "sha256:" + "b" * 64,
             valid + "@sha256:" + "b" * 64,
             valid + ":extra",
             valid + "/extra",
@@ -136,7 +136,9 @@ class CandidateImagePreapplyTests(unittest.TestCase):
 
     def test_release_workflow_uses_source_commit_not_plan_image_as_trust_anchor(self):
         self.assertIn('--source-commit-sha "$GITHUB_SHA"', DEPLOY)
-        self.assertIn('IMAGE="${{ vars.ACR_LOGIN_SERVER }}/comuni:${GITHUB_SHA}"', DEPLOY)
+        self.assertIn('TAG="${REGISTRY_HOST}/comuni:${GITHUB_SHA}"', DEPLOY)
+        self.assertIn("scripts/azure/resolve-pushed-image-digest.py", DEPLOY)
+        self.assertIn('--candidate-image-digest "$CANDIDATE_IMAGE_DIGEST"', DEPLOY)
         self.assertIn('image  = var.image', TERRAFORM)
         self.assertIn('azurerm_container_registry.main.login_server', TERRAFORM)
         self.assertLess(DEPLOY.index('--source-commit-sha "$GITHUB_SHA"'),
