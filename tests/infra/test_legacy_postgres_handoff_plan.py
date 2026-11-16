@@ -1,0 +1,211 @@
+"""TDD RED: separated, read-only Terraform plan gate for state-only legacy handoff.
+
+All fixtures and passwords are synthetic. No Azure, Terraform backend, or secret
+value is accessed. The actual state handoff requires a future owner-approved change.
+"""
+import copy
+import json
+from pathlib import Path
+import subprocess
+import sys
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+GATE = ROOT / "scripts/azure/check-legacy-postgres-handoff-plan.py"
+TF = (ROOT / "infra/main.tf").read_text()
+DEPLOY = (ROOT / ".github/workflows/deploy.yml").read_text()
+
+SECRET_ADDRESS = "azurerm_key_vault_secret.postgres_connection"
+APP_ADDRESS = "azurerm_container_app.main"
+URI = "https://comuni-itn-001-kv.vault.azure.net/secrets/postgres-connection"
+SENTINEL = "synthetic-postgres-password-private-not-for-logs"
+SENTINEL_HOST = "synthetic-secret-host-private-not-for-logs"
+
+
+def resource(address, type_name, actions, before=None, after=None):
+    return {
+        "address": address, "type": type_name,
+        "change": {"actions": actions, "before": before, "after": after},
+    }
+
+
+def plan():
+    legacy_before = {
+        "name": "postgres-connection", "versionless_id": URI,
+        "value": SENTINEL, "id": "synthetic-id-not-to-log",
+    }
+    app = {
+        "secret": [
+            {"name": "postgres-connection", "key_vault_secret_id": URI},
+            {"name": "pg-dddddddddddddddd",
+             "key_vault_secret_id": "https://comuni-itn-001-kv.vault.azure.net/secrets/postgres-runtime-connection/" + "d" * 32},
+        ],
+        "template": [{
+            "container": [{
+                "env": [
+                    {"name": "ConnectionStrings__Default",
+                     "secret_name": "pg-dddddddddddddddd"}
+                ]
+            }]
+        }],
+    }
+    return {
+        "format_version": "1.2",
+        "resource_changes": [
+            resource(SECRET_ADDRESS, "azurerm_key_vault_secret",
+                     ["forget"], legacy_before, None),
+            resource(APP_ADDRESS, "azurerm_container_app", ["no-op"],
+                     app, copy.deepcopy(app)),
+            resource("azurerm_key_vault.main", "azurerm_key_vault", ["no-op"],
+                     {"name": "comuni-itn-001-kv"}, {"name": "comuni-itn-001-kv"}),
+        ],
+        "resource_drift": [],
+        "output_changes": {},
+    }
+
+
+def run_gate(data):
+    if not GATE.is_file():
+        return subprocess.CompletedProcess([], 127, "", "missing read-only state handoff gate")
+    return subprocess.run(
+        [sys.executable, str(GATE)],
+        input=json.dumps(data) if not isinstance(data, str) else data,
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+
+
+class LegacyPostgresHandoffPlanTests(unittest.TestCase):
+    def deny(self, data):
+        result = run_gate(data)
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        for value in (SENTINEL, SENTINEL_HOST, URI, SECRET_ADDRESS,
+                      "synthetic-id-not-to-log"):
+            self.assertNotIn(value, result.stdout + result.stderr)
+
+    def test_only_single_non_destructive_forget_with_unchanged_app_is_accepted(self):
+        result = run_gate(plan())
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn(SENTINEL, result.stdout + result.stderr)
+        self.assertNotIn(URI, result.stdout + result.stderr)
+
+    def test_target_cannot_be_destroyed_recreated_or_updated(self):
+        for actions in (["delete"], ["create"], ["update"], ["delete", "create"],
+                        ["create", "forget"], ["no-op"], ["forget", "create"],
+                        ["forget", "delete"], [], "forget"):
+            with self.subTest(actions=actions):
+                p = plan()
+                p["resource_changes"][0]["change"]["actions"] = actions
+                self.deny(p)
+
+    def test_forget_requires_exact_target_before_and_null_after(self):
+        for key, value in [
+            ("before", None),
+            ("before", {"name": "another-secret", "versionless_id": URI}),
+            ("before", {"name": "postgres-connection", "versionless_id": URI}),
+            ("after", {"value": SENTINEL}),
+            ("after", {}),
+        ]:
+            with self.subTest(key=key, value=value):
+                p = plan()
+                p["resource_changes"][0]["change"][key] = value
+                self.deny(p)
+
+    def test_must_leave_stable_aca_app_secret_and_runtime_reference_unchanged(self):
+        cases = []
+        for change in ("update", "delete", "forget", "create"):
+            p = plan()
+            p["resource_changes"][1]["change"]["actions"] = [change]
+            cases.append(p)
+        p = plan()
+        p["resource_changes"][1]["change"]["after"]["secret"][0]["key_vault_secret_id"] += "/" + "e" * 32
+        cases.append(p)
+        p = plan()
+        p["resource_changes"][1]["change"]["after"]["secret"].pop(0)
+        cases.append(p)
+        p = plan()
+        p["resource_changes"][1]["change"]["before"]["secret"].pop(0)
+        p["resource_changes"][1]["change"]["after"]["secret"].pop(0)
+        cases.append(p)
+        p = plan()
+        p["resource_changes"][1]["change"]["before"]["secret"].append(
+            {"name": "postgres-connection", "key_vault_secret_id": URI})
+        cases.append(p)
+        p = plan()
+        p["resource_changes"][1]["change"]["before"]["template"][0]["container"][0]["env"][0] = {
+            "name": "ConnectionStrings__Default", "value": SENTINEL_HOST}
+        cases.append(p)
+        p = plan()
+        p["resource_changes"].pop(1)
+        cases.append(p)
+        for case in cases:
+            self.deny(case)
+
+    def test_unrelated_terraform_mutations_and_duplicate_resources_are_denied(self):
+        for addr, t in [
+            ("azurerm_key_vault.main", "azurerm_key_vault"),
+            ("azurerm_postgresql_flexible_server.main", "azurerm_postgresql_flexible_server"),
+            ("azurerm_role_assignment.secrets", "azurerm_role_assignment"),
+            ("azurerm_container_app.other", "azurerm_container_app"),
+        ]:
+            for action in (["forget"], ["update"], ["delete"], ["create"],
+                           ["read"], ["delete", "create"]):
+                p = plan()
+                p["resource_changes"].append(resource(
+                    addr, t, action, {"value": SENTINEL}, None))
+                self.deny(p)
+        p = plan()
+        p["resource_changes"].append(copy.deepcopy(p["resource_changes"][0]))
+        self.deny(p)
+        p = plan()
+        p["resource_changes"].append(copy.deepcopy(p["resource_changes"][1]))
+        self.deny(p)
+
+    def test_bad_secret_uri_and_inconsistent_legacy_id_are_denied(self):
+        for uri in (
+            "https://evil.example.test/secrets/postgres-connection",
+            "http://comuni-itn-001-kv.vault.azure.net/secrets/postgres-connection",
+            URI + "/" + "a" * 32,
+            URI + "?alt=1",
+            URI + ".evil.test",
+        ):
+            p = plan()
+            p["resource_changes"][0]["change"]["before"]["versionless_id"] = uri
+            self.deny(p)
+        p = plan()
+        p["resource_changes"][0]["change"]["before"]["versionless_id"] = URI + "/" + "b" * 32
+        p["resource_changes"][1]["change"]["before"]["secret"][0]["key_vault_secret_id"] = URI + "/" + "b" * 32
+        p["resource_changes"][1]["change"]["after"]["secret"][0]["key_vault_secret_id"] = URI + "/" + "b" * 32
+        self.deny(p)
+
+    def test_reject_drift_output_changes_empty_plan_and_untrusted_json(self):
+        for mutation in (
+            lambda p: p.update(resource_drift=[resource(SECRET_ADDRESS,
+                "azurerm_key_vault_secret", ["update"], {"value": SENTINEL}, None)]),
+            lambda p: p.update(output_changes={"secret": {
+                "actions": ["update"], "before": SENTINEL, "after": SENTINEL}}),
+            lambda p: p.update(resource_changes=[]),
+            lambda p: p.update(resource_changes=[p["resource_changes"][0]]),
+        ):
+            p = plan()
+            mutation(p)
+            self.deny(p)
+        self.deny("{ invalid json with " + SENTINEL)
+        self.deny({"resource_changes": []})
+
+    def test_gate_is_read_only_and_production_staging_remains_separate(self):
+        self.assertTrue(GATE.is_file(), "RED: missing independent state-handoff plan gate")
+        source = GATE.read_text()
+        for prohibited in ("terraform apply", "terraform state rm", "az keyvault",
+                           "az containerapp", "shell=True", "print(plan)", "print(json.dumps(plan"):
+            self.assertNotIn(prohibited, source)
+        self.assertIn("json.load(sys.stdin)", source)
+        self.assertIn("['forget']", source.replace('"', "'"))
+        self.assertIn('resource "azurerm_key_vault_secret" "postgres_connection"', TF)
+        self.assertIn("azurerm_key_vault_secret.postgres_connection.versionless_id", TF)
+        self.assertNotIn("from = azurerm_key_vault_secret.postgres_connection", TF)
+        self.assertNotIn("check-legacy-postgres-handoff-plan.py", DEPLOY)
+        self.assertIn("check-staged-rollout-plan.py", DEPLOY)
+
+
+if __name__ == "__main__":
+    unittest.main()
