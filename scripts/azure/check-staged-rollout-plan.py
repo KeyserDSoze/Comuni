@@ -89,6 +89,58 @@ def runtime_postgres_version_uri(value, version, trusted_vault_host):
     )
 
 
+def validate_hosted_oidc_environment(env):
+    """Reject ambiguous ACA env keys before .NET configuration is assembled.
+
+    Azure Container Apps can take the last duplicate; ASP.NET Core configuration
+    keys ignore case and normalize "__" to ":". Treat every conflicting key as
+    an invalid release, even when the original exact-name key looks safe.
+    """
+    require(isinstance(env, list) and len(env) > 0,
+            "invalid candidate environment variables")
+    indexed = {}
+    for entry in env:
+        require(isinstance(entry, dict) and isinstance(entry.get("name"), str),
+                "malformed candidate environment variable")
+        name = entry["name"]
+        require(bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)),
+                "invalid or noncanonical environment variable name")
+        normalized = name.replace("__", ":").casefold()
+        require(normalized not in indexed,
+                "duplicate ASP.NET Core configuration key in candidate")
+        indexed[normalized] = entry
+
+    # DOTNET_ENVIRONMENT may override ASPNETCORE_ENVIRONMENT in WebApplication.
+    # This candidate must not provide a second source of environment selection.
+    require("dotnet_environment" not in indexed,
+            "candidate cannot override hosted environment selection")
+
+    def plain_value(key):
+        entry = indexed.get(key.replace("__", ":").casefold())
+        require(isinstance(entry, dict) and isinstance(entry.get("value"), str)
+                and not entry.get("secret_name"),
+                "missing or non-plain required hosted OIDC setting")
+        return entry["value"]
+
+    require(plain_value("ASPNETCORE_ENVIRONMENT") == "Production",
+            "candidate must run with Production environment")
+    require(plain_value("Authentication__Mode") == "Oidc",
+            "candidate must enforce OIDC token validation")
+
+    authority = plain_value("Authentication__Authority")
+    parsed = urlparse(authority)
+    require(bool(authority) and authority == authority.strip()
+            and not any(char.isspace() for char in authority)
+            and parsed.scheme == "https" and bool(parsed.hostname)
+            and parsed.username is None and parsed.password is None
+            and not parsed.query and not parsed.fragment,
+            "candidate OIDC authority must be an HTTPS issuer without credentials")
+
+    audience = plain_value("Authentication__Audience")
+    require(bool(audience) and not any(char.isspace() for char in audience),
+            "candidate OIDC audience must be explicit and nonempty")
+
+
 def managed_postgres_fqdn(plan):
     """Trust only the managed Flexible Server in Terraform planned_values.
 
@@ -289,6 +341,7 @@ def validate(plan, args):
     require(isinstance(containers, list) and len(containers) == 1 and
             isinstance(containers[0], dict),
             "expected single API + SPA container")
+    validate_hosted_oidc_environment(containers[0].get("env"))
     proof = named(containers[0].get("env", []), "Security__TenantProofKey")
     proof_id = named(containers[0].get("env", []), "Security__TenantProofKeyId")
     require(proof.get("secret_name") == candidate_name and not proof.get("value"),
