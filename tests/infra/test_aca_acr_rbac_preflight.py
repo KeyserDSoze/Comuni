@@ -197,7 +197,7 @@ class ACRRbacPreflightTests(unittest.TestCase):
     def test_workflow_preflight_before_acr_login_build_and_push(self):
         self.assertIn("scripts/azure/check-acr-role-boundary.py", WORKFLOW)
         self.assertLess(WORKFLOW.index("check-acr-role-boundary.py"),
-                        WORKFLOW.index("az acr login"))
+                        WORKFLOW.index("login-acr-oauth.py"))
         self.assertLess(WORKFLOW.index("check-acr-role-boundary.py"),
                         WORKFLOW.index("docker push"))
         self.assertIn('--deployer-client-id "$ACR_PUSH_CLIENT_ID"', WORKFLOW)
