@@ -1,0 +1,27 @@
+# ADR 0045 — Pinning dell'esatto FQDN Azure PostgreSQL nel runtime, Terraform e verificatore ACA
+
+- Stato: Accepted per API e gate offline di staging, non per accettazione del deployment reale.
+- Data: 2026-11-16.
+- Issue: #52, sub-issue di #49/#5/#6/#19. Dipende da ADR 0043 e 0044.
+- Fonti: [Azure PostgreSQL Flexible Server CLI](https://learn.microsoft.com/en-us/cli/azure/postgres/flexible-server), [Azure PostgreSQL Flexible Server quickstart](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/quickstart-create-server-portal), [Terraform show JSON](https://developer.hashicorp.com/terraform/internals/json-format), [Azure Container Apps revisions](https://learn.microsoft.com/en-us/azure/container-apps/revisions).
+
+## Contesto e vulnerabilità residua
+
+ADR 0044 impone `SSL Mode=VerifyFull`/verifica CA+SAN e il dominio `<server>.postgres.database.azure.com` nella connessione `comuni_app_runtime`. Tuttavia, *qualsiasi* server Azure PostgreSQL legittimo può possedere un certificato valido per il proprio nome. Poiché #50 usa una stringa di connessione candidata creata **fuori Terraform** in Key Vault, un URL SQL malevolo ma formalmente Azure nella secret potrebbe inviare la password verso un'altra istanza. Serve un host trusted da una seconda sorgente approvata, **indipendente dal valore della connessione**.
+
+## Decisioni
+
+1. **API fail-closed.** In qualunque ambiente hosted diverso da `Development`/`Testing`, `RuntimePostgresConnectionSettings.Read` verifica che `RuntimePostgres:ExpectedHost` esista, non sia whitespace, rispetti il FQDN Azure PostgreSQL e corrisponda *esattamente* (case-insensitive) a `NpgsqlConnectionStringBuilder.Host`. Se il server nel secret è un'altra istanza Azure certificata, il bootstrap fallisce prima di DbContext, I/O SQL o richieste. Nessun fallback a dominio suffisso generico, IP, alias, nome multiplo o override via JWT/query/frontend. Errori generici non contengono valore del secret, FQDN o inner exception. `Development`/`Testing` mantengono PostgreSQL locale senza metadata host.
+2. **Origine metadato: Terraform resource.** `azurerm_container_app.main.template.container.env.RuntimePostgres__ExpectedHost` proviene unicamente da `azurerm_postgresql_flexible_server.main.fqdn`: non è un input `TF_VAR_*` e non legge la secret. La stable conserva vecchio secret `postgres-connection` versionless e il binario già pubblicato; la candidata mantiene `ConnectionStrings__Default` da `pg-<16hex>` pinned Key Vault e zero traffico.
+3. **Plan gate.** `check-staged-rollout-plan.py` legge soltanto il campo non segreto `planned_values.root_module.resources` per l'esatta risorsa `azurerm_postgresql_flexible_server.main`, richiede un solo `name`/`fqdn` consistente e in formato Azure valido, e confronta questo FQDN con l'env `RuntimePostgres__ExpectedHost` della candidata (unico valore, non secretRef). Fail closed se provider restituisce metadati sconosciuti/mancanti, risorsa duplicata o se il piano vuole aggiornare PostgreSQL durante lo stage; non stampa JSON, host o altri segreti. Questo non è una attestazione crittografica del Terraform state o di RBAC e richiede review del piano reale prima dell'apply.
+4. **Post-stage ARM read-only.** `verify-staged-revisions.py`, nel contesto autenticato Azure del deploy approvato, esegue `az postgres flexible-server show --name <prefix>-pg --resource-group <prefix>-rg --query fullyQualifiedDomainName -o tsv`, derivando il nome dal nome ACA `<prefix>-app`. Confronta l'FQDN restituito da ARM con il nome previsto e con l'env della candidata. Risposte vuote, errate/altro host o accesso negato comportano errore senza output di metadati. Il verifier continua a richiedere stable=100%, candidate=0%, health, immagine e secretRefs pinned. Non promuove/revoca/riavvia nulla.
+5. **TDD e compatibilità.** RED xUnit e contratti Python di pianificazione segnalano la vulnerabilità, GREEN aggiunge guard, Terraform, gate e read-only verifier; runner CI valida codice .NET 10, PostgreSQL 17, Playwright, Terraform, CodeQL e Docker. Il nuovo controllo di piano potrebbe bloccare un deploy se il provider non espone `fqdn` in `planned_values`: è **intenzionale**; non disabilitare la guardia. Serve eventualmente un ADR per una diversa sorgente attestata.
+6. **Limiti e responsabilità.** Un attore con privilegi per alterare sia l'ARM PostgreSQL sia la revisione Terraform può aggirare i controlli di coerenza; servono RBAC separati, approvazioni, audit, controllo DNS privato e Key Vault. L'FQDN corretto più `VerifyFull` non dimostrano un handshake reale, le grant RLS, il pairing del secret HMAC, l'IdP/MFA e la procedura di rollback. Lo storico `azurerm_key_vault_secret.postgres_connection` versionless e il suo valore in Terraform State restano debito non sanato (#49/#6). Non si effettuano apply o cambi alla produzione in questa slice.
+
+## Alternative rifiutate
+
+- Accettare qualsiasi FQDN del dominio Azure: non protegge da un'altra istanza Azure valida.
+- Calcolare `ExpectedHost` dalla stessa stringa Key Vault: controllo tautologico e aggirabile.
+- Passare l'host come input HTTP/JWT o variabile manuale `TF_VAR`: non è indipendente dalla richiesta o dalla secret compromessa.
+- Scrivere host atteso hardcoded per ogni Comune o introdurre secondo DB: contrario al Core multi-organization.
+- Bloccare la CI locale per PKI Azure/connessioni VNet: non costituirebbe una prova in produzione.
