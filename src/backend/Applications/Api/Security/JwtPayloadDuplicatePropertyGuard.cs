@@ -7,15 +7,17 @@ namespace Comuni.Api.Security;
 
 /// <summary>
 /// JWT processors may collapse duplicate JSON names before creating claims.
-/// Check the exact payload bytes in the already cryptographically validated
-/// SecurityToken, BEFORE accepting a municipal/platform principal.
+/// Check the exact JOSE header AND payload bytes of the cryptographically
+/// validated SecurityToken, BEFORE accepting a municipal/platform principal.
 /// </summary>
 public static class JwtPayloadDuplicatePropertyGuard
 {
     // Bounded independent of JwtBearer MaximumTokenSizeInBytes. A large or
     // deeply nested external IdP payload must fail closed, not exhaust memory.
+    private const int MaxHeaderBytes = 8 * 1024;
     private const int MaxPayloadBytes = 64 * 1024;
     private const int MaxDepth = 32;
+    private const int MaxEncodedHeaderChars = ((MaxHeaderBytes + 2) / 3) * 4;
     private const int MaxEncodedPayloadChars = ((MaxPayloadBytes + 2) / 3) * 4;
 
     public static bool IsAcceptable(SecurityToken? validatedToken)
@@ -35,27 +37,24 @@ public static class JwtPayloadDuplicatePropertyGuard
             compact.IndexOf('.', secondDot + 1) != -1)
             return false;
 
-        var encodedLength = secondDot - firstDot - 1;
-        if (encodedLength > MaxEncodedPayloadChars)
+        // Bound both JOSE header and payload before Base64Url decoding.
+        // The JOSE header can carry a duplicated alg/kid that the JWT parser
+        // already collapsed before signature verification. Even after a
+        // successful signature check, reject its original JSON ambiguity.
+        var headerLength = firstDot;
+        var payloadLength = secondDot - firstDot - 1;
+        if (headerLength > MaxEncodedHeaderChars ||
+            payloadLength > MaxEncodedPayloadChars)
             return false;
 
         try
         {
-            // Read from the SecurityToken returned by JwtBearer, never from
-            // a separate HTTP header or any unverified user claim.
-            var payload = Base64UrlEncoder.DecodeBytes(
-                compact.Substring(firstDot + 1, encodedLength));
-            if (payload.Length > MaxPayloadBytes)
-                return false;
-
-            using var document = JsonDocument.Parse(payload, new JsonDocumentOptions
-            {
-                AllowTrailingCommas = false,
-                CommentHandling = JsonCommentHandling.Disallow,
-                MaxDepth = MaxDepth
-            });
-            return document.RootElement.ValueKind == JsonValueKind.Object &&
-                   HasUniqueObjectPropertyNames(document.RootElement);
+            // Only the SecurityToken returned by JwtBearer AFTER its signature
+            // and issuer/audience/lifetime checks. Never a raw request header.
+            return IsCanonicalObject(compact[..firstDot], MaxHeaderBytes) &&
+                   IsCanonicalObject(
+                       compact.Substring(firstDot + 1, payloadLength),
+                       MaxPayloadBytes);
         }
         catch (Exception error) when (
             error is ArgumentException or FormatException or JsonException or InvalidOperationException)
@@ -64,6 +63,22 @@ public static class JwtPayloadDuplicatePropertyGuard
             // the auth rejection path.
             return false;
         }
+    }
+
+    private static bool IsCanonicalObject(string encoded, int maxDecodedBytes)
+    {
+        var bytes = Base64UrlEncoder.DecodeBytes(encoded);
+        if (bytes.Length > maxDecodedBytes)
+            return false;
+
+        using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = false,
+            CommentHandling = JsonCommentHandling.Disallow,
+            MaxDepth = MaxDepth
+        });
+        return document.RootElement.ValueKind == JsonValueKind.Object &&
+               HasUniqueObjectPropertyNames(document.RootElement);
     }
 
     private static bool HasUniqueObjectPropertyNames(JsonElement element)
