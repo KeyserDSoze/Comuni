@@ -50,7 +50,10 @@ if args != expected:
 if os.environ.get("FAKE_GH_EXIT", "0") != "0":
     sys.stderr.write(os.environ["FAKE_GH_STDERR"])
     sys.exit(int(os.environ["FAKE_GH_EXIT"]))
-sys.stdout.write(os.environ["FAKE_GH_JSON"])
+if os.environ["FAKE_GH_JSON"] == "__OVERSIZED__":
+    sys.stdout.write(" " * 200000)
+else:
+    sys.stdout.write(os.environ["FAKE_GH_JSON"])
 """
 
 
@@ -139,7 +142,7 @@ class SignedProvenanceTests(unittest.TestCase):
                 "subject": [], "predicateType": "https://slsa.dev/provenance/v1"}}}]),
             json.dumps(verified_statement()).replace('"sha256"', '"sha512"'),
             SENTINEL,
-            " " * 140000,
+            "__OVERSIZED__",
         ]
         for raw in candidates:
             with self.subTest(length=len(raw)):
