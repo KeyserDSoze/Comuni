@@ -12,7 +12,7 @@ from pathlib import Path
 from test_staged_rollout import (
     fixture_plan, STABLE_REVISION, CANDIDATE_REVISION,
     STABLE_VERSION, CANDIDATE_VERSION, CANDIDATE_KEY_ID,
-    RUNTIME_POSTGRES_VERSION,
+    RUNTIME_POSTGRES_VERSION, SOURCE_COMMIT_SHA,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,12 +36,13 @@ NON_APP_RESOURCES = [
 ]
 
 
-def check(plan):
+def check(plan, source_sha=SOURCE_COMMIT_SHA):
     return subprocess.run(
         [
             sys.executable, str(GATE),
             "--stable-revision", STABLE_REVISION,
             "--candidate-revision", CANDIDATE_REVISION,
+            "--source-commit-sha", source_sha,
             "--stable-secret-version", STABLE_VERSION,
             "--candidate-secret-version", CANDIDATE_VERSION,
             "--candidate-key-id", CANDIDATE_KEY_ID,
