@@ -1,0 +1,27 @@
+# ADR 0060 — Preflight read-only ACR RBAC per identità pull e deploy
+
+- Stato: **Accepted per controllo offline e workflow**, non verificato su Azure reale.
+- Data: 2026-11-16.
+- Scope: issue #69, sotto #65/#5/#6, dopo ADR 0059.
+- Fonti ufficiali: [Azure ACR RBAC e ABAC](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-rbac-abac-repository-permissions), [Azure CLI az acr](https://learn.microsoft.com/en-us/cli/azure/acr), [Azure CLI role assignment list](https://learn.microsoft.com/en-us/azure/role-based-access-control/role-assignments-list-cli), [Managed identities for ACR](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-authentication-managed-identity).
+
+## Minaccia
+
+Terraform crea un registry Basic con admin disabilitato e un'identità UserAssigned dell'applicazione che usa `AcrPull`; il workflow GitHub esegue push e staging con il client federato `AZURE_CLIENT_ID`. La modalità ACR `rbac-abac` non riconosce `AcrPull` e `AcrPush` legacy: attivarla senza migrare ruoli può interrompere il pull della revisione stable anche quando questa mantiene 100% di traffico. Un'identità di runtime cui venga accidentalmente attribuito `AcrPush`/Owner/Contributor potrebbe inoltre modificare il registry da cui l'app effettua i pull.
+
+Gli script #64–#68 verificano digest, firma, CVE e doppio lock, ma **non** verificavano prima del push che il registry e i suoi principali conservassero il contratto RBAC previsto da Terraform.
+
+## Decisione
+
+1. Aggiungere `scripts/azure/check-acr-role-boundary.py` subito dopo `azure/login@v2` e **prima** di `terraform init`, `docker build/push`, Trivy, attestazioni, plan e apply nel workflow di produzione. Parametri: `--prefix`, `--registry-name`, `--registry-host` dalle GitHub Environment vars e `--deployer-client-id "$ARM_CLIENT_ID"` da GitHub Secret; verificare nome ACR `<prefix senza trattini>acr`, group `<prefix>-rg` e login server gestito.
+2. Eseguire solo letture Azure CLI: `az acr show` per ID, nome, loginServer, `roleAssignmentMode` e `adminUserEnabled`; richiedere modalità **esattamente `rbac`**, `adminUserEnabled=false` booleano, ID e dominio coerenti con Terraform. Null, `rbac-abac`, server/ID differente o output malformato bloccano **prima** dell'esecuzione di Docker.
+3. Usare `az identity show` per ricavare `principalId` e `clientId` della UAI `<prefix>-app-identity` realmente registrata. Ricavare `objectId` del client federato GitHub mediante `az ad sp show --id <ARM_CLIENT_ID> --query id`. Entrambe le identità devono essere UUID canonicali e **diverse**; se il principal non è risolvibile per permessi Microsoft Graph/propagazione, fallire chiuso e richiedere intervento owner: non assumere arbitrariamente l'objectId dall'appId.
+4. Interrogare le assegnazioni `az role assignment list --assignee-object-id <principal> --scope <ACR-ID> --all --include-inherited --fill-principal-name false --output json`. Per la UAI richiedere **un `AcrPull` esatto, diretto all'ACR, non condizionato**. Negare ruoli di scrittura/distruzione o privilegi ampi anche ereditati e risposte inattese; consentire soltanto `Reader` esplicitamente ereditato come ruolo aggiuntivo non mutativo. Per il deployer richiedere **un `AcrPush` diretto all'ACR**; negare condizioni, ruoli aggiuntivi privilegiati o scope non previsti (salvo `Reader` ereditato). Le assegnazioni `AcrPull` e `AcrPush` non vengono create o modificate dal preflight.
+5. Tutte le risposte e diagnostiche della CLI sono catturate, limitate a dimensione massima e **mai stampate**; i fallimenti usano motivi statici senza token, tenant, objectId, URL o secret. Nessun `az role assignment create/delete`, `az acr update`, cambio `roleAssignmentMode` o `terraform apply` in questo incremento. Non trasformare silenziosamente l'ACR in modalità ABAC.
+6. Test TDD RED→GREEN in `tests/infra/test_aca_acr_rbac_preflight.py` con fake `az`: positivo con 5 chiamate read-only e identità separate; negativi per ABAC/admin enabled, principal uguali, ruolo sbagliato/scope ereditato/condition/owner, risposte errate e fault injection su ciascuna chiamata; test del workflow pre-push. CI 7/7 sul medesimo SHA finale `main` necessaria alla chiusura della #69.
+
+## Prerequisiti e limiti
+
+Il principal OIDC di release deve possedere una assegnazione esplicita `AcrPush` sul registry, distinta da `AcrPull` della UAI. **Attenzione:** lo stesso principal esegue anche l'apply Terraform; un eventuale ruolo `Contributor`/Owner ereditato produce un rifiuto. La segregazione in un principal build dedicato e uno per Terraform/IAM va pianificata separatamente, non indebolendo il preflight con un bypass. I permessi aggiuntivi per aggiornare le proprietà di tag/manifest ACR sono da verificare in Azure. La visualizzazione di assegnazioni dirette e inherited via CLI **non dimostra** da sola i diritti effettivi derivati da gruppi Entra, PIM, custom roles, deny assignments, policy o propagazione; serve una prova reale di pull con la UAI, push/lock con l'identità build e controllo IAM da parte dell'owner.
+
+La CLI non viene chiamata realmente dai test CI, che usano solo un fake; non sono stati eseguiti ACR/Terraform apply live, letture di segreti o promozioni di traffico. La #65 e le #5/#6/#49 restano aperte. Un futuro cambio a `rbac-abac` necessita ADR, doppie assegnazioni transitorie per `Container Registry Repository Reader`/`Writer` e prove di compatibilità prima dello switch.
