@@ -97,6 +97,69 @@ class PrivatePostgresCopySourceTests(unittest.TestCase):
         self.assertEqual("", result.stdout)
         self.assertEqual("Private input transport rejected", result.stderr.strip())
 
+    def test_tenant_proof_keys_use_exact_copy_allowlists_not_literal_sql(self):
+        cases = (
+            (
+                "tenant-legacy", "provision-tenant-proof.sql",
+                {"TENANT_PROOF_KEY": "test-only-legacy-key-for-copy-proof-2026-11-17"},
+                ("tenant_proof_key",),
+            ),
+            (
+                "tenant-stage", "stage-tenant-proof-key.sql",
+                {
+                    "TENANT_PROOF_KEY_ID": "test_copy_key",
+                    "TENANT_PROOF_KEY": "test-only-staged-key-for-copy-proof-2026-11-17",
+                },
+                ("new_key", "new_key_id"),
+            ),
+        )
+        for operation, filename, values, legacy_literals in cases:
+            with self.subTest(operation=operation):
+                result = invoke(operation=operation, values=values)
+                self.assertEqual(0, result.returncode)
+                self.assertEqual("", result.stderr)
+                self.assertEqual(1, len(result.stdout.splitlines()))
+                envelope = json.loads(base64.b64decode(result.stdout.strip(), validate=True))
+                self.assertEqual(values, envelope)
+                sql = (REPO / "scripts" / "postgres" / filename).read_text(
+                    encoding="utf-8")
+                self.assertIn("CREATE TEMP TABLE pg_temp.comuni_private_input", sql)
+                self.assertIn(
+                    "FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py "
+                    + operation + "'", sql)
+                self.assertIn("ON COMMIT DROP", sql)
+                self.assertIn("FROM pg_temp.comuni_private_input", sql)
+                for key in legacy_literals:
+                    self.assertNotIn(":'" + key + "'", sql)
+
+    def test_tenant_proof_copy_errors_never_echo_key_material(self):
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory():
+            for operation, values in (
+                ("tenant-legacy", {"TENANT_PROOF_KEY": "private-canary" * 200}),
+                ("tenant-stage", {"TENANT_PROOF_KEY_ID": "synthetic"}),
+                ("tenant-stage", {
+                    "TENANT_PROOF_KEY_ID": "synthetic",
+                    "TENANT_PROOF_KEY": "",
+                }),
+            ):
+                with self.subTest(operation=operation, values=values):
+                    env = os.environ.copy()
+                    for key in ("TENANT_PROOF_KEY", "TENANT_PROOF_KEY_ID"):
+                        env.pop(key, None)
+                    env.update(values)
+                    proc = subprocess.run(
+                        [sys.executable, str(SCRIPT), operation], env=env,
+                        cwd=REPO, capture_output=True, text=True, timeout=10,
+                        check=False)
+                    self.assertNotEqual(0, proc.returncode)
+                    self.assertEqual("", proc.stdout)
+                    self.assertEqual(
+                        "Private input transport rejected", proc.stderr.strip())
+                    self.assertNotIn("private-canary", proc.stderr)
+                    self.assertNotIn("Traceback", proc.stderr)
+
     def test_sql_cannot_use_inline_psql_secret_literals(self):
         sql = (REPO / "scripts/postgres" /
                "stage-emergency-admin-replacement.sql").read_text(encoding="utf-8")
