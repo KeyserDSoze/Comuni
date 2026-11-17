@@ -193,3 +193,7 @@ L'enrollment `scripts/postgres/enroll-additional-admin.sql` (ADR 0071) accetta o
 ## Hardening input sensibili staging emergenza — invariato il contratto HTTP (#88)
 
 Il solo script offline owner-only `stage-emergency-admin-replacement.sql` acquisisce ora input OIDC dalla temp table alimentata tramite COPY dal **client psql**, non da literal SQL. Non sono stati introdotti o modificati endpoint HTTP, claim JWT, RLS, grant del runtime né feature flags. Il Comune resta sospeso finché un cambio lifecycle separato non viene approvato. Validazioni ed eventi audit definiti dall'ADR 0072 invariati; limiti del trasporto e privacy log in [ADR 0073](../adr/0073-owner-only-psql-copy-private-input.md). Il percorso non è autorizzato per IdP/Comuni reali mentre #86 e #84 sono aperte.
+
+## Nessuna variazione API per i segreti di firma tenant RLS (#90)
+
+Le procedure SQL offline `provision-tenant-proof.sql` e `stage-tenant-proof-key.sql` ora acquisiscono chiavi da COPY client-side e temp table invece che da SQL literal. Non sono nuovi endpoint HTTP, né modifiche agli issuer JWT, ai contratti REST, al verifier `platform.verified_tenant_id()`, alle policy RLS, alla firma HMAC o alla configurazione dei moduli; l'identificazione del Comune rimane server-side e fail-closed. L'API non può leggere o ruotare la chiave. ADR 0074 e issue #90; test solo PostgreSQL 17 sintetici, non rollout Azure live.
