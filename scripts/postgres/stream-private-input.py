@@ -16,6 +16,10 @@ import sys
 # Restrict operation names and their input sets to known, reviewed scripts.
 # Extending this dictionary requires matching SQL, tests, and an ADR.
 INPUTS: dict[str, tuple[str, ...]] = {
+    # Signing keys are only read from the runner's protected environment;
+    # NEVER forward the caller's complete environment to PostgreSQL.
+    "tenant-legacy": ("TENANT_PROOF_KEY",),
+    "tenant-stage": ("TENANT_PROOF_KEY_ID", "TENANT_PROOF_KEY"),
     "emergency": (
         "COMUNI_EMERGENCY_ORGANIZATION_ID",
         "COMUNI_EMERGENCY_OLD_IDENTITY_ISSUER",
