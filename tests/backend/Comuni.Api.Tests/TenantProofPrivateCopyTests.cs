@@ -46,7 +46,8 @@ public sealed class TenantProofPrivateCopyTests
             "-p", db.Port.ToString(), "-U", db.Username, "-d", db.Database,
             "-f", Path.Combine(Root(), "scripts/postgres", script)
         }) psi.ArgumentList.Add(arg);
-        psi.Environment["PGPASSWORD"] = db.Password;
+        psi.Environment["PGPASSWORD"] = db.Password
+            ?? throw new InvalidOperationException("Synthetic PostgreSQL password required.");
         if (key is null) psi.Environment.Remove("TENANT_PROOF_KEY");
         else psi.Environment["TENANT_PROOF_KEY"] = key;
         if (keyId is null) psi.Environment.Remove("TENANT_PROOF_KEY_ID");
