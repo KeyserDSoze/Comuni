@@ -201,3 +201,7 @@ Le procedure SQL offline `provision-tenant-proof.sql` e `stage-tenant-proof-key.
 ## Password dei login PostgreSQL: nessuna nuova API (#91)
 
 I login SQL di runtime e inventario platform sono gestiti solo dalla procedura offline schema-owner. Il passaggio a verificatori SCRAM generati sul client, temp table e COPY non crea endpoint di provisioning, non cambia JWT/OIDC, moduli, ruoli applicativi, RLS, Admin/Superadmin o tenant isolation. `comuni_app_runtime` e `comuni_platform_reader` restano con grants distinti e invariati; la modifica riguarda esclusivamente il trasferimento del segreto e il DDL per creare/aggiornare le rispettive password. Vedere ADR 0075, docs/deployment e #91; **non** autorizza credenziali di produzione né l'uso in Azure live.
+
+## Nessuna API per audit pgAudit dei login SQL (#92)
+
+La suite offline con pgAudit della #92 verifica i due script SQL di provisioning dei ruoli già introdotti dalla #91. Non introduce endpoint, permessi applicativi, JWT, bypass tenant, impersonificazione, feature flag o altre organizzazioni nel database reale. Il test PostgreSQL 17 usa un cluster CI disposable separato e controlla la presenza di audit ROLE/DDL e la redazione SCRAM nei log, secondo [ADR 0076](../adr/0076-pgaudit-role-scram-verifier-logging.md). La verifica delle configurazioni Azure/pgAuditLogToFile/SIEM e il go-live rimangono esplicitamente non eseguiti.
