@@ -160,6 +160,100 @@ class PrivatePostgresCopySourceTests(unittest.TestCase):
                     self.assertNotIn("private-canary", proc.stderr)
                     self.assertNotIn("Traceback", proc.stderr)
 
+    def test_role_passwords_use_private_scram_copy_not_plaintext_ddl(self):
+        # Create/ALTER ROLE must receive a salted verifier, never password
+        # literals, psql arguments, or direct server-side password parameters.
+        import hashlib
+        import hmac
+
+        cases = (
+            ("runtime-role", "provision-runtime-role.sql",
+             "RUNTIME_DB_PASSWORD", "runtime_password",
+             "synthetic-runtime-pass-2026-11-18-' ;--", 24),
+            ("platform-role", "provision-platform-read-role.sql",
+             "PLATFORM_READ_DB_PASSWORD", "platform_password",
+             "synthetic-platform-reader-pass-2026-11-18-' ;--", 32),
+        )
+        for operation, filename, key, old_variable, password, minimum in cases:
+            with self.subTest(operation=operation):
+                env = os.environ.copy()
+                env.pop("RUNTIME_DB_PASSWORD", None)
+                env.pop("PLATFORM_READ_DB_PASSWORD", None)
+                env[key] = password
+                def run():
+                    return subprocess.run(
+                        [sys.executable, str(SCRIPT), operation], env=env,
+                        cwd=REPO, capture_output=True, text=True, timeout=10,
+                        check=False)
+
+                first = run()
+                self.assertEqual(0, first.returncode, first.stderr)
+                self.assertEqual("", first.stderr)
+                payload = json.loads(
+                    base64.b64decode(first.stdout.strip(), validate=True))
+                self.assertEqual({"SCRAM_VERIFIER"}, set(payload))
+                verifier = payload["SCRAM_VERIFIER"]
+                self.assertNotIn(password, first.stdout + first.stderr + verifier)
+                self.assertTrue(verifier.startswith("SCRAM-SHA-256$4096:"))
+                self.assertEqual(1, len(first.stdout.splitlines()))
+                parts = verifier.split("$")
+                self.assertEqual(3, len(parts))
+                iterations, salt_b64 = parts[1].split(":")
+                self.assertEqual(4096, int(iterations))
+                salt = base64.b64decode(salt_b64, validate=True)
+                self.assertEqual(16, len(salt))
+                stored_b64, server_b64 = parts[2].split(":")
+                salted = hashlib.pbkdf2_hmac(
+                    "sha256", password.encode("utf-8"), salt, 4096)
+                stored = hashlib.sha256(
+                    hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+                ).digest()
+                server = hmac.new(
+                    salted, b"Server Key", hashlib.sha256).digest()
+                self.assertEqual(stored, base64.b64decode(stored_b64))
+                self.assertEqual(server, base64.b64decode(server_b64))
+                self.assertNotEqual(verifier,
+                    json.loads(base64.b64decode(run().stdout.strip()))["SCRAM_VERIFIER"])
+
+                sql = (REPO / "scripts" / "postgres" / filename).read_text()
+                self.assertIn("CREATE TEMP TABLE pg_temp.comuni_private_input", sql)
+                self.assertIn(
+                    "FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py "
+                    + operation + "'", sql)
+                self.assertIn("ON COMMIT DROP", sql)
+                self.assertIn("FROM pg_temp.comuni_private_input", sql)
+                self.assertNotIn(":'" + old_variable + "'", sql)
+                self.assertNotIn("\\gexec", sql)
+                self.assertIn("NOINHERIT", sql)
+                self.assertIn("NOCREATEROLE", sql)
+
+    def test_role_password_copy_denies_weak_empty_unicode_and_unsupported(self):
+        cases = (
+            ("runtime-role", "RUNTIME_DB_PASSWORD",
+             ["tiny", "", "unicode-pass-è-2026-11-18-" * 3,
+              "x" * 1100]),
+            ("platform-role", "PLATFORM_READ_DB_PASSWORD",
+             ["tiny", "", "unicode-pass-è-2026-11-18-" * 3,
+              "x" * 1100]),
+        )
+        for operation, key, invalid in cases:
+            for password in [None] + invalid:
+                with self.subTest(operation=operation, password_present=password is not None):
+                    env = os.environ.copy()
+                    env.pop("RUNTIME_DB_PASSWORD", None)
+                    env.pop("PLATFORM_READ_DB_PASSWORD", None)
+                    if password is not None:
+                        env[key] = password
+                    result = subprocess.run(
+                        [sys.executable, str(SCRIPT), operation], env=env,
+                        cwd=REPO, capture_output=True, text=True, timeout=10,
+                        check=False)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual("", result.stdout)
+                    self.assertEqual(
+                        "Private input transport rejected", result.stderr.strip())
+                    self.assertNotIn("Traceback", result.stderr)
+
     def test_sql_cannot_use_inline_psql_secret_literals(self):
         sql = (REPO / "scripts/postgres" /
                "stage-emergency-admin-replacement.sql").read_text(encoding="utf-8")
