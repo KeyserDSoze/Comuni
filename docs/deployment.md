@@ -242,7 +242,7 @@ Preparare nel runner, **senza stampare valori in command line/history o issue**,
 
 Eseguire con variabili già in environment, senza `set -x`, `psql -a` o `psql -e`:
 ```bash
-psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<path-CA-attendibile>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-organization.sql
 ```
 Le credenziali `PGPASSWORD` arrivano dal vault/runner protetto, non da GitHub o argomenti CLI. **Exit non zero = stop immediato**: non ritentare con UUID/nome diversi senza nuovo change. Un retry con **stesso UUID/nome** è no-op soltanto quando la riga ha audit di provisioning coerente e la feature `protocol` esiste; non riattiva un Comune sospeso, né cambia moduli o utenti già gestiti. Il lock advisory per UUID serializza chiamate concorrenti. In caso di UUID già usato con nome diverso o riga legacy senza audit, aprire un incident/change: non usare UPDATE correttivi automatici.
