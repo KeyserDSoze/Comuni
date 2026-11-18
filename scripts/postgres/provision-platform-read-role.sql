@@ -1,56 +1,78 @@
 \set ON_ERROR_STOP on
 
--- Run as schema owner ONLY after migrations including inventory view 0012.
--- Separate platform inventory principal: NEVER reuse municipal runtime role.
--- Password arrives from protected runner environment, not CLI or git.
-\getenv platform_password PLATFORM_READ_DB_PASSWORD
-\if :{?platform_password}
-\else
-    \echo 'Missing PLATFORM_READ_DB_PASSWORD: refusing to provision platform role.'
-    DO $$ BEGIN RAISE EXCEPTION 'Platform provisioning refused'; END $$;
-\endif
+-- Owner-only offline role password provisioning (#91, ADR 0075).
+-- Requires checkout root as cwd, private runner, Python3. Never echo input.
+-- The client generates a SCRAM verifier and only that verifier is sent over
+-- COPY STDIN. It can still be exposed to pgAudit/DDL extensions and must be
+-- treated as sensitive. No production use before external logging review.
+BEGIN;
 
--- Reject an empty or trivially weak secret; no secret printed.
-SELECT (length(:'platform_password') >= 32)::int AS strong_password
-\gset
-\if :strong_password
-\else
-    DO $ BEGIN RAISE EXCEPTION 'Platform role password too short'; END $;
-\endif
-
-SELECT format(
-    'CREATE ROLE comuni_platform_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
-    :'platform_password'
-)
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'comuni_platform_reader')
-\gexec
-
-DO $guard$
+DO $role_owner$
 BEGIN
+    IF current_user <> (
+        SELECT pg_get_userbyid(relowner)
+        FROM pg_class WHERE oid = 'platform.platform_organization_inventory'::regclass
+    ) THEN
+        RAISE EXCEPTION 'Restricted role provisioning requires schema owner';
+    END IF;
+END
+$role_owner$;
+
+CREATE TEMP TABLE pg_temp.comuni_private_input (payload text NOT NULL)
+ON COMMIT DROP;
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py platform-role' WITH (FORMAT csv)
+
+DO $role_password$
+DECLARE
+    v_payload jsonb;
+    v_verifier text;
+BEGIN
+    IF (SELECT count(*) FROM pg_temp.comuni_private_input) <> 1 THEN
+        RAISE EXCEPTION 'Invalid private SCRAM verifier envelope';
+    END IF;
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb
+      INTO v_payload FROM pg_temp.comuni_private_input;
+    v_verifier := v_payload ->> 'SCRAM_VERIFIER';
+    IF v_verifier IS NULL OR length(v_verifier) <> 133
+        OR left(v_verifier, 19) <> 'SCRAM-SHA-256$4096:' THEN
+        RAISE EXCEPTION 'Invalid private SCRAM verifier';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='comuni_platform_reader') THEN
+        EXECUTE format(
+            'CREATE ROLE comuni_platform_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            v_verifier);
+    END IF;
+
     IF EXISTS (
         SELECT 1 FROM pg_roles
-        WHERE rolname = 'comuni_platform_reader'
-          AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+        WHERE rolname='comuni_platform_reader' AND (
+            rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication
+            OR rolbypassrls OR rolinherit OR NOT rolcanlogin)
     ) THEN
-        RAISE EXCEPTION 'Platform read principal has elevated attributes';
+        RAISE EXCEPTION 'Restricted SQL principal has forbidden attributes';
     END IF;
     IF EXISTS (
         SELECT 1 FROM pg_auth_members
-        WHERE member = (SELECT oid FROM pg_roles WHERE rolname = 'comuni_platform_reader')
+        WHERE member=(SELECT oid FROM pg_roles WHERE rolname='comuni_platform_reader')
     ) THEN
-        RAISE EXCEPTION 'Platform read principal must not be member of any role';
+        RAISE EXCEPTION 'Restricted SQL principal cannot inherit other roles';
     END IF;
+
+    -- Dynamic DDL receives a salted SCRAM verifier, not a plaintext password.
+    -- The verifier itself may be logged by DDL extensions and is sensitive.
+    EXECUTE format(
+        'ALTER ROLE comuni_platform_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+        v_verifier);
 END
-$guard$;
+$role_password$;
 
-SELECT format(
-    'ALTER ROLE comuni_platform_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
-    :'platform_password'
-)
-\gexec
-
-SELECT format('GRANT CONNECT ON DATABASE %I TO comuni_platform_reader', current_database())
-\gexec
+DO $database_grant$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO comuni_platform_reader',
+                   current_database());
+END
+$database_grant$;
 
 REVOKE ALL ON SCHEMA platform, protocol FROM comuni_platform_reader;
 REVOKE ALL ON ALL TABLES IN SCHEMA platform, protocol FROM comuni_platform_reader;
@@ -73,3 +95,5 @@ GRANT EXECUTE ON FUNCTION platform.active_platform_operator_id(text,text)
 GRANT INSERT (id, actor_subject, action, resource_type, resource_id,
               correlation_id, occurred_at)
     ON TABLE platform.platform_operator_audit_events TO comuni_platform_reader;
+
+COMMIT;
