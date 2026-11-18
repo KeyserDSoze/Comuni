@@ -1,0 +1,23 @@
+# ADR 0085 — Provisioning legacy owner-only: input client-side COPY privato
+
+- Data: 2026-11-18.
+- Stato: **Accepted esclusivamente per test sintetici offline**; non autorizza onboarding PA reale né la riabilitazione di una procedura legacy.
+- Issue: #101, sotto-incremento P0 di #86; rettifica il trasporto dell'ADR 0026 (#32), distinto dalla registrazione #100/ADR 0084.
+- Riferimenti PostgreSQL 17: https://www.postgresql.org/docs/17/app-psql.html, https://www.postgresql.org/docs/17/sql-copy.html, https://www.postgresql.org/docs/17/runtime-config-logging.html.
+
+## Problema
+
+`scripts/postgres/provision-organization.sql` trasmetteva UUID, nome Comune, change ticket e reviewer in `set_config(..., :'provision_*', true)`. Il quoting lato `psql` evita injection, ma i **literal dello statement SQL** sono osservabili dal server con `log_statement=all` e da eventuali strumenti SQL audit/error-log. `psql -q` non redige gli statement lato server. La registrazione `register-organization.sql` (#100) è un'altra procedura e il suo hardening non protegge il provisioning legacy.
+
+## Decisione, senza modifiche al lifecycle
+
+1. Le quattro variabili `COMUNI_PROVISION_ORGANIZATION_ID`, `COMUNI_PROVISION_ORGANIZATION_NAME`, `COMUNI_PROVISION_CHANGE_TICKET`, `COMUNI_PROVISION_APPROVER` restano controllate per presenza nel client tramite `psql \\getenv`. Nessun input è concatenato in literal SQL.
+2. L'helper locale statico `python3 scripts/postgres/stream-private-input.py provision-organization` ha allowlist **esatta** delle quattro variabili, limite 1024 byte UTF-8 per campo e 8192 byte di busta JSON, rifiuta campi assenti/vuoti/troppo grandi con errore fisso senza stdout/traceback, non inoltra altre variabili di ambiente. Emette una sola riga `base64(JSON)`, mai da eseguire singolarmente in un terminale.
+3. All'interno di `BEGIN/COMMIT`, `CREATE TEMP TABLE pg_temp.comuni_private_input(payload text NOT NULL) ON COMMIT DROP`; `\\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py provision-organization' WITH (FORMAT csv)` statico **lato client**; query SQL statica `convert_from(decode(payload,'base64'),'UTF8')::jsonb`, estrazione delle quattro chiavi e `set_config(...,true)`, seguita da `\\gset` senza output. La TEMP e le GUC transaction-local non sopravvivono al commit o rollback.
+4. Il blocco `DO $provision$` esistente rimane **byte-per-byte invariato**: schema-owner delle tre tabelle, validazioni UUID/nome/ticket/reviewer, advisory lock, anti-adoption, audit append-only `platform.organization.created` atomico, modulo `protocol` disabilitato, membership zero, idempotenza/serializzazione e runtime denied. Nessun nuovo endpoint, migration, grant, schema o cambio di identity/tenant. **Importante:** la semantica legacy conserva l'attivazione implicita della riga `is_activated=TRUE` via default DB; *non* equivale al percorso pending `register-organization.sql`, che deve essere preferito nelle future analisi di onboarding. Non cambiare stato retroattivamente in questo fix del trasporto.
+5. TDD RED → GREEN direttamente su `main`: Python stdlib impone helper allowlist, singola busta, no echo e input invalidi/expansion over-cap; xUnit/PostgreSQL 17 verifica `psql` dalla root trusted, canary sintetici **nome/ticket/reviewer**, `PGOPTIONS=-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1`, veri `docker logs`, presenza di `statement: COPY` e assenza canary nel testo degli statement. In CI log assenti = failure; non pubblicare output grezzi. Suite 7/7 (backend/PostgreSQL, React/Playwright, Terraform/Python, SCA, CodeQL C#/JS, Docker) sullo **stesso SHA HEAD finale** per completare #101.
+6. Esecuzione ammessa solo in ambienti sintetici/runner privati da root di checkout trusted con owner DB e TLS VerifyFull: `psql -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-organization.sql`. Vietati `psql -a/-e`, `set -x`, log di env/pipe e valori in argv/issue. Non invocare il programma Python separatamente.
+
+## Limiti e dipendenze
+
+**Base64 non cifra e non redige:** il payload è recuperabile nel canale COPY, TEMP, proxy, errore DB, APM, pgAudit/Azure/SIEM, backup o dump; il test protegge solo i **literal nello statement server**. Non verifica issuer/id del Comune, mandato, approvazione, titolarità del reviewer, identità reale, RGPD, logging Azure, retention e gestione chiavi. #86 resta aperta per residui, review reale Security/Privacy e SIEM; #84 per MFA/identity proof/change approval, #49 per TLS, #92 per pgAudit. Questa modifica non rende utilizzabile con dati reali la procedura legacy né sostituisce il nuovo percorso pending #100/ADR 0084.
