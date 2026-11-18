@@ -1,0 +1,22 @@
+# ADR 0084 — Registrazione owner-only dei Comuni con input tramite COPY privato
+
+- Data: 2026-11-18.
+- Stato: **Accepted solo per test sintetici offline**; non autorizza l'onboarding di Comuni reali.
+- Issue: #100, slice P0 di #86; aggiorna il trasporto descritto in ADR 0037 e segue ADR 0073/0083.
+- Riferimenti PostgreSQL 17: https://www.postgresql.org/docs/17/app-psql.html; https://www.postgresql.org/docs/17/sql-copy.html; https://www.postgresql.org/docs/17/runtime-config-logging.html.
+
+## Minaccia e perimetro
+
+Lo script originale `scripts/postgres/register-organization.sql` usava `set_config(..., :'register_*', true)`: `psql` quotava correttamente i valori e non li stampava intenzionalmente, ma il server PostgreSQL riceveva **UUID, denominazione, ticket e reviewer come literal SQL**. `log_statement=all`, pgAudit, error statement log e pipeline SIEM potevano conservare quei riferimenti. Non disattivare il logging amministrativo per mascherarli.
+
+## Decisione circoscritta a #100
+
+1. I soli input di registrazione restano `COMUNI_REGISTER_ORGANIZATION_ID`, `COMUNI_REGISTER_ORGANIZATION_NAME`, `COMUNI_REGISTER_CHANGE_TICKET` e `COMUNI_REGISTER_APPROVER`. `psql \\getenv` verifica lato client la presenza, senza interpolarli come SQL literal. L'helper `python3 scripts/postgres/stream-private-input.py register-organization` ha una allowlist fissa di **esattamente quattro** variabili, rifiuta input assenti, vuoti e >1024 byte/campo e buste >8192 byte, produce una sola riga base64(JSON) e fallisce con messaggio costante, senza echo di valori, traceback o argomenti variabili.
+2. Prima del preesistente `DO $register$`, nella **stessa transazione** si crea `CREATE TEMP TABLE pg_temp.comuni_private_input(payload text NOT NULL) ON COMMIT DROP`. Il comando statico client-side `\\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py register-organization' WITH (FORMAT csv)` trasporta la riga verso `COPY FROM STDIN`. Una query SQL staticamente dichiarata legge `convert_from(decode(payload,'base64'),'UTF8')::jsonb`, estrae le quattro chiavi e chiama `set_config(..., true)`, seguita da `\\gset` senza output. Le variabili PostgreSQL sono limitate alla transazione e la TEMP scompare al commit/rollback.
+3. **Non si modifica una sola istruzione di `DO $register$`**: owner delle tre tabelle, UUID non-zero, validazione nome e riferimenti, advisory lock per organization, anti-adoption, rigetto collisioni e conflitti, insert atomici di organization `created`/protocollo disabilitato/audit append-only, nessuna membership, idempotenza e denied runtime rimangono invariati. Nessun nuovo endpoint, schema, migrazione, grant, ruolo, frontend o risorsa Azure.
+4. Esecuzione ammessa **solo per ambienti sintetici** da root di checkout fidato: `psql -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/register-organization.sql`, account schema owner, connessione privata e TLS VerifyFull, approvazioni verificate esternamente. Non eseguire l'helper da solo (stdout contiene dati reversibili); vietati `psql -a/-e`, shell `set -x`, env dump, stdout catturato su log pubblici o dati comunali reali nei test.
+5. **TDD RED→GREEN su `main`**: Python stdlib verifica allowlist, formato una riga base64(JSON), input invalidi senza eco e assenza interpolazioni; xUnit/PostgreSQL 17 registra con canary sintetici per nome, ticket e reviewer tramite `psql` e `PGOPTIONS=-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1`. Il test interroga i veri `docker logs` di PostgreSQL 17, richiede `statement: COPY` e assenza di tutti i canary senza stampare log grezzi; in CI l'impossibilità di leggerli è un errore. Restano regressioni per pending/403, nome con apice, validazioni, retry, sospensione, concorrenti, runtime deny, isolamento, Playwright, Terraform, CodeQL C#/JS, SCA, Docker. Chiusura #100 solo con 7/7 job verdi **sullo stesso SHA finale**.
+
+## Limitazioni e dipendenze
+
+**Base64 NON è crittografia o anonimizzazione**: il contenuto è reversibile nella pipe COPY, nella TEMP, nei processi e nei dump; proxy, audit SQL esteso, error context, APM, Azure/pgAudit/SIEM/retention non sono esclusi dal test sul solo statement. Non esiste controllo automatico del mandato istituzionale o dell'indipendenza del reviewer. Prima di Comuni reali sono bloccanti #86 (inventario e Security/Privacy review live), #84 (identity proof/MFA/change approval), #49 (TLS VerifyFull) e #92 (pgAudit Azure). L'epica #5 e il workflow di provisioning #6 restano aperti.
