@@ -26,3 +26,7 @@ Il bootstrap del primo Admin (#31) e l'enrollment di un secondo Admin (#80) sono
 Per un **compromesso dell'unico Admin**, la procedura rifiuta la revoca; è necessario un piano di emergenza esterno: sospendere l'organization con l'attuale procedura owner-only (che nega subito nuove richieste), coordinare revoca IdP/token e nuovo Admin verificato con due operatori, poi riesaminare i criteri di riattivazione. Non bypassare il controllo ultimo Admin né abilitare automaticamente servizi. L'attuale enrollment #80 rifiuta un roster che contiene Admin inattivi; l'eventuale sostituzione post-revoca richiede un successivo processo di recovery esplicitamente progettato e non deve essere forzata tramite SQL runtime.
 
 Niente produzione reale, nuove credenziali, permessi Azure, Terraform apply o modifica dell'IdP in questa slice. La copertura audit generale, attuazione procedura a quattro occhi, monitoring/retention e controllo legale rimangono nelle #2/#3/#4/#5/#10.
+
+## Emendamento al trasporto input (#96, ADR 0080)
+
+La descrizione storica del trasporto con psql quoted literals riflette l'implementazione originale. L'attuale revoke-admin.sql usa un canale client-side \copy a tabella temporanea con allowlist dei sei COMUNI_REVOKE_ADMIN_* e non inserisce issuer/sub nel testo delle statement SQL. La policy di revoca qui definita (owner, organizzazione operativa, ultimo Admin, lock, audit, retry e concorrenza) è invariata. Le verifiche su IdP reale, payload COPY, pgAudit Azure e pipeline SIEM restano aperte in #84/#86/#92.

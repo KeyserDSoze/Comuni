@@ -21,3 +21,7 @@ Il bootstrap iniziale `scripts/postgres/bootstrap-initial-admin.sql` invocava `p
 ## Limiti e go-live
 
 L'assenza di un subject canary nei log *statement* del PostgreSQL 17 disposable non equivale a protezione del contenuto del protocollo COPY, dei log errori, di pgAudit in Azure, APM, SIEM, backup, proxy, trace processi o memory dump. Anche se la suite e la CI sono verdi, la **#86 resta aperta** per revoca, lifecycle, platform operator, onboarding e verifica reale dei log/retention/accessi. La #84 richiede IdP, MFA, verifica in persona e autorizzazione a quattro occhi reale; la #92 tratta il logging pgAudit/SCRAM e la #49 TLS VerifyFull del deployment. Non usare su dati o identità reali prima della revisione Security/Privacy e dei change indipendenti; lasciare bloccato il bootstrap in caso di dubbio.
+
+## Estensione distinta alla revoca (#96, ADR 0080)
+
+L'ADR 0080 riusa lo stesso trasporto client-side COPY per la revoca di un Admin, preservando un insieme diverso di invarianti (sopravvivenza di almeno un altro Admin, disattivazione e audit atomico). Non modifica i controlli del primo bootstrap. L'operatività con persone reali resta subordinata alle verifiche #84/#86 e Azure/pgAudit.
