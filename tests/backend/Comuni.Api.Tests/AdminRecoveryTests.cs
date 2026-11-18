@@ -41,6 +41,10 @@ public sealed class AdminRecoveryTests(OidcApiFactory factory) : IClassFixture<O
         var db = new NpgsqlConnectionStringBuilder(connection ?? Owner);
         var start = new ProcessStartInfo("psql")
         {
+            // Owner-only COPY FROM PROGRAM resolves the fixed local helper in
+            // a trusted repository checkout, irrespective of the test host cwd.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(path)!, "..", "..")),
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false
         };
         foreach (var arg in new[] {
