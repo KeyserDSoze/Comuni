@@ -18,3 +18,7 @@ Il comando read-only `scripts/azure/check-legacy-postgres-handoff-plan.py` verif
 ## Limiti e prerequisiti
 
 Questo gate prova **solo coerenza sintattica di metadata pianificati**. Non valida un handshake TLS reale, catena root CA, esistenza del secret pinato, valore della stringa, credenziali SQL, autenticazione del server in VNet, clock/revocation, revisioni inactive, readiness, promotion/rollback o approvazioni indipendenti. Per il go-live servono review live degli owner e Security/Privacy, prove con due Comuni sintetici, CA e SAN, rete privata, gestione dei precedenti State snapshot e rotazione coordinata Key Vault/ACA. **#49/#6/#19** restano aperte. Non è stato eseguito alcun accesso Azure né sono stati utilizzati segreti o Comuni reali.
+
+## Emendamento #108 / ADR 0091 — non fidarsi di snapshot Terraform discordanti
+
+L'FQDN managed `planned_values` di ADR 0090 ora deve concordare anche con `resource_changes["azurerm_postgresql_flexible_server.main"]` `no-op` su `name/fqdn`. Una corrispondenza della sola env `RuntimePostgres__ExpectedHost` con il blocco `planned_values` non è più sufficiente; il gate controlla anche la coerenza dei campi security-relevant dell'ACA tra gli stessi due blocchi. Test Python RED→GREEN e motivazione in ADR 0091; la verifica resta offline, non un handshake TLS reale.
