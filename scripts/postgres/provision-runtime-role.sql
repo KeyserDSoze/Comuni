@@ -1,52 +1,78 @@
 \set ON_ERROR_STOP on
 
--- Run as the migration/schema owner *after* EF migrations.
--- The runtime password comes from the runner environment, not a SQL literal in git.
-\getenv runtime_password RUNTIME_DB_PASSWORD
-\if :{?runtime_password}
-\else
-    \echo 'Missing RUNTIME_DB_PASSWORD: refusing to provision runtime role.'
-    DO $ BEGIN RAISE EXCEPTION 'Provisioning refused by safety guard'; END $;
-\endif
+-- Owner-only offline role password provisioning (#91, ADR 0075).
+-- Requires checkout root as cwd, private runner, Python3. Never echo input.
+-- The client generates a SCRAM verifier and only that verifier is sent over
+-- COPY STDIN. It can still be exposed to pgAudit/DDL extensions and must be
+-- treated as sensitive. No production use before external logging review.
+BEGIN;
 
--- psql's quoted variable is a SQL literal, escaped before format(%L).
--- \gexec sends the generated CREATE statement only when the role is absent.
-SELECT format(
-    'CREATE ROLE comuni_app_runtime LOGIN NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
-    :'runtime_password'
-)
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'comuni_app_runtime')
-\gexec
-
--- Fail closed if a pre-existing role has elevated capabilities or inherited role grants.
--- In particular, a member of an owner/admin role would bypass this table allowlist.
-DO $$
+DO $role_owner$
 BEGIN
+    IF current_user <> (
+        SELECT pg_get_userbyid(relowner)
+        FROM pg_class WHERE oid = 'platform.organizations'::regclass
+    ) THEN
+        RAISE EXCEPTION 'Restricted role provisioning requires schema owner';
+    END IF;
+END
+$role_owner$;
+
+CREATE TEMP TABLE pg_temp.comuni_private_input (payload text NOT NULL)
+ON COMMIT DROP;
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py runtime-role' WITH (FORMAT csv)
+
+DO $role_password$
+DECLARE
+    v_payload jsonb;
+    v_verifier text;
+BEGIN
+    IF (SELECT count(*) FROM pg_temp.comuni_private_input) <> 1 THEN
+        RAISE EXCEPTION 'Invalid private SCRAM verifier envelope';
+    END IF;
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb
+      INTO v_payload FROM pg_temp.comuni_private_input;
+    v_verifier := v_payload ->> 'SCRAM_VERIFIER';
+    IF v_verifier IS NULL OR length(v_verifier) <> 133
+        OR left(v_verifier, 19) <> 'SCRAM-SHA-256$4096:' THEN
+        RAISE EXCEPTION 'Invalid private SCRAM verifier';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='comuni_app_runtime') THEN
+        EXECUTE format(
+            'CREATE ROLE comuni_app_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            v_verifier);
+    END IF;
+
     IF EXISTS (
         SELECT 1 FROM pg_roles
-        WHERE rolname = 'comuni_app_runtime'
-          AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+        WHERE rolname='comuni_app_runtime' AND (
+            rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication
+            OR rolbypassrls OR rolinherit OR NOT rolcanlogin)
     ) THEN
-        RAISE EXCEPTION 'comuni_app_runtime has forbidden elevated role attributes';
+        RAISE EXCEPTION 'Restricted SQL principal has forbidden attributes';
     END IF;
     IF EXISTS (
         SELECT 1 FROM pg_auth_members
-        WHERE member = (SELECT oid FROM pg_roles WHERE rolname = 'comuni_app_runtime')
+        WHERE member=(SELECT oid FROM pg_roles WHERE rolname='comuni_app_runtime')
     ) THEN
-        RAISE EXCEPTION 'comuni_app_runtime must not inherit memberships in other roles';
+        RAISE EXCEPTION 'Restricted SQL principal cannot inherit other roles';
     END IF;
+
+    -- Dynamic DDL receives a salted SCRAM verifier, not a plaintext password.
+    -- The verifier itself may be logged by DDL extensions and is sensitive.
+    EXECUTE format(
+        'ALTER ROLE comuni_app_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+        v_verifier);
 END
-$$;
+$role_password$;
 
--- Rotation is intentional. No secret is printed by normal psql execution.
-SELECT format(
-    'ALTER ROLE comuni_app_runtime LOGIN NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
-    :'runtime_password'
-)
-\gexec
-
-SELECT format('GRANT CONNECT ON DATABASE %I TO comuni_app_runtime', current_database())
-\gexec
+DO $database_grant$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO comuni_app_runtime',
+                   current_database());
+END
+$database_grant$;
 
 -- Never grant schema CREATE or DDL ownership to the application runtime.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -94,3 +120,5 @@ GRANT EXECUTE ON FUNCTION platform.verified_tenant_id() TO comuni_app_runtime;
 -- on platform.platform_operators: a SQL injection cannot list operator roster.
 GRANT EXECUTE ON FUNCTION platform.is_active_platform_operator(text, text)
     TO comuni_app_runtime;
+
+COMMIT;
