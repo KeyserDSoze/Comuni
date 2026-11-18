@@ -31,11 +31,15 @@ public sealed class TenantProofRetirementGuardTests
     }
 
     private static async Task<(int ExitCode, string Output)> RetireAsync(
-        string? target, string? successor, string? grace = "300", string? connection = null)
+        string? target, string? successor, string? grace = "300", string? connection = null,
+        bool logStatements = false)
     {
         var database = new NpgsqlConnectionStringBuilder(connection ?? Owner);
         var start = new ProcessStartInfo("psql")
         {
+            // Static client-side COPY resolves only from a trusted checkout root.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(Script())!, "..", "..")),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -47,6 +51,9 @@ public sealed class TenantProofRetirementGuardTests
             "-d", database.Database, "-f", Script()
         }) start.ArgumentList.Add(part);
         start.Environment["PGPASSWORD"] = database.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         void Set(string name, string? value)
         {
             if (value is null) start.Environment.Remove(name);
@@ -210,5 +217,86 @@ public sealed class TenantProofRetirementGuardTests
         Assert.Null((await ReadAsync(from)).Revoked);
         Assert.DoesNotContain(OldKey, result.Output);
         Assert.DoesNotContain(NewKey, result.Output);
+    }
+
+    [Fact]
+    public async Task Retirement_private_copy_transport_does_not_interpolate_metadata()
+    {
+        var sql = await File.ReadAllTextAsync(Script());
+        foreach (var name in new[] { "retire_id", "replacement_id", "grace_secs" })
+            Assert.DoesNotContain(":'" + name + "'", sql);
+        Assert.Contains(
+            "FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py retire-tenant-proof'",
+            sql);
+    }
+
+    [Fact]
+    public async Task Retirement_key_metadata_canaries_do_not_appear_in_real_PostgreSQL_17_statement_logs()
+    {
+        // Only synthetic metadata (never HMAC secrets); no raw server logs
+        // or input markers are printed in failure messages.
+        var target = FreshId();
+        var successor = FreshId();
+        await SeedAsync(target, OldKey);
+        await SeedAsync(successor, NewKey);
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+        var result = await RetireAsync(target, successor, "0", logStatements: true);
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(result.Output.Contains(target, StringComparison.Ordinal)
+                     || result.Output.Contains(successor, StringComparison.Ordinal),
+            "psql emitted synthetic retirement metadata.");
+        Assert.NotNull((await ReadAsync(target)).Revoked);
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        }) dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "PostgreSQL 17 server logs are mandatory in CI.");
+            return;
+        }
+        var ids = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(ids))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "PostgreSQL 17 server logs must be inspectable in CI.");
+            return;
+        }
+        Assert.DoesNotContain('\n', ids);
+
+        using var logs = new Process();
+        logs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, ids })
+            logs.StartInfo.ArgumentList.Add(arg);
+        logs.Start();
+        var stdout = logs.StandardOutput.ReadToEndAsync();
+        var stderr = logs.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await logs.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, logs.ExitCode);
+        var text = await stdout + await stderr;
+        Assert.Contains("statement: COPY", text);
+        Assert.False(text.Contains(target, StringComparison.Ordinal)
+                     || text.Contains(successor, StringComparison.Ordinal),
+            "PostgreSQL statement logging exposed synthetic retirement metadata; raw logs withheld.");
     }
 }
