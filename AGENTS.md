@@ -11,6 +11,7 @@
 9. Azure soltanto; Terraform dichiarativo, identità gestite e Key Vault. Segreti mai committati. Docker Compose è solo per locale.
 10. Modificare documentazione, contratti API, test e codice nello stesso incremento. Segnalare chiaramente le verifiche non eseguite.
 11. Non dichiarare conformità AgID, GDPR, SPID/CIE, ANPR, PagoPA o PDND prima di realizzare e verificare i requisiti pertinenti.
+12. Ogni nuovo script PostgreSQL owner-only che legge input privati deve adottare COPY client-side statico e aggiornare il manifest `docs/security/owner-only-psql-private-input-inventory.json`, il test `tests/infra/test_owner_psql_copy_inventory.py`, gli xUnit pertinenti e l'ADR (ADR 0088). Vietati `psql :'value'`, echo input e bypass audit/privilegi.
 
 ## Comandi
 

@@ -16,6 +16,7 @@
 - Priorità: **P0** sicurezza/fondazione bloccante; **P1** infrastruttura/admin; **P2** domini funzionali/integrations.
 - Non usare la chiusura per nascondere scope incompleto; separare lavoro distinto in nuove issue.
 - La definizione di Done include xUnit, PostgreSQL, Playwright quando applicabile, test CI, ADR/docs aggiornati e verifica delle API di sicurezza.
+- Per nuovo SQL owner-only con input privati aggiornare in RED il test inventory `tests/infra/test_owner_psql_copy_inventory.py`, il manifest `docs/security/owner-only-psql-private-input-inventory.json`, l'allowlist helper e le regressioni xUnit (ADR 0088 / #105); preservare lo scope multi-organization.
 
 ## Sotto-issue
 
