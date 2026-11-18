@@ -28,3 +28,7 @@ Dopo la #43 la registrazione owner creava un Comune con `is_suspended=false` e `
 - Inserire l'esatto `created/active/suspended` nell'inventario globale senza rivedere privacy, mapping API/SPA e test: ridondante per la presente slice; il booleano compatibility comunica solamente indisponibilità operativa.
 
 Questa implementazione è **offline e testata con dati sintetici**. Non è una verifica dell'identità istituzionale, della conformità GDPR/AgID, di MFA/IdP reali o di un deployment Azure; non completa il catalogo moduli, il workflow amministrativo Superadmin né la gestione delle dipendenze. Le epiche #2/#3/#4/#5/#10, la #19 e la #38 restano aperte.
+
+## Emendamento sul canale di input dell'attivazione (#99 / ADR 0083)
+
+La descrizione precedente di `psql :'var'` e `SET LOCAL` riflette la **versione iniziale** della procedura, non il trasporto attuale. L'owner-only `activate-organization.sql` legge ora i tre `COMUNI_ACTIVATE_*` da `\copy` locale in TEMP, evitando la presenza di UUID/ticket/reviewer come literal SQL. Nessuno dei controlli created → active, primo Admin OIDC, moduli disabilitati, row lock, audit atomico, idempotenza o isolamento è cambiato. Base64 è reversibile: la review del payload COPY, IdP, Azure/pgAudit/SIEM, retention e privacy rimane aperta (#86/#84/#92).
