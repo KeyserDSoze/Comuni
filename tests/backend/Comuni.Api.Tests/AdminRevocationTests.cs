@@ -63,7 +63,8 @@ public sealed class AdminRevocationTests(OidcApiFactory factory) : IClassFixture
     private static async Task<(int Code, string Output)> Revoke(Guid org,
         string? subject = Second, string? issuer = Issuer,
         string? ticket = Ticket, string? reviewer = "independent-reviewer",
-        string? reason = Reason, string? connection = null)
+        string? reason = Reason, string? connection = null,
+        bool logStatements = false)
     {
         var script = Path.Combine(Root(), "scripts/postgres/revoke-admin.sql");
         Assert.True(File.Exists(script), "RED: owner-only Admin revocation script missing.");
@@ -78,6 +79,9 @@ public sealed class AdminRevocationTests(OidcApiFactory factory) : IClassFixture
             "-U", db.Username, "-d", db.Database, "-f", script
         }) start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = db.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         void Set(string key, string? value)
         {
             if (value is null) start.Environment.Remove(key);
@@ -284,4 +288,97 @@ public sealed class AdminRevocationTests(OidcApiFactory factory) : IClassFixture
             subject: Second, organizationId: other.ToString("D")));
         Assert.Equal(HttpStatusCode.OK, (await otherTenant.GetAsync("/api/v1/context")).StatusCode);
     }
+    [Fact]
+    public async Task Revocation_script_must_not_inline_issuer_or_subject_as_SQL_literals()
+    {
+        var source = await File.ReadAllTextAsync(
+            Path.Combine(Root(), "scripts", "postgres", "revoke-admin.sql"));
+        Assert.DoesNotContain(":'revoke_subject'", source);
+        Assert.DoesNotContain(":'revoke_issuer'", source);
+    }
+
+    [Fact]
+    public async Task Revocation_issuer_and_subject_are_absent_from_real_Postgres_statement_logs()
+    {
+        // Distinct canaries per invocation; never print logs or the canaries on
+        // failure, even when logging is deliberately maximized in PostgreSQL.
+        var org = await Seed(admins: [First, Second]);
+        var subject = "synthetic-revoke-private-" + Guid.NewGuid().ToString("N");
+        var issuer = "https://revoke-" + Guid.NewGuid().ToString("N") + ".example.test";
+        await using (var db = new NpgsqlConnection(Owner))
+        {
+            await db.OpenAsync();
+            await using var update = new NpgsqlCommand("""
+                UPDATE platform.organization_memberships
+                SET subject=@subject, identity_issuer=@issuer
+                WHERE organization_id=@org AND role='Admin' AND subject=@original
+                """, db);
+            update.Parameters.AddWithValue("org", org);
+            update.Parameters.AddWithValue("subject", subject);
+            update.Parameters.AddWithValue("issuer", issuer);
+            update.Parameters.AddWithValue("original", Second);
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
+        }
+
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+        var result = await Revoke(org, subject: subject, issuer: issuer, logStatements: true);
+        Assert.Equal(0, result.Code);
+        Assert.False(result.Output.Contains(subject, StringComparison.Ordinal)
+                     || result.Output.Contains(issuer, StringComparison.Ordinal),
+            "psql output included synthetic private identity.");
+        Assert.Equal((1L, 1L, 1L), await State(org));
+
+        using var ps = new Process();
+        ps.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        })
+            ps.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            ps.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI must expose PostgreSQL 17 server logs.");
+            return;
+        }
+
+        var ids = (await ps.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await ps.StandardError.ReadToEndAsync();
+        await ps.WaitForExitAsync();
+        if (ps.ExitCode != 0 || string.IsNullOrWhiteSpace(ids))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI PostgreSQL server log is mandatory.");
+            return;
+        }
+        Assert.DoesNotContain('\n', ids);
+
+        using var logs = new Process();
+        logs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, ids })
+            logs.StartInfo.ArgumentList.Add(arg);
+        logs.Start();
+        var stdout = logs.StandardOutput.ReadToEndAsync();
+        var stderr = logs.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await logs.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, logs.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(subject, StringComparison.Ordinal)
+                     || serverLog.Contains(issuer, StringComparison.Ordinal),
+            "PostgreSQL statement log contained private synthetic OIDC identity; raw logs withheld.");
+    }
+
 }
