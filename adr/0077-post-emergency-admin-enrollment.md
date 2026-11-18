@@ -25,3 +25,7 @@ Il primo commit RED #87 aggiunge `PostEmergencyAdminEnrollmentTests.cs` con Post
 ## Limiti di sicurezza e rilascio
 
 Un `db-owner` compromesso può falsificare righe o audit e non è sostituito dalla verifica del workflow; hash issuer/sub sono pseudonimi, non anonimi. Prima di produzione: verificare realmente identità/MFA/revisori e incident approval (#84), eliminare rischi dei literal nei server log di issuer/subject nel *restante* percorso enrollment (#86), policy retention/audit (#4), configurazione pgAudit/Azure e autorizzazione esplicita dell'operatore. La #92 sul leak di verificatori SCRAM in configurazioni reali resta indipendente. In caso di dubbio sospendere il Comune e bloccare il change, non disabilitare i guard o ripristinare vecchie identità.
+
+## Nota sul trasporto degli identificativi (#94, ADR 0078)
+
+La politica di trust emergency/post-reattivazione di questo ADR è invariata. Il suo script owner-only di enrollment ora importa il binding issuer/sub tramite `\\copy` privato in TEMP table e non tramite `psql :'add_admin_*'`, per mitigare i literal nei log statement PostgreSQL. L'ADR 0078 documenta il perimetro dell'intervento e i limiti: non si assume protezione dei payload COPY in Azure/SIEM, né verifiche IdP o reviewer reali. Restano aperte #84 e #86.
