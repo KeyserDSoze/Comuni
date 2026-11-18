@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 
--- OWNER-ONLY OFFLINE additional OIDC Admin enrollment (#80/#83; ADR 0069/0071).
+-- OWNER-ONLY OFFLINE additional OIDC Admin enrollment (#80/#83/#87; ADR 0069/0071/0077).
 -- The existing first Admin is NEVER disabled, transferred or replaced.
 -- Independent human issuer+sub verification and change approval are required
 -- before invoking this script with a private schema-owner connection.
@@ -58,9 +58,17 @@ DECLARE
     v_org uuid;
     v_activated boolean;
     v_suspended boolean;
-    v_admin_count bigint;
     v_valid_count bigint;
-    v_attested_revoked_count bigint;
+    v_admin record;
+    v_revocation_count bigint;
+    v_revocation_action text;
+    v_revocation_correlation text;
+    v_revocation_actor text;
+    v_revocation_time timestamptz;
+    v_stage_count bigint;
+    v_lifecycle_action text;
+    v_lifecycle_time timestamptz;
+    v_lifecycle_actor text;
     v_existing_issuer text;
     v_existing_active boolean;
     v_matching_audits bigint;
@@ -111,35 +119,163 @@ BEGIN
         RAISE EXCEPTION 'Only an operational organization can add an Admin';
     END IF;
 
-    -- Inactive Admins are historical only if their owner-only revocation
-    -- is independently represented by exactly one matching append-only audit.
-    -- No unsigned disable, legacy issuer, or unhealthy active Admin is tolerated.
-    SELECT count(*),
-           count(*) FILTER (
-               WHERE m.is_active = TRUE AND m.identity_issuer IS NOT NULL
-                 AND length(m.identity_issuer) <= 512
-                 AND m.identity_issuer ~
-                     '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$'),
-           count(*) FILTER (
-               WHERE m.is_active = FALSE AND m.identity_issuer IS NOT NULL
-                 AND length(m.identity_issuer) <= 512
-                 AND m.identity_issuer ~
-                     '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$'
-                 AND (SELECT count(*) FROM platform.audit_events a
-                      WHERE a.organization_id = v_org
-                        AND a.action = 'platform.membership.admin.revoked'
-                        AND a.resource_type = 'platform.membership'
+    -- All active Admins must remain bound to an OIDC issuer; at least one is
+    -- required before any owner-only enrollment. Never infer identity from JWT
+    -- role claims or from a tenant-supplied selector.
+    SELECT count(*) INTO v_valid_count
+    FROM platform.organization_memberships m
+    WHERE m.organization_id = v_org AND m.role = 'Admin'
+      AND m.is_active = TRUE AND m.identity_issuer IS NOT NULL
+      AND length(m.identity_issuer) <= 512
+      AND m.identity_issuer ~
+          '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$';
+    IF v_valid_count < 1 THEN
+        RAISE EXCEPTION 'An active issuer-bound OIDC Admin is required';
+    END IF;
+
+    -- Every historical Admin is individually checked against exactly ONE
+    -- owner-only revoke audit for its exact org|role|subject|issuer hash.
+    -- A break-glass revoke must additionally be paired atomically with
+    -- the staged, CURRENT active Admin and an independently audited
+    -- reactivation AFTER that incident. Neither record is rewritten.
+    FOR v_admin IN
+        SELECT subject, identity_issuer, is_active
+        FROM platform.organization_memberships
+        WHERE organization_id = v_org AND role = 'Admin'
+    LOOP
+        IF v_admin.identity_issuer IS NULL OR length(v_admin.identity_issuer) > 512
+           OR v_admin.identity_issuer !~
+               '^https://[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(/[-A-Za-z0-9._~/%]*)?$' THEN
+            RAISE EXCEPTION 'Ambiguous historical or active Admin identity';
+        END IF;
+        IF v_admin.is_active = FALSE THEN
+            SELECT count(*) INTO v_revocation_count
+            FROM platform.audit_events a
+            WHERE a.organization_id = v_org
+              AND a.resource_type = 'platform.membership'
+              AND a.resource_id = md5(
+                  v_org::text || '|Admin|' || v_admin.subject || '|' || v_admin.identity_issuer
+              )::uuid
+              AND a.action IN ('platform.membership.admin.revoked',
+                               'platform.membership.admin.emergency.revoked');
+            IF v_revocation_count <> 1 THEN
+                RAISE EXCEPTION 'Historical Admin requires one exact revocation audit';
+            END IF;
+            SELECT action, correlation_id, actor_subject, occurred_at
+              INTO v_revocation_action, v_revocation_correlation,
+                   v_revocation_actor, v_revocation_time
+            FROM platform.audit_events a
+            WHERE a.organization_id = v_org
+              AND a.resource_type = 'platform.membership'
+              AND a.resource_id = md5(
+                  v_org::text || '|Admin|' || v_admin.subject || '|' || v_admin.identity_issuer
+              )::uuid
+              AND a.action IN ('platform.membership.admin.revoked',
+                               'platform.membership.admin.emergency.revoked');
+            IF v_revocation_actor NOT LIKE 'db-owner:%' THEN
+                RAISE EXCEPTION 'Revocation audit must be owner-originated';
+            END IF;
+
+            IF v_revocation_action = 'platform.membership.admin.revoked' THEN
+                IF v_revocation_correlation !~
+                   '^admin-revoke:[A-Za-z0-9][A-Za-z0-9._:/-]{7,109}$' THEN
+                    RAISE EXCEPTION 'Invalid normal Admin revocation audit';
+                END IF;
+            ELSIF v_revocation_action = 'platform.membership.admin.emergency.revoked' THEN
+                IF v_revocation_correlation !~ '^emergency:INC-[A-Za-z0-9-]{8,60}$'
+                   OR (SELECT count(*) FROM platform.audit_events a
+                       WHERE a.organization_id = v_org
+                         AND a.correlation_id = v_revocation_correlation) <> 2 THEN
+                    RAISE EXCEPTION 'Emergency incident audit must be unique and complete';
+                END IF;
+                SELECT count(*) INTO v_stage_count
+                FROM platform.audit_events a
+                JOIN platform.organization_memberships m
+                  ON m.organization_id = v_org AND m.role = 'Admin'
+                 AND m.is_active = TRUE
+                 AND a.resource_id = md5(
+                     v_org::text || '|Admin|' || m.subject || '|' || m.identity_issuer
+                 )::uuid
+                WHERE a.organization_id = v_org
+                  AND a.action = 'platform.membership.admin.emergency.staged'
+                  AND a.correlation_id = v_revocation_correlation
+                  AND a.resource_type = 'platform.membership'
+                  AND a.actor_subject = v_revocation_actor
+                  AND a.occurred_at = v_revocation_time;
+                IF v_stage_count <> 1 OR EXISTS (
+                    SELECT 1 FROM platform.organization_memberships m
+                    WHERE m.organization_id = v_org
+                      AND m.subject = v_admin.subject AND m.role <> 'Admin'
+                ) THEN
+                    RAISE EXCEPTION 'Emergency staged Admin pair or containment is invalid';
+                END IF;
+
+                SELECT action, occurred_at, actor_subject
+                  INTO v_lifecycle_action, v_lifecycle_time, v_lifecycle_actor
+                FROM platform.audit_events
+                WHERE organization_id = v_org
+                  AND resource_type = 'platform.organization'
+                  AND resource_id = v_org
+                  AND action IN ('platform.organization.suspended',
+                                 'platform.organization.reactivated')
+                ORDER BY occurred_at DESC, id DESC LIMIT 1;
+                IF v_lifecycle_action IS DISTINCT FROM 'platform.organization.reactivated'
+                   OR v_lifecycle_time IS NULL
+                   OR v_lifecycle_time < v_revocation_time
+                   OR v_lifecycle_actor NOT LIKE 'db-owner:%' THEN
+                    RAISE EXCEPTION 'Independently audited post-incident reactivation required';
+                END IF;
+            ELSE
+                RAISE EXCEPTION 'Unsupported historical Admin revocation';
+            END IF;
+        END IF;
+    END LOOP;
+
+    -- Fail closed for orphan, forged or duplicate emergency events, including
+    -- events not reachable via a historical membership. Both sides must be
+    -- owner-originated in the same transaction (same occurred_at and actor).
+    IF EXISTS (
+        SELECT 1 FROM platform.audit_events a
+        WHERE a.organization_id = v_org
+          AND a.action IN ('platform.membership.admin.emergency.revoked',
+                           'platform.membership.admin.emergency.staged')
+          AND (
+              a.resource_type <> 'platform.membership'
+              OR a.actor_subject NOT LIKE 'db-owner:%'
+              OR a.correlation_id !~ '^emergency:INC-[A-Za-z0-9-]{8,60}$'
+              OR (SELECT count(*) FROM platform.audit_events e
+                  WHERE e.organization_id = v_org
+                    AND e.correlation_id = a.correlation_id) <> 2
+              OR NOT EXISTS (
+                  SELECT 1 FROM platform.audit_events paired
+                  WHERE paired.organization_id = v_org
+                    AND paired.correlation_id = a.correlation_id
+                    AND paired.resource_type = 'platform.membership'
+                    AND paired.actor_subject = a.actor_subject
+                    AND paired.occurred_at = a.occurred_at
+                    AND paired.action = CASE
+                        WHEN a.action = 'platform.membership.admin.emergency.revoked'
+                          THEN 'platform.membership.admin.emergency.staged'
+                        ELSE 'platform.membership.admin.emergency.revoked' END)
+              OR (a.action = 'platform.membership.admin.emergency.revoked'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM platform.organization_memberships m
+                      WHERE m.organization_id = v_org AND m.role = 'Admin'
+                        AND m.is_active = FALSE
                         AND a.resource_id = md5(
                             v_org::text || '|Admin|' || m.subject || '|' || m.identity_issuer
-                        )::uuid
-                        AND a.correlation_id ~
-                            '^admin-revoke:[A-Za-z0-9][A-Za-z0-9._:/-]{7,109}$'
-                        AND a.actor_subject LIKE 'db-owner:%') = 1)
-      INTO v_admin_count, v_valid_count, v_attested_revoked_count
-      FROM platform.organization_memberships m
-     WHERE m.organization_id = v_org AND m.role = 'Admin';
-    IF v_valid_count < 1 OR v_admin_count <> v_valid_count + v_attested_revoked_count THEN
-        RAISE EXCEPTION 'An active OIDC Admin and fully audited revoked history are required';
+                        )::uuid))
+              OR (a.action = 'platform.membership.admin.emergency.staged'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM platform.organization_memberships m
+                      WHERE m.organization_id = v_org AND m.role = 'Admin'
+                        AND m.is_active = TRUE
+                        AND a.resource_id = md5(
+                            v_org::text || '|Admin|' || m.subject || '|' || m.identity_issuer
+                        )::uuid))
+          )
+    ) THEN
+        RAISE EXCEPTION 'Unmatched or inconsistent emergency audit history';
     END IF;
 
     v_resource_id := md5(v_org::text || '|Admin|' || v_subject || '|' || v_issuer)::uuid;
@@ -166,7 +302,10 @@ BEGIN
           AND ((action = 'platform.membership.admin.initialized'
                 AND correlation_id = 'bootstrap:' || v_ticket)
             OR (action = 'platform.membership.admin.revoked'
-                AND correlation_id = 'admin-revoke:' || v_ticket))
+                AND correlation_id = 'admin-revoke:' || v_ticket)
+            OR (action IN ('platform.membership.admin.emergency.revoked',
+                           'platform.membership.admin.emergency.staged')
+                AND correlation_id = 'emergency:' || v_ticket))
     ) THEN
         RAISE EXCEPTION 'The approval reference belongs to another Admin change';
     END IF;
@@ -194,7 +333,9 @@ BEGIN
           AND resource_id = v_resource_id
           AND action IN ('platform.membership.admin.initialized',
                          'platform.membership.admin.added',
-                         'platform.membership.admin.revoked')
+                         'platform.membership.admin.revoked',
+                         'platform.membership.admin.emergency.revoked',
+                         'platform.membership.admin.emergency.staged')
     ) THEN
         RAISE EXCEPTION 'Unapproved or conflicting subject enrollment';
     END IF;
