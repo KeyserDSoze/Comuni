@@ -61,13 +61,16 @@ public sealed class InitialAdminBootstrapTests
     private static async Task<(int ExitCode, string Output)> BootstrapAsync(
         Guid org, string? issuer = "https://identity.example.test/tenant/v2.0",
         string? subject = "synthetic-first-admin", string? ticket = "CHANGE-2026-00031",
-        string? reviewer = "security-reviewer", string? connectionOverride = null)
+        string? reviewer = "security-reviewer", string? connectionOverride = null,
+        bool logStatements = false)
     {
         var script = ScriptPath;
         Assert.True(File.Exists(script), "Owner-only bootstrap script missing.");
         var db = new NpgsqlConnectionStringBuilder(connectionOverride ?? ConnectionString);
         var start = new ProcessStartInfo("psql")
         {
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(script)!, "..", "..")),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -81,6 +84,9 @@ public sealed class InitialAdminBootstrapTests
         })
             start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = db.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         start.Environment["COMUNI_BOOTSTRAP_ORGANIZATION_ID"] = org.ToString("D");
         if (issuer is not null) start.Environment["COMUNI_BOOTSTRAP_IDENTITY_ISSUER"] = issuer;
         else start.Environment.Remove("COMUNI_BOOTSTRAP_IDENTITY_ISSUER");
@@ -202,4 +208,76 @@ public sealed class InitialAdminBootstrapTests
         Assert.Single(results.Where(x => x.ExitCode == 0));
         Assert.Equal((1L, 1L), await CountsAsync(org));
     }
+    [Fact]
+    public async Task First_admin_bootstrap_sql_never_inlines_oidc_subject_or_issuer()
+    {
+        var sql = await File.ReadAllTextAsync(ScriptPath);
+        Assert.DoesNotContain(":'bootstrap_subject'", sql);
+        Assert.DoesNotContain(":'bootstrap_issuer'", sql);
+    }
+
+    [Fact]
+    public async Task First_admin_bootstrap_subject_stays_out_of_real_Postgres_statement_logs()
+    {
+        // The raw server log may contain synthetic identity; never print it,
+        // even if the assertion fails. Real CI Docker logs are mandatory.
+        var org = await SeedOrganizationAsync();
+        var opaque = "private-bootstrap-canary-" + Guid.NewGuid().ToString("N");
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+        var outcome = await BootstrapAsync(org, subject: opaque, logStatements: true);
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.False(outcome.Output.Contains(opaque, StringComparison.Ordinal),
+            "psql client output exposed a synthetic subject.");
+        Assert.Equal((1L, 1L), await CountsAsync(org));
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI must provide the PostgreSQL 17 container logs.");
+            return;
+        }
+        var ids = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(ids))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "PostgreSQL container log access is mandatory in CI.");
+            return;
+        }
+        Assert.DoesNotContain('\n', ids);
+        using var dockerLog = new Process();
+        dockerLog.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, ids })
+            dockerLog.StartInfo.ArgumentList.Add(arg);
+        dockerLog.Start();
+        var stdout = dockerLog.StandardOutput.ReadToEndAsync();
+        var stderr = dockerLog.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await dockerLog.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, dockerLog.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(opaque, StringComparison.Ordinal),
+            "The PostgreSQL server statement log exposed a synthetic OIDC subject; raw logs withheld.");
+    }
+
 }
