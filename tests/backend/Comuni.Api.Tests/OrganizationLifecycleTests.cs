@@ -59,6 +59,10 @@ public sealed class OrganizationLifecycleTests(ApiFactory factory) : IClassFixtu
         var builder = new NpgsqlConnectionStringBuilder(connection ?? OwnerConnection);
         var start = new ProcessStartInfo("psql")
         {
+            // Fixed private COPY FROM PROGRAM resolves in the trusted checkout,
+            // regardless of the test-runner's bin/Release directory.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(ScriptPath)!, "..", "..")),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false

@@ -3,6 +3,7 @@
 -- Owner-only offline transition of an EXISTING organization's suspension state.
 -- Never run as comuni_app_runtime or with psql echo (-a/-e) or shell tracing.
 -- Real identity, incident rationale and approvals MUST be verified externally.
+-- Local COPY program requires an approved trusted checkout root (#98/ADR 0082).
 \getenv lifecycle_org COMUNI_LIFECYCLE_ORGANIZATION_ID
 \getenv lifecycle_action COMUNI_LIFECYCLE_ACTION
 \getenv lifecycle_ticket COMUNI_LIFECYCLE_CHANGE_TICKET
@@ -37,14 +38,31 @@
 
 BEGIN;
 
--- All external values are escaped as SQL literals, never substituted as SQL.
--- Transaction-local settings, no printed input, no persisted raw rationale.
+-- A fixed local COPY helper transports exactly five allowlisted inputs
+-- through the COPY protocol, not as literal values in SQL statement logs.
+-- Requires psql cwd at a trusted repository root; base64 is NOT encryption.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py organization-lifecycle' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.lifecycle_org', :'lifecycle_org', true) AS org,
-    set_config('comuni.lifecycle_action', :'lifecycle_action', true) AS action,
-    set_config('comuni.lifecycle_ticket', :'lifecycle_ticket', true) AS ticket,
-    set_config('comuni.lifecycle_approver', :'lifecycle_approver', true) AS approver,
-    set_config('comuni.lifecycle_reason', :'lifecycle_reason', true) AS reason
+    set_config('comuni.lifecycle_org',
+               secret ->> 'COMUNI_LIFECYCLE_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.lifecycle_action',
+               secret ->> 'COMUNI_LIFECYCLE_ACTION', true) AS action,
+    set_config('comuni.lifecycle_ticket',
+               secret ->> 'COMUNI_LIFECYCLE_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.lifecycle_approver',
+               secret ->> 'COMUNI_LIFECYCLE_APPROVER', true) AS approver,
+    set_config('comuni.lifecycle_reason',
+               secret ->> 'COMUNI_LIFECYCLE_REASON_CODE', true) AS reason
+FROM private_json
 \gset
 
 DO $lifecycle$
