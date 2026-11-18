@@ -22,3 +22,9 @@ Il primo Admin OIDC può ora essere associato con il runner owner tramite lo scr
 ## Alternative e limiti
 
 Il percorso Superadmin con identità platform-level, approvazioni, lifecycle completo di sospensione/riattivazione e gestione catalogo rimane #3/#10. L'owner DB è un account privilegiato, quindi il sistema **non** sostituisce un workflow di approval con separazione dei compiti: senza validazione umana esterna una persona con accesso owner potrebbe creare Comuni illegittimi. L'UUID è deciso esternamente in modo verificabile; l'assenza di utenti attivi è condizione necessaria, non garanzia sufficiente di autorizzazione. Nessun IdP, Azure deployment, ANPR/SPID/CIE o onboarding reale è stato verificato. Una migrazione di dati già esistenti richiede un piano distinto, senza backfill automatico.
+
+## Rettifica del trasporto legacy degli input (#101, ADR 0085)
+
+La menzione storica di `psql :'name'` e `SET LOCAL` riflette la versione originaria. Lo script owner-only `provision-organization.sql` ora acquisisce **esattamente** i quattro `COMUNI_PROVISION_*` dall'helper statico `stream-private-input.py provision-organization` tramite client-side `\\copy`, tabella TEMP `ON COMMIT DROP` e `set_config(...,true)` con query statica, senza interpolare il nome Comune, UUID, ticket e revisore come SQL literal. Il blocco `DO $provision$` e i suoi controlli owner/lock/audit/tenant/modulo restano invariati. **Il lifecycle legacy (organizzazione nata attivata, senza membri) non cambia**: preferire la distinta registration pending di ADR 0037/0038/0084 per nuovi flussi.
+
+La prova PostgreSQL17 con `log_statement=all` controlla soltanto che i canary di nome/ticket/reviewer non siano nel **testo degli statement**; il payload base64 JSON è reversibile e non è garantita riservatezza da protocolli COPY, TEMP, proxy, pgAudit, Azure, SIEM o backup. #86/#84/#49/#92 e review Security/Privacy restano blocchi reali.
