@@ -24,3 +24,7 @@ La procedura presuppone che owner DB e log audit append-only non siano stati com
 Uso operativo: prima verificare Comune `active`, Admin superstite verificato e audit revoche; approvare un *nuovo* subject con issuer OIDC reale esatto, ticket indipendente e revisore distinto; fornire le stesse cinque variabili `COMUNI_ADD_ADMIN_*` della #80 tramite canale segreto del runner privato PostgreSQL TLS schema-owner, poi eseguire `psql -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/enroll-additional-admin.sql`. Niente `psql -a/-e`, `set -x` o dati personali in GitHub issue. Verificare con account owner separato un solo nuovo audit `platform.membership.admin.added` e che tutti i revocati restino inattivi; usare nuova chiamata OIDC per validare diritti solo quando il provider reale è autorizzato.
 
 Test offline **non** significa produzione o compliance PA verificata; #2/#3/#4/#5/#10 e controlli Azure live rimangono aperti.
+
+## Estensione mirata #87 (ADR 0077)
+
+La decisione originaria su Admin inattivi con revoca **ordinaria** resta valida. Il caso distinto di Admin inattivo dopo staged break-glass e riattivazione owner non deve essere risolto con hard-delete o ripristino della vecchia membership: il nuovo ADR 0077 aggiunge guard su incident audit accoppiato e riattivazione successiva. Tutti i limiti di IdP live/approvazione reale e le issue #84/#86 rimangono aperti.
