@@ -24,3 +24,9 @@ Il Core della singola API .NET 10 condivide un solo DB PostgreSQL multi-organiza
 - Restrizione al solo metadata URI Key Vault: non verifica il contenuto della stringa né il trust TLS.
 - Riutilizzare `PlatformInventorySettings` o il login `comuni_platform_reader`: sono contesti SQL distinti, con privilegi diversi, e questo nuovo guard deve proteggere anche un Comune senza inventario globale.
 - Cambiare in-place la secret legacy o imporre PKI Azure a CI/Development: può spezzare stable e suite locali e non prova un rollout reale.
+
+## Allineamento dei runbook amministrativi libpq (#49, 2026-11-18)
+
+Il contratto Npgsql di questa ADR protegge il **runtime della API**, non i comandi manuali `psql` dell'owner PostgreSQL. Anche tali connessioni possono trasportare privilegi e input sensibili; in `docs/deployment.md` tutti i dieci esempi con stringhe di connessione `psql` sono ora uniformati a `host=<private-postgres-fqdn> sslmode=verify-full sslrootcert=<approved-ca-bundle>` (libpq PostgreSQL 17), con `-X -q -v ON_ERROR_STOP=1` dove mancavano. Un test Python statico impedisce downgrade documentali a `sslmode=require` e verifica che il runbook descriva hostname certificato, CA root e rotazione delle CA. Il valore del bundle non è hardcoded e deve essere verificato dal runner privato; non introdurre trust indiscriminato di certificati server o alias DNS.
+
+Questa modifica è **solo documentazione e test offline**: non modifica `infra/main.tf`, versionless secret legacy, credenziali, RBAC o login `comuni_app_runtime`. Non equivale a test TLS live, rinnovo CA provato, connessione reale o rotazione a zero downtime di ACA/Key Vault; #49 rimane APERTA per quei requisiti, oltre a #5/#6/#19. Fonti: https://www.postgresql.org/docs/17/libpq-ssl.html e https://learn.microsoft.com/en-us/azure/postgresql/security/security-tls-how-to-connect.
