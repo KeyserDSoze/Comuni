@@ -27,3 +27,7 @@ Le ADR 0043–0045 hanno introdotto la connessione candidata versionata con Veri
 - Eliminare la secret Azure o usare `terraform destroy`/`terraform state rm` senza plan: non consente revisione dichiarativa in sicurezza.
 - Leggere i valori della secret o stampare il piano per dimostrare una connessione: introdurrebbe esfiltrazione in log e non dimostrerebbe TLS o isolamento.
 - Considerare le credenziali storiche sanificate dopo `forget`: snapshot precedenti e versioni del secret restano sensibili.
+
+## Emendamento #106 / ADR 0089 — stato ACA esistente prima dell'handoff
+
+La versione iniziale di questa ADR richiedeva `azurerm_container_app.main ["no-op"]` con `before==after`, ma una configurazione **già sbagliata** avrebbe comunque passato il gate. Il validatore offline `check-legacy-postgres-handoff-plan.py` ora verifica anche su `before` `revision_mode=Multiple`, esattamente due target, stable `latest_revision=false` al 100% con suffix valida, candidata `latest_revision=true` allo 0% con label uguale alla `template.revision_suffix`, e nessun target ulteriore o duplicato. È un controllo **di forma del piano**, non dei veri byte Key Vault, del routing live né di approvazioni per rimozione dal Terraform State. La snapshot non basta per `terraform apply`; servono verifica indipendente dell'inventario revisioni, traffico live, SSL CA/hostname e recovery, con operatori autorizzati e change separato. Vedere ADR 0089 e la suite `test_legacy_postgres_handoff_plan.py`.
