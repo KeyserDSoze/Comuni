@@ -51,6 +51,13 @@ class TenantRetirementPrivateCopyTests(unittest.TestCase):
         self.assertIn("LOCK TABLE platform.tenant_proof_keys IN SHARE ROW EXCLUSIVE MODE", sql)
         self.assertIn("interval '300 seconds'", sql)
         self.assertIn("least(valid_until,", sql)
+        # A malformed text patch must never duplicate the lock/update body.
+        self.assertEqual(1, sql.count("SET LOCAL lock_timeout = '10s'"))
+        self.assertEqual(
+            1, sql.count("LOCK TABLE platform.tenant_proof_keys IN SHARE ROW EXCLUSIVE MODE")
+        )
+        self.assertEqual(1, sql.count("    COMMIT;"))
+        self.assertEqual(1, sql.count("\\if :replacement_safe"))
         # PostgreSQL may reorder boolean AND terms, so bad grace values
         # must be protected by a nested CASE *before* integer casting.
         self.assertIn(
