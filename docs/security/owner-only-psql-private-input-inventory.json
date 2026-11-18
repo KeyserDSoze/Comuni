@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "purpose": "Offline inventory of reviewed owner-only private psql COPY input transports; base64(JSON) is reversible, not encryption; not production approval.",
+  "owner_only": true,
+  "operations": [
+    {
+      "script": "revoke-admin.sql",
+      "operation": "revoke-admin",
+      "classification": "identity-and-approval",
+      "source_issue": 96,
+      "environment_variables": [
+        "COMUNI_REVOKE_ADMIN_ORGANIZATION_ID",
+        "COMUNI_REVOKE_ADMIN_IDENTITY_ISSUER",
+        "COMUNI_REVOKE_ADMIN_SUBJECT",
+        "COMUNI_REVOKE_ADMIN_CHANGE_TICKET",
+        "COMUNI_REVOKE_ADMIN_APPROVER",
+        "COMUNI_REVOKE_ADMIN_REASON_CODE"
+      ]
+    },
+    {
+      "script": "register-organization.sql",
+      "operation": "register-organization",
+      "classification": "municipality-metadata",
+      "source_issue": 100,
+      "environment_variables": [
+        "COMUNI_REGISTER_ORGANIZATION_ID",
+        "COMUNI_REGISTER_ORGANIZATION_NAME",
+        "COMUNI_REGISTER_CHANGE_TICKET",
+        "COMUNI_REGISTER_APPROVER"
+      ]
+    },
+    {
+      "script": "activate-organization.sql",
+      "operation": "activate-organization",
+      "classification": "municipality-metadata",
+      "source_issue": 99,
+      "environment_variables": [
+        "COMUNI_ACTIVATE_ORGANIZATION_ID",
+        "COMUNI_ACTIVATE_CHANGE_TICKET",
+        "COMUNI_ACTIVATE_APPROVER"
+      ]
+    },
+    {
+      "script": "provision-organization.sql",
+      "operation": "provision-organization",
+      "classification": "municipality-metadata",
+      "source_issue": 101,
+      "environment_variables": [
+        "COMUNI_PROVISION_ORGANIZATION_ID",
+        "COMUNI_PROVISION_ORGANIZATION_NAME",
+        "COMUNI_PROVISION_CHANGE_TICKET",
+        "COMUNI_PROVISION_APPROVER"
+      ]
+    },
+    {
+      "script": "retire-tenant-proof-key.sql",
+      "operation": "retire-tenant-proof",
+      "classification": "key-retirement-metadata",
+      "source_issue": 103,
+      "environment_variables": [
+        "TENANT_PROOF_RETIRE_KEY_ID",
+        "TENANT_PROOF_REPLACEMENT_KEY_ID",
+        "TENANT_PROOF_GRACE_SECONDS"
+      ]
+    },
+    {
+      "script": "bootstrap-initial-admin.sql",
+      "operation": "bootstrap-admin",
+      "classification": "identity-and-approval",
+      "source_issue": 95,
+      "environment_variables": [
+        "COMUNI_BOOTSTRAP_ORGANIZATION_ID",
+        "COMUNI_BOOTSTRAP_IDENTITY_ISSUER",
+        "COMUNI_BOOTSTRAP_SUBJECT",
+        "COMUNI_BOOTSTRAP_CHANGE_TICKET",
+        "COMUNI_BOOTSTRAP_APPROVER"
+      ]
+    },
+    {
+      "script": "manage-platform-operator.sql",
+      "operation": "platform-operator",
+      "classification": "identity-and-approval",
+      "source_issue": 97,
+      "environment_variables": [
+        "COMUNI_PLATFORM_OPERATOR_IDENTITY_ISSUER",
+        "COMUNI_PLATFORM_OPERATOR_SUBJECT",
+        "COMUNI_PLATFORM_OPERATOR_ACTION",
+        "COMUNI_PLATFORM_OPERATOR_CHANGE_TICKET",
+        "COMUNI_PLATFORM_OPERATOR_APPROVER"
+      ]
+    },
+    {
+      "script": "set-organization-suspension.sql",
+      "operation": "organization-lifecycle",
+      "classification": "municipality-metadata",
+      "source_issue": 98,
+      "environment_variables": [
+        "COMUNI_LIFECYCLE_ORGANIZATION_ID",
+        "COMUNI_LIFECYCLE_ACTION",
+        "COMUNI_LIFECYCLE_CHANGE_TICKET",
+        "COMUNI_LIFECYCLE_APPROVER",
+        "COMUNI_LIFECYCLE_REASON_CODE"
+      ]
+    },
+    {
+      "script": "stage-emergency-admin-replacement.sql",
+      "operation": "emergency",
+      "classification": "identity-and-approval",
+      "source_issue": 88,
+      "environment_variables": [
+        "COMUNI_EMERGENCY_ORGANIZATION_ID",
+        "COMUNI_EMERGENCY_OLD_IDENTITY_ISSUER",
+        "COMUNI_EMERGENCY_OLD_SUBJECT",
+        "COMUNI_EMERGENCY_NEW_IDENTITY_ISSUER",
+        "COMUNI_EMERGENCY_NEW_SUBJECT",
+        "COMUNI_EMERGENCY_INCIDENT_TICKET",
+        "COMUNI_EMERGENCY_SECURITY_REVIEWER",
+        "COMUNI_EMERGENCY_MUNICIPAL_REVIEWER",
+        "COMUNI_EMERGENCY_REASON_CODE"
+      ]
+    },
+    {
+      "script": "enroll-additional-admin.sql",
+      "operation": "add-admin",
+      "classification": "identity-and-approval",
+      "source_issue": 94,
+      "environment_variables": [
+        "COMUNI_ADD_ADMIN_ORGANIZATION_ID",
+        "COMUNI_ADD_ADMIN_IDENTITY_ISSUER",
+        "COMUNI_ADD_ADMIN_SUBJECT",
+        "COMUNI_ADD_ADMIN_CHANGE_TICKET",
+        "COMUNI_ADD_ADMIN_APPROVER"
+      ]
+    },
+    {
+      "script": "provision-runtime-role.sql",
+      "operation": "runtime-role",
+      "classification": "key-and-password",
+      "source_issue": 91,
+      "environment_variables": [
+        "RUNTIME_DB_PASSWORD"
+      ]
+    },
+    {
+      "script": "provision-platform-read-role.sql",
+      "operation": "platform-role",
+      "classification": "key-and-password",
+      "source_issue": 91,
+      "environment_variables": [
+        "PLATFORM_READ_DB_PASSWORD"
+      ]
+    },
+    {
+      "script": "provision-tenant-proof.sql",
+      "operation": "tenant-legacy",
+      "classification": "key-and-password",
+      "source_issue": 90,
+      "environment_variables": [
+        "TENANT_PROOF_KEY"
+      ]
+    },
+    {
+      "script": "stage-tenant-proof-key.sql",
+      "operation": "tenant-stage",
+      "classification": "key-and-password",
+      "source_issue": 90,
+      "environment_variables": [
+        "TENANT_PROOF_KEY_ID",
+        "TENANT_PROOF_KEY"
+      ]
+    }
+  ]
+}
