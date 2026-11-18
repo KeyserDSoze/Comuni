@@ -103,6 +103,79 @@ def managed_postgres_fqdn(plan):
     return fqdn
 
 
+def planned_resource_values(plan, address, resource_type):
+    # Cross-check Terraform's projected final values against the SAME
+    # resource_changes no-op snapshot. A plan with mismatching sections must
+    # not be treated as safe evidence for a future owner-only state handoff.
+    planned = plan.get("planned_values")
+    require(isinstance(planned, dict))
+    root = planned.get("root_module")
+    require(isinstance(root, dict))
+    resources = root.get("resources")
+    require(isinstance(resources, list))
+    matches = [resource for resource in resources if isinstance(resource, dict)
+               and resource.get("address") == address]
+    require(len(matches) == 1 and matches[0].get("type") == resource_type)
+    values = matches[0].get("values")
+    require(isinstance(values, dict))
+    return values
+
+
+def require_consistent_noop_snapshots(plan, found, app_before):
+    postgres = found.get(POSTGRES_ADDRESS)
+    require(isinstance(postgres, dict)
+            and postgres.get("type") == "azurerm_postgresql_flexible_server")
+    pg_change = postgres.get("change")
+    require(isinstance(pg_change, dict)
+            and pg_change.get("actions") == ["no-op"])
+    pg_before = pg_change.get("before")
+    pg_planned = planned_resource_values(
+        plan, POSTGRES_ADDRESS, "azurerm_postgresql_flexible_server")
+    require(isinstance(pg_before, dict)
+            and all(pg_before.get(field) == pg_planned.get(field)
+                    for field in ("name", "fqdn")))
+
+    planned_app = planned_resource_values(plan, APP, "azurerm_container_app")
+    require(planned_app.get("revision_mode") == app_before.get("revision_mode"))
+
+    def one_block(obj, key):
+        blocks = obj.get(key) if isinstance(obj, dict) else None
+        require(isinstance(blocks, list) and len(blocks) == 1
+                and isinstance(blocks[0], dict))
+        return blocks[0]
+
+    planned_ingress = one_block(planned_app, "ingress")
+    before_ingress = one_block(app_before, "ingress")
+    for field in ("traffic_weight", "target_port", "external_enabled"):
+        require(planned_ingress.get(field) == before_ingress.get(field))
+
+    planned_template = one_block(planned_app, "template")
+    before_template = one_block(app_before, "template")
+    require(planned_template.get("revision_suffix") ==
+            before_template.get("revision_suffix"))
+    planned_container = one_block(planned_template, "container")
+    before_container = one_block(before_template, "container")
+    require(planned_container.get("image") == before_container.get("image"))
+
+    for name in ("ConnectionStrings__Default", "RuntimePostgres__ExpectedHost"):
+        planned_env = only_entry(planned_container.get("env"), name)
+        before_env = only_entry(before_container.get("env"), name)
+        for field in ("secret_name", "value"):
+            require(planned_env.get(field) == before_env.get(field))
+
+    # Do not compare secret payloads or computed provider fields. Only
+    # ensure the versioned Key Vault references and legacy name are identical.
+    candidate_name = only_entry(before_container.get("env"),
+                                "ConnectionStrings__Default").get("secret_name")
+    require(isinstance(candidate_name, str))
+    for name in (LEGACY_APP_SECRET, candidate_name):
+        planned_secret = only_entry(planned_app.get("secret"), name)
+        before_secret = only_entry(app_before.get("secret"), name)
+        require(planned_secret.get("key_vault_secret_id") ==
+                before_secret.get("key_vault_secret_id")
+                and not planned_secret.get("value"))
+
+
 def validate_app(app_before, legacy_uri, expected_postgres_host):
     # A state-only handoff must NOT update the application-scoped secret or
     # any revision. The legacy Key Vault secret must stay in Azure.
@@ -189,6 +262,7 @@ def validate(plan):
     app_before = found[APP]["change"]["before"]
     legacy_uri = found[LEGACY]["change"]["before"]["versionless_id"]
     validate_app(app_before, legacy_uri, managed_postgres_fqdn(plan))
+    require_consistent_noop_snapshots(plan, found, app_before)
 
 
 def main():
