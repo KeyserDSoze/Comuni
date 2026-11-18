@@ -28,7 +28,8 @@ DOCKER_IMAGE = "comuni-pgaudit-roles:ci"
 # No password, verifier or connection URI may appear in a command argument
 # or in the printed diagnostics from this script.
 def run(args: list[str], label: str, env: dict[str, str] | None = None,
-        expected: int = 0, timeout: int = 110) -> str:
+        expected: int = 0, timeout: int = 110,
+        include_stderr: bool = False) -> str:
     try:
         p = subprocess.run(args, cwd=ROOT, env=env, capture_output=True,
                            text=True, timeout=timeout, check=False)
@@ -40,7 +41,9 @@ def run(args: list[str], label: str, env: dict[str, str] | None = None,
             "review CI setup separately without printing captured credentials")
     if expected != 0 and p.returncode == 0:
         raise AssertionError(f"pgAudit rejected operation unexpectedly succeeded: {label}")
-    return p.stdout
+    # Docker attaches PostgreSQL's server logs to stderr, not stdout.
+    # Keep them in memory only; NEVER echo the full contents to CI.
+    return p.stdout + p.stderr if include_stderr else p.stdout
 
 
 def psql_env(**additional: str) -> dict[str, str]:
@@ -142,7 +145,7 @@ def assert_audits(log: str, verifiers: list[str],
     # Audited operations remain traceable, including GRANT/REVOKE and roles.
     if not any(",ROLE,GRANT," in line for line in audit_lines):
         raise AssertionError("Privilege-change audit events were suppressed")
-    # This gate does not SET pgaudit.log = 'none' or SET log_statement = 'none'.
+    # Preserve pgAudit ROLE/DDL and native PostgreSQL statement logging.
 
 
 def main() -> None:
@@ -237,7 +240,8 @@ def main() -> None:
                     raise AssertionError("Restricted runtime changed reader password")
 
         # Real pgAudit and native logs; never print their raw contents.
-        logs = run(["docker", "logs", name], "collect private pgAudit logs")
+        logs = run(["docker", "logs", name], "collect private pgAudit logs",
+                   include_stderr=True)
         assert_audits(logs, observed_verifiers, test_passwords)
         print("PASS: real PostgreSQL17 pgAudit ROLE/DDL audit retained; "
               "CREATE/ALTER redacted, login and rollback proven; "
