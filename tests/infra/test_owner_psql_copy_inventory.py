@@ -160,7 +160,7 @@ class OwnerPsqlCopyInventoryTests(unittest.TestCase):
             validate_private_sql(
                 reference.replace(
                     COPY_PREFIX + "register-organization" + COPY_SUFFIX,
-                    r"\copy pg_temp.comuni_private_input(payload) FROM PROGRAM :'program'",
+                    r"\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'unreviewed-program' WITH (FORMAT csv)",
                 ),
                 "register-organization",
             )
