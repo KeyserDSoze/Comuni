@@ -20,6 +20,8 @@ APP_ADDRESS = "azurerm_container_app.main"
 URI = "https://comuni-itn-001-kv.vault.azure.net/secrets/postgres-connection"
 SENTINEL = "synthetic-postgres-password-private-not-for-logs"
 SENTINEL_HOST = "synthetic-secret-host-private-not-for-logs"
+POSTGRES_ADDRESS = "azurerm_postgresql_flexible_server.main"
+EXPECTED_HOST = "comuni-itn-001-pg.postgres.database.azure.com"
 
 
 def resource(address, type_name, actions, before=None, after=None):
@@ -56,13 +58,23 @@ def plan():
             "container": [{
                 "env": [
                     {"name": "ConnectionStrings__Default",
-                     "secret_name": "pg-dddddddddddddddd"}
+                     "secret_name": "pg-dddddddddddddddd"},
+                    {"name": "RuntimePostgres__ExpectedHost",
+                     "value": EXPECTED_HOST}
                 ]
             }]
         }],
     }
     return {
         "format_version": "1.2",
+        "planned_values": {"root_module": {"resources": [{
+            "address": POSTGRES_ADDRESS,
+            "type": "azurerm_postgresql_flexible_server",
+            "values": {
+                "name": "comuni-itn-001-pg",
+                "fqdn": EXPECTED_HOST,
+            },
+        }]}},
         "resource_changes": [
             resource(SECRET_ADDRESS, "azurerm_key_vault_secret",
                      ["forget"], legacy_before, None),
@@ -151,6 +163,65 @@ class LegacyPostgresHandoffPlanTests(unittest.TestCase):
         cases.append(p)
         for case in cases:
             self.deny(case)
+
+    def test_authorized_postgres_server_must_come_from_managed_planned_values(self):
+        def resource_for(p):
+            return p["planned_values"]["root_module"]["resources"][0]
+
+        for change in (
+            lambda p: p.pop("planned_values"),
+            lambda p: p.update(planned_values={}),
+            lambda p: p["planned_values"].pop("root_module"),
+            lambda p: p["planned_values"]["root_module"].pop("resources"),
+            lambda p: p["planned_values"]["root_module"].update(resources=[]),
+            lambda p: p["planned_values"]["root_module"].update(resources="untrusted"),
+            lambda p: p["planned_values"]["root_module"]["resources"].append(
+                copy.deepcopy(resource_for(p))),
+            lambda p: resource_for(p).update(address="azurerm_postgresql_flexible_server.other"),
+            lambda p: resource_for(p).update(type="azurerm_key_vault_secret"),
+            lambda p: resource_for(p).pop("values"),
+            lambda p: resource_for(p)["values"].update(name="other-pg"),
+            lambda p: resource_for(p)["values"].update(fqdn="other-pg.postgres.database.azure.com"),
+            lambda p: resource_for(p)["values"].update(fqdn="10.90.2.8"),
+            lambda p: resource_for(p)["values"].update(fqdn="other-pg.postgres.database.azure.com.evil.test"),
+            lambda p: resource_for(p)["values"].update(fqdn="other-pg.private.postgres.database.azure.com"),
+            lambda p: resource_for(p)["values"].update(fqdn=SENTINEL_HOST),
+            lambda p: resource_for(p)["values"].update(fqdn=EXPECTED_HOST + "."),
+            lambda p: resource_for(p)["values"].update(fqdn=""),
+        ):
+            with self.subTest(change=change):
+                p = plan()
+                change(p)
+                self.deny(p)
+
+    def test_candidate_expected_host_is_exact_authorized_managed_server_metadata(self):
+        def environment(app):
+            return app["template"][0]["container"][0]["env"]
+
+        for change in (
+            lambda app: environment(app).pop(1),
+            lambda app: environment(app).append(
+                {"name": "RuntimePostgres__ExpectedHost", "value": EXPECTED_HOST}),
+            lambda app: environment(app)[1].update(value="other-pg.postgres.database.azure.com"),
+            lambda app: environment(app)[1].update(value="10.90.2.8"),
+            lambda app: environment(app)[1].update(value=SENTINEL_HOST),
+            lambda app: environment(app)[1].update(value=""),
+            lambda app: environment(app)[1].update(value=None),
+            lambda app: environment(app)[1].update(secret_name="pg-dddddddddddddddd"),
+            lambda app: environment(app)[1].pop("value"),
+            lambda app: environment(app)[1].update(name="RuntimePostgres__OtherHost"),
+        ):
+            with self.subTest(change=change):
+                self.deny(self.risky_aca(change))
+
+    def test_host_identity_check_is_not_trusted_from_cli_or_candidate_secret(self):
+        case = plan()
+        # A signed-looking value in ACA cannot override the managed FQDN.
+        case["resource_changes"][1]["change"]["before"]["template"][0][
+            "container"][0]["env"][1]["value"] = SENTINEL_HOST
+        case["resource_changes"][1]["change"]["after"]["template"][0][
+            "container"][0]["env"][1]["value"] = SENTINEL_HOST
+        self.deny(case)
 
     @staticmethod
     def risky_aca(mutate):
