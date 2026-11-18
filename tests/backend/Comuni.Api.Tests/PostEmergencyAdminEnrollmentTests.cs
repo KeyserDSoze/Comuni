@@ -46,7 +46,7 @@ public sealed class PostEmergencyAdminEnrollmentTests(OidcApiFactory factory)
             "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", db.Host, "-p", db.Port.ToString(),
             "-U", db.Username, "-d", db.Database, "-f", Path.Combine(Root(), "scripts", "postgres", file)
         })
-            start.ArgumentList.Add(arg);
+            start.ArgumentList.Add(arg!);
         start.Environment["PGPASSWORD"] = db.Password;
         void Env(string key, string? value)
         {
@@ -195,6 +195,23 @@ public sealed class PostEmergencyAdminEnrollmentTests(OidcApiFactory factory)
         Assert.Equal((1L, 1L, 0L, 1L, 1L), await Counts(org));
     }
 
+    [Fact]
+    public async Task Manually_clearing_suspension_flag_without_owner_reactivation_audit_cannot_grant_Admin()
+    {
+        var org = await Staged(reactivate: false);
+        await using (var db = new NpgsqlConnection(Owner))
+        {
+            await db.OpenAsync();
+            await using var sql = new NpgsqlCommand("""
+                UPDATE platform.organizations SET is_suspended=FALSE WHERE id=@id
+                """, db);
+            sql.Parameters.AddWithValue("id", org);
+            Assert.Equal(1, await sql.ExecuteNonQueryAsync());
+        }
+        Assert.NotEqual(0, await Enroll(org));
+        Assert.Equal((1L, 1L, 0L, 1L, 1L), await Counts(org));
+    }
+
     [Theory]
     [InlineData("platform.membership.admin.emergency.revoked", "post-emergency-compromised")]
     [InlineData("platform.membership.admin.emergency.staged", "post-emergency-rescued")]
@@ -237,7 +254,7 @@ public sealed class PostEmergencyAdminEnrollmentTests(OidcApiFactory factory)
         var candidates = await Task.WhenAll(
             Enroll(org, "additional-a"),
             Enroll(org, "additional-b"));
-        Assert.Single(candidates.Where(result => result == 0));
+        Assert.Single(candidates, result => result == 0);
         Assert.Equal((2L, 1L, 1L, 1L, 1L), await Counts(org));
         Assert.Equal((1L, 1L, 0L, 1L, 1L), await Counts(other));
         Assert.Equal(0, await Enroll(other));
