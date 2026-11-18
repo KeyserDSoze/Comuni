@@ -32,3 +32,7 @@ Questa implementazione è **offline e testata con dati sintetici**. Non è una v
 ## Emendamento sul canale di input dell'attivazione (#99 / ADR 0083)
 
 La descrizione precedente di `psql :'var'` e `SET LOCAL` riflette la **versione iniziale** della procedura, non il trasporto attuale. L'owner-only `activate-organization.sql` legge ora i tre `COMUNI_ACTIVATE_*` da `\copy` locale in TEMP, evitando la presenza di UUID/ticket/reviewer come literal SQL. Nessuno dei controlli created → active, primo Admin OIDC, moduli disabilitati, row lock, audit atomico, idempotenza o isolamento è cambiato. Base64 è reversibile: la review del payload COPY, IdP, Azure/pgAudit/SIEM, retention e privacy rimane aperta (#86/#84/#92).
+
+## Emendamento per provisioning legacy (#102 / ADR 0086)
+
+Il `DEFAULT TRUE` di `platform.organizations.is_activated` serve a preservare organizzazioni **già presenti all'upgrade**; non è una regola per attivare nuovi Comuni. Lo script legacy `provision-organization.sql`, rimasto disponibile solo come bootstrap owner controllato, dopo #102 scrive esplicitamente `is_activated=FALSE` per i **nuovi** tenant. Anche questi Comuni, come quelli creati da `register-organization.sql`, rimangono `created`, Protocollo off e 403 su API protette anche dopo bootstrap Admin OIDC, fino all'approvazione separata di `activate-organization.sql`. Non toccare gli stati active/suspended preesistenti, né aggiungere autorizzazioni client o tenant spoofing. Test xUnit, guard Python e ADR 0086 tracciano il confine; nessuna autorizzazione a usare dati reali.
