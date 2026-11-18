@@ -4,6 +4,7 @@
 -- Review issuer+sub and change approval externally; do NOT run against
 -- production without approved change, recovery plan and independent reviewer.
 -- Never run with psql -a/-e, shell tracing or municipal runtime credentials.
+-- Private client-side COPY requires a trusted checkout root (ADR 0080 / #96).
 \getenv revoke_org COMUNI_REVOKE_ADMIN_ORGANIZATION_ID
 \getenv revoke_issuer COMUNI_REVOKE_ADMIN_IDENTITY_ISSUER
 \getenv revoke_subject COMUNI_REVOKE_ADMIN_SUBJECT
@@ -44,15 +45,33 @@
 
 BEGIN;
 
--- Every operator input is a psql quoted literal, transaction-local only.
--- The SQL script never executes input as code or prints sensitive inputs.
+-- The fixed local COPY source sends exactly six inputs through the protocol
+-- (not as literal issuer/sub/ticket values in the SQL statement log).
+-- psql must run at a trusted repository root. Base64 is NOT encryption.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py revoke-admin' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.revoke_admin_org', :'revoke_org', true) AS org,
-    set_config('comuni.revoke_admin_issuer', :'revoke_issuer', true) AS issuer,
-    set_config('comuni.revoke_admin_subject', :'revoke_subject', true) AS subject,
-    set_config('comuni.revoke_admin_ticket', :'revoke_ticket', true) AS ticket,
-    set_config('comuni.revoke_admin_approver', :'revoke_approver', true) AS approver,
-    set_config('comuni.revoke_admin_reason', :'revoke_reason', true) AS reason
+    set_config('comuni.revoke_admin_org',
+               secret ->> 'COMUNI_REVOKE_ADMIN_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.revoke_admin_issuer',
+               secret ->> 'COMUNI_REVOKE_ADMIN_IDENTITY_ISSUER', true) AS issuer,
+    set_config('comuni.revoke_admin_subject',
+               secret ->> 'COMUNI_REVOKE_ADMIN_SUBJECT', true) AS subject,
+    set_config('comuni.revoke_admin_ticket',
+               secret ->> 'COMUNI_REVOKE_ADMIN_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.revoke_admin_approver',
+               secret ->> 'COMUNI_REVOKE_ADMIN_APPROVER', true) AS approver,
+    set_config('comuni.revoke_admin_reason',
+               secret ->> 'COMUNI_REVOKE_ADMIN_REASON_CODE', true) AS reason
+FROM private_json
 \gset
 
 DO $revocation$

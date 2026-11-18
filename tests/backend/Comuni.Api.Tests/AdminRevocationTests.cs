@@ -71,6 +71,9 @@ public sealed class AdminRevocationTests(OidcApiFactory factory) : IClassFixture
         var db = new NpgsqlConnectionStringBuilder(connection ?? Owner);
         var start = new ProcessStartInfo("psql")
         {
+            // Private COPY FROM PROGRAM resolves a fixed local helper in a
+            // trusted checkout, never relative to the test-runner cwd.
+            WorkingDirectory = Root(),
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false
         };
         foreach (var arg in new[] {

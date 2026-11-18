@@ -25,6 +25,14 @@ INPUTS: dict[str, tuple[str, ...]] = {
     # NEVER forward the caller's complete environment to PostgreSQL.
     "tenant-legacy": ("TENANT_PROOF_KEY",),
     "tenant-stage": ("TENANT_PROOF_KEY_ID", "TENANT_PROOF_KEY"),
+    "revoke-admin": (
+        "COMUNI_REVOKE_ADMIN_ORGANIZATION_ID",
+        "COMUNI_REVOKE_ADMIN_IDENTITY_ISSUER",
+        "COMUNI_REVOKE_ADMIN_SUBJECT",
+        "COMUNI_REVOKE_ADMIN_CHANGE_TICKET",
+        "COMUNI_REVOKE_ADMIN_APPROVER",
+        "COMUNI_REVOKE_ADMIN_REASON_CODE",
+    ),
     "bootstrap-admin": (
         "COMUNI_BOOTSTRAP_ORGANIZATION_ID",
         "COMUNI_BOOTSTRAP_IDENTITY_ISSUER",
