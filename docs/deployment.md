@@ -2,6 +2,15 @@
 
 **Una sola piattaforma su Azure.** ADR 0003 sceglie Azure Container Apps (singola app API + SPA), PostgreSQL Flexible Server privato, Blob Storage privato, ACR, Key Vault, Managed Identity e Log Analytics. Tutto l'inventario infrastrutturale è in `infra/`.
 
+## TLS verificato per i comandi PostgreSQL owner (ADR 0044 / #49)
+
+**Gli esempi sotto sono solo modelli con placeholder, non credenziali funzionanti.** Per i comandi `psql` owner nella VNet usare sempre il **FQDN originale** `<private-postgres-fqdn>` corrispondente al **hostname del certificato** del Flexible Server (non un alias DNS o IP privato), `sslmode=verify-full` e `sslrootcert=<approved-ca-bundle>`. Il percorso root cert deve puntare al bundle CA attendibile mantenuto e verificato sul runner autorizzato. `sslmode=require` cifra il traffico ma non costituisce garanzia esplicita di controllo CA e hostname; non usare `verify-ca` come fallback. Il comando deve fallire chiuso se manca la catena fidata o il nome del certificato non coincide.
+
+Durante la rotazione TLS mantenere nel trust store soltanto le **CA radice** approvate, e ove richiesto le **CA precedenti e nuove** fino a completamento della transizione del servizio; non pin di certificati server o intermedi senza piano di manutenzione. Le credenziali owner e i file CA sono gestiti da operatori autorizzati sul runner privato, senza env dump, `psql -a/-e`, tracing `set -x` o stampa di segreti. Il controllo testuale del runbook **non prova** l'handshake Azure reale, la catena aggiornata, il rollout TLS runtime, la rotazione dei secret versionati Key Vault/ACA o l'assenza di downtime; rimangono i gate manuali #49/#5/#6/#19.
+
+Riferimenti: [PostgreSQL 17 libpq TLS](https://www.postgresql.org/docs/17/libpq-ssl.html) e [Azure PostgreSQL TLS](https://learn.microsoft.com/en-us/azure/postgresql/security/security-tls-how-to-connect).
+
+
 ## Prerequisiti (fuori dal repository)
 - Subscription, permessi Azure per Resource Groups, RBAC e creazione risorse; OIDC federato GitHub → Azure.
 - Storage Account e container per backend Terraform remoti **creati prima** del primo `terraform init`; accesso Blob Data Contributor per l'identità del deploy. Lo stato contiene segreti sensibili: RBAC e auditing obbligatori.
@@ -42,8 +51,8 @@ bash scripts/migrate.sh
 
 # 2. Il provisioning legge RUNTIME_DB_PASSWORD direttamente dall'ambiente
 #    ed è idempotente; PGPASSWORD autentica l'owner presso PostgreSQL.
-psql "host=<private-pg-host> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
-  -v ON_ERROR_STOP=1 -f scripts/postgres/provision-runtime-role.sql
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
+  -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-runtime-role.sql
 
 # 3. Aggiornare Terraform dopo aver configurato POSTGRES_RUNTIME_PASSWORD
 #    e verificato l'accesso con la nuova utenza.
@@ -219,7 +228,7 @@ Questo runbook si applica **soltanto** a un Comune già creato, attivo, privo di
 Con queste variabili già presenti nel runner, eseguire **senza** `set -x`, `psql -a` o `psql -e` e senza password nella CLI:
 
 ```bash
-psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/bootstrap-initial-admin.sql
 ```
 
@@ -242,7 +251,7 @@ Preparare nel runner, **senza stampare valori in command line/history o issue**,
 
 Eseguire con variabili già in environment, senza `set -x`, `psql -a` o `psql -e`:
 ```bash
-psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<path-CA-attendibile>" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-organization.sql
 ```
 Le credenziali `PGPASSWORD` arrivano dal vault/runner protetto, non da GitHub o argomenti CLI. **Exit non zero = stop immediato**: non ritentare con UUID/nome diversi senza nuovo change. Un retry con **stesso UUID/nome** è no-op soltanto quando la riga ha audit di provisioning coerente e la feature `protocol` esiste; non riattiva un Comune sospeso, né cambia moduli o utenti già gestiti. Il lock advisory per UUID serializza chiamate concorrenti. In caso di UUID già usato con nome diverso o riga legacy senza audit, aprire un incident/change: non usare UPDATE correttivi automatici.
@@ -266,7 +275,7 @@ Preparare nel runner approvato, senza mostrare i valori su CLI/history/log, cinq
 Con ambiente già preparato e password prelevata da vault, eseguire **senza** `set -x`, `psql -a` o `psql -e`:
 
 ```bash
-psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/set-organization-suspension.sql
 ```
 
@@ -299,7 +308,7 @@ Nel runner privato con accesso PostgreSQL/TLS, owner di `platform.platform_opera
 Con environment già preparato dal runner, senza `set -x`, `psql -a`, `psql -e` né password in argomenti CLI:
 
 ```bash
-psql "host=<pg-host-privato> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/manage-platform-operator.sql
 ```
 
@@ -318,7 +327,7 @@ Questa funzione è **disabilitata per default**: `PlatformInventory:Enabled=fals
 1. Migrare con **schema owner** fino a `202611150012_PlatformOrganizationInventory`. La migration definisce `platform.platform_organization_inventory` (soli UUID, denominazione, sospensione, booleano Protocollo) e funzione `platform.active_platform_operator_id(text,text)` invocabile soltanto dal nuovo principal. La vista è una proiezione deliberatamente globale in owner-context, ma **non** accessibile al login comunale.
 2. Dal secret store iniettarne il valore in `PLATFORM_READ_DB_PASSWORD` (minimo 32 caratteri; diverso dalle credenziali owner e runtime). Eseguire da runner su rete privata e TLS, **senza** `set -x`, `psql -a` o `psql -e`:
    ```bash
-   psql "host=<private-pg-host> port=5432 dbname=comuni user=<schema-owner> sslmode=require" \
+   psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
      -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-platform-read-role.sql
    ```
    Il provisioning è idempotente e rifiuta un ruolo già membro di altri ruoli o con privilegi superuser/CREATEROLE/BYPASSRLS. Verificare esplicitamente username `comuni_platform_reader`, USAGE schema `platform`, SELECT **solo** vista, EXECUTE funzione di audit actor, INSERT **solo colonne audit**, e divieto di leggere tabelle base/membership/documenti. Il principal `comuni_app_runtime` deve continuare a non poter leggere la vista né invocare il resolver; un test SQL diretto deve ricevere 42501.
@@ -336,9 +345,9 @@ Questa funzione è **disabilitata per default**: `PlatformInventory:Enabled=fals
 **Prerequisiti manuali obbligatori (runner privato owner-reviewed, fuori GitHub Actions di deploy):** dopo migration `202611150012_PlatformOrganizationInventory`, provisionare `comuni_platform_reader` sullo **stesso** database del runtime comunale con `PLATFORM_READ_DB_PASSWORD` fornita dalla cassaforte esterna. Mai usare la password dell'owner o `comuni_app_runtime`, `set -x`, `psql -e`, output in chiaro o parametri password in shell. Dal runner VNet privata con TLS PostgreSQL, eseguire:
 
 ```bash
-psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/provision-platform-read-role.sql
-psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 -f scripts/postgres/verify-platform-read-role.sql
 ```
 
@@ -407,7 +416,7 @@ Prima del rollout in un ambiente autorizzato, verificare con Comuni **sintetici*
 Con variabili già configurate dal gestore segreti del runner, senza stampare valori o abilitare shell tracing:
 
 ```bash
-psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 \
   -f scripts/postgres/register-organization.sql
 ```
@@ -424,7 +433,7 @@ Il processo deve abortire se **una** delle tre scritture fallisce: `platform.org
 Dopo la migration: (1) verificare esternamente adesione/mandato e fare owner `register-organization.sql`, che crea `created` con `protocol=false`; (2) verificare l'issuer OIDC, il subject e l'approvazione a quattro occhi, eseguire owner `bootstrap-initial-admin.sql` (#31) per attribuire l'Admin senza accesso HTTP ancora; (3) verificare che il Protocollo resti off e nessun servizio sia abilitato, quindi su **un nuovo ticket approvato** eseguire owner `activate-organization.sql`. Impostare nella sessione privata del runner `COMUNI_ACTIVATE_ORGANIZATION_ID`, `COMUNI_ACTIVATE_CHANGE_TICKET`, `COMUNI_ACTIVATE_APPROVER` tramite processo controllato, mai nei log/chat/repository o negli argomenti shell. Eseguire senza tracing:
 
 ```bash
-psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full" \
+psql "host=<private-postgres-fqdn> port=5432 dbname=comuni user=<schema-owner> sslmode=verify-full sslrootcert=<approved-ca-bundle>" \
   -X -q -v ON_ERROR_STOP=1 \
   -f scripts/postgres/activate-organization.sql
 ```
