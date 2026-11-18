@@ -31,3 +31,9 @@ La registrazione **non** prova che il Comune sia legalmente aderente o che l'ope
 ## Evoluzione con ADR 0038 (#44) — stato created distinto da active
 
 Questo ADR documenta il primo comando di registrazione. **L'ADR 0038 ne estende ora il lifecycle:** dopo la migration 0013, `register-organization.sql` inserisce anche `is_activated=FALSE`, rendendo il Comune **created e non operativo**, anche dopo l'aggiunta del primo Admin OIDC con #31. L'owner deve eseguire la separata procedura `activate-organization.sql` dopo un nuovo change approvato prima dell'accesso con membership. Solo da active può seguire la sospensione/riattivazione #33. Il default migration TRUE mantiene gli enti legacy operativi; il Down rifiuta pending per evitare attivazioni automatiche. L'affermazione storica secondo cui manca uno stato created distinto è quindi superata dall'ADR 0038, **non** dalla sola registrazione #43.
+
+## Rettifica sicurezza dell'input (#100 / ADR 0084)
+
+La decisione storica del punto 2 usa `psql :'var'` nel SQL: tale descrizione è **superata**. Il canale corrente di `register-organization.sql` usa `\\copy` client-side da un helper statico con allowlist di quattro `COMUNI_REGISTER_*`, una TEMP `pg_temp.comuni_private_input` `ON COMMIT DROP`, una sola busta base64(JSON) e `set_config(...,true)` mediante query statica. L'operazione resta schema-owner only, `created`, senza ruoli/moduli attivi e con audit atomico/idempotenza immutati. Il testo del `DO $register$` non è stato alterato.
+
+Il test PostgreSQL 17 e i canary sintetici dimostrano soltanto l'assenza di nome/ticket/reviewer nel **testo degli statement** del server per quella connessione. Base64 è reversibile: contenuti di COPY, TEMP, error context, pgAudit, Azure/SQL proxy, SIEM, backup e retention non sono verificati. #86/#92/#49/#84 restano bloccanti per Comuni reali. Vedere ADR 0084 e docs/security.md, docs/testing.md, docs/deployment.md.
