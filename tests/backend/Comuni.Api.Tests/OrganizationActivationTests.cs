@@ -28,7 +28,7 @@ public sealed class OrganizationActivationTests(ApiFactory factory) : IClassFixt
 
     private static async Task<(int Code, string Output)> ExecuteAsync(string name, Guid org,
         string? ticket = "CHANGE-2026-00044", string? approver = "independent-reviewer",
-        string? connection = null)
+        string? connection = null, bool logStatements = false)
     {
         var file = Script(name);
         Assert.True(File.Exists(file), "RED: owner activation procedure has not been implemented.");
@@ -47,6 +47,9 @@ public sealed class OrganizationActivationTests(ApiFactory factory) : IClassFixt
             "-p", db.Port.ToString(), "-U", db.Username, "-d", db.Database, "-f", file
         }) start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = db.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         void Env(string key, string? value)
         {
             if (value is null) start.Environment.Remove(key);
@@ -84,8 +87,8 @@ public sealed class OrganizationActivationTests(ApiFactory factory) : IClassFixt
         ExecuteAsync("bootstrap-initial-admin.sql", org);
     private static Task<(int Code, string Output)> Activate(Guid org,
         string? ticket = "CHANGE-2026-00044", string? reviewer = "independent-reviewer",
-        string? connection = null) =>
-        ExecuteAsync("activate-organization.sql", org, ticket, reviewer, connection);
+        string? connection = null, bool logStatements = false) =>
+        ExecuteAsync("activate-organization.sql", org, ticket, reviewer, connection, logStatements);
 
     private static async Task<(bool Activated, bool Suspended, bool ModuleEnabled,
         long Admins, long Activations)> ReadAsync(Guid org)
@@ -322,4 +325,86 @@ public sealed class OrganizationActivationTests(ApiFactory factory) : IClassFixt
         Assert.True(rows.GetBoolean(0)); // effective non-operational in legacy field
         Assert.False(rows.GetBoolean(1));
     }
+    [Fact]
+    public async Task Activation_SQL_must_not_inline_change_ticket_or_reviewer()
+    {
+        var sql = await File.ReadAllTextAsync(Script("activate-organization.sql"));
+        Assert.DoesNotContain(":'activate_org'", sql);
+        Assert.DoesNotContain(":'activate_ticket'", sql);
+        Assert.DoesNotContain(":'activate_approver'", sql);
+    }
+
+    [Fact]
+    public async Task Owner_activation_private_canaries_never_appear_in_real_Postgres_statement_logs()
+    {
+        // Only synthetic change references. Fail closed in CI if Docker logs
+        // are inaccessible. Never print raw logs or the private canaries.
+        var org = Guid.NewGuid();
+        Assert.Equal(0, (await Register(org)).Code);
+        Assert.Equal(0, (await Bootstrap(org)).Code);
+        var suffix = Guid.NewGuid().ToString("N");
+        var ticket = "CHANGE-2026-ACTIVATE-" + suffix;
+        var reviewer = "activation-reviewer-" + suffix;
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+
+        var activated = await Activate(org, ticket: ticket, reviewer: reviewer,
+            logStatements: true);
+        Assert.Equal(0, activated.Code);
+        Assert.False(activated.Output.Contains(ticket, StringComparison.Ordinal)
+                     || activated.Output.Contains(reviewer, StringComparison.Ordinal),
+            "psql output exposed private synthetic approval values.");
+        Assert.Equal((true, false, false, 1L, 1L), await ReadAsync(org));
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "PostgreSQL 17 service logs are mandatory in CI.");
+            return;
+        }
+        var containerIds = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(containerIds))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "Real PostgreSQL 17 server logs must be inspectable in CI.");
+            return;
+        }
+        Assert.DoesNotContain('\n', containerIds);
+
+        using var logs = new Process();
+        logs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, containerIds })
+            logs.StartInfo.ArgumentList.Add(arg);
+        logs.Start();
+        var stdout = logs.StandardOutput.ReadToEndAsync();
+        var stderr = logs.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await logs.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, logs.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(ticket, StringComparison.Ordinal)
+                     || serverLog.Contains(reviewer, StringComparison.Ordinal),
+            "PostgreSQL statement log exposed a synthetic private approval canary; raw log withheld.");
+    }
+
 }
