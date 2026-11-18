@@ -21,6 +21,10 @@ NEW_URI = re.compile(
     re.IGNORECASE,
 )
 NEW_APP_SECRET = re.compile(r"pg-[0-9a-f]{16}\Z")
+POSTGRES_ADDRESS = "azurerm_postgresql_flexible_server.main"
+AZURE_POSTGRES_HOST = re.compile(
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.postgres\.database\.azure\.com\Z"
+)
 
 
 class HandoffRejected(Exception):
@@ -75,7 +79,31 @@ def validate_existing_staged_traffic(app, template):
             and stable_weight.get("label") != candidate_suffix)
 
 
-def validate_app(app_before, legacy_uri):
+def managed_postgres_fqdn(plan):
+    # Bind candidate TLS identity to an independently managed Terraform
+    # resource, never to a supplied argument, secret or ACA env value.
+    planned = plan.get("planned_values")
+    require(isinstance(planned, dict))
+    root = planned.get("root_module")
+    require(isinstance(root, dict))
+    resources = root.get("resources")
+    require(isinstance(resources, list))
+    matching = [resource for resource in resources
+                if isinstance(resource, dict)
+                and resource.get("address") == POSTGRES_ADDRESS]
+    require(len(matching) == 1
+            and matching[0].get("type") == "azurerm_postgresql_flexible_server")
+    values = matching[0].get("values")
+    require(isinstance(values, dict))
+    fqdn, name = values.get("fqdn"), values.get("name")
+    require(isinstance(fqdn, str)
+            and AZURE_POSTGRES_HOST.fullmatch(fqdn) is not None
+            and isinstance(name, str)
+            and fqdn == name + ".postgres.database.azure.com")
+    return fqdn
+
+
+def validate_app(app_before, legacy_uri, expected_postgres_host):
     # A state-only handoff must NOT update the application-scoped secret or
     # any revision. The legacy Key Vault secret must stay in Azure.
     require(isinstance(app_before, dict))
@@ -90,6 +118,11 @@ def validate_app(app_before, legacy_uri):
     require(isinstance(containers, list) and len(containers) == 1
             and isinstance(containers[0], dict))
     validate_existing_staged_traffic(app_before, template[0])
+    # Even a valid TLS certificate for ANOTHER Azure server is not enough.
+    # The bound hostname must be the real managed Flexible Server in this plan.
+    expected = only_entry(containers[0].get("env"), "RuntimePostgres__ExpectedHost")
+    require(expected.get("value") == expected_postgres_host
+            and not expected.get("secret_name"))
     default = only_entry(containers[0].get("env"), "ConnectionStrings__Default")
     runtime_name = default.get("secret_name")
     require(isinstance(runtime_name, str)
@@ -155,7 +188,7 @@ def validate(plan):
     require(LEGACY in found and APP in found)
     app_before = found[APP]["change"]["before"]
     legacy_uri = found[LEGACY]["change"]["before"]["versionless_id"]
-    validate_app(app_before, legacy_uri)
+    validate_app(app_before, legacy_uri, managed_postgres_fqdn(plan))
 
 
 def main():
