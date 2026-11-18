@@ -165,7 +165,7 @@ public sealed class PostgresRolePrivatePasswordTests
         {
             var result = await Run(script, name, password);
             Assert.NotEqual(0, result.Exit);
-            if (password is not null)
+            if (!string.IsNullOrEmpty(password))
                 Assert.DoesNotContain(password, result.Output);
         }
 
