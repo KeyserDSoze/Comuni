@@ -1,8 +1,8 @@
 # ADR 0076 — Verifica pgAudit ROLE/DDL di verificatori SCRAM con PostgreSQL 17 isolato
 
 - Data: 2026-11-18.
-- Stato: **Proposed; la prova CI reale è bloccante.** Questo ADR non autorizza provisioning di ruoli/credenziali reali e non certifica Azure o SIEM.
-- Issue: #92 (pgAudit e risk assessment), dipende da #91/ADR 0075 (SCRAM generato client-side), #89 (bootstrap privilegiato), #86 (inventario/logging complessivo).
+- Stato: **Accepted per il gate CI PostgreSQL 17/pgAudit offline**, da verificare sullo SHA finale di `main`; **non autorizzato per produzione**. Le verifiche Azure/pgAuditLogToFile/SIEM e l'approvazione Security/Privacy restano nella #92.
+- Issue: #92 (risk assessment e verifiche reali) e #93 (slice CI completabile); dipende da #91/ADR 0075 (SCRAM generato client-side), #89 (bootstrap privilegiato), #86 (inventario/logging complessivo).
 - Riferimenti verificabili: [pgAudit README](https://github.com/pgaudit/pgaudit/blob/main/README.md), [pgAudit source: redaction after PASSWORD](https://github.com/pgaudit/pgaudit/blob/main/pgaudit.c), [pgAudit ROLE redaction regression](https://github.com/pgaudit/pgaudit/blob/main/expected/pgaudit.out), [PostgreSQL 17 logging](https://www.postgresql.org/docs/17/runtime-config-logging.html).
 
 ## Problema e minaccia
