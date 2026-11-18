@@ -5,6 +5,7 @@
 -- Independent human issuer+sub verification and change approval are required
 -- before invoking this script with a private schema-owner connection.
 -- Do not run with psql -a/-e, shell tracing or a municipal runtime credential.
+-- The private COPY helper must run from a trusted checkout root (#94, ADR 0078).
 \getenv add_admin_org COMUNI_ADD_ADMIN_ORGANIZATION_ID
 \getenv add_admin_issuer COMUNI_ADD_ADMIN_IDENTITY_ISSUER
 \getenv add_admin_subject COMUNI_ADD_ADMIN_SUBJECT
@@ -39,13 +40,32 @@
 
 BEGIN;
 
--- Literal quoting and transaction-local settings avoid SQL interpolation.
+-- Values are read through a fixed, local, client-side COPY STDIN program:
+-- no issuer, subject or ticket is interpolated into server SQL statements.
+-- Requires a trusted checkout with psql cwd at repository root.
+-- Base64(JSON) is only transport encoding, not encryption or anonymization.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py add-admin' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.add_admin_org', :'add_admin_org', true) AS org,
-    set_config('comuni.add_admin_issuer', :'add_admin_issuer', true) AS issuer,
-    set_config('comuni.add_admin_subject', :'add_admin_subject', true) AS subject,
-    set_config('comuni.add_admin_ticket', :'add_admin_ticket', true) AS ticket,
-    set_config('comuni.add_admin_approver', :'add_admin_approver', true) AS approver
+    set_config('comuni.add_admin_org',
+               secret ->> 'COMUNI_ADD_ADMIN_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.add_admin_issuer',
+               secret ->> 'COMUNI_ADD_ADMIN_IDENTITY_ISSUER', true) AS issuer,
+    set_config('comuni.add_admin_subject',
+               secret ->> 'COMUNI_ADD_ADMIN_SUBJECT', true) AS subject,
+    set_config('comuni.add_admin_ticket',
+               secret ->> 'COMUNI_ADD_ADMIN_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.add_admin_approver',
+               secret ->> 'COMUNI_ADD_ADMIN_APPROVER', true) AS approver
+FROM private_json
 \gset
 
 DO $enrollment$
