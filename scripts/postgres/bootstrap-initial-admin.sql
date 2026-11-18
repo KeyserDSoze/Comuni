@@ -4,6 +4,7 @@
 -- All input values are supplied through a separately approved operator change.
 -- Do not use for identity proofing, legacy backfills, second admins or runtime API.
 -- Do NOT run with psql -a/-e or shell tracing; do not print input or DB responses.
+-- Private COPY helper requires a trusted checkout root (ADR 0079 / #95).
 \getenv bootstrap_org COMUNI_BOOTSTRAP_ORGANIZATION_ID
 \getenv bootstrap_issuer COMUNI_BOOTSTRAP_IDENTITY_ISSUER
 \getenv bootstrap_subject COMUNI_BOOTSTRAP_SUBJECT
@@ -38,15 +39,32 @@
 
 BEGIN;
 
--- Only psql literal-quoting is used for operator-supplied data.
--- SET LOCAL holds values exclusively in this transaction; no dynamic SQL.
--- \gset suppresses output of the private inputs.
+-- Client-side COPY passes exactly five private inputs into a transaction-
+-- scoped TEMP table. No issuer, subject or ticket appears as a SQL literal.
+-- The local command is static; psql must run from a trusted repository root.
+-- Base64(JSON) is transport encoding only, not encryption or anonymization.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py bootstrap-admin' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.bootstrap_org', :'bootstrap_org', true) AS org,
-    set_config('comuni.bootstrap_issuer', :'bootstrap_issuer', true) AS issuer,
-    set_config('comuni.bootstrap_subject', :'bootstrap_subject', true) AS subject,
-    set_config('comuni.bootstrap_ticket', :'bootstrap_ticket', true) AS ticket,
-    set_config('comuni.bootstrap_approver', :'bootstrap_approver', true) AS approver
+    set_config('comuni.bootstrap_org',
+               secret ->> 'COMUNI_BOOTSTRAP_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.bootstrap_issuer',
+               secret ->> 'COMUNI_BOOTSTRAP_IDENTITY_ISSUER', true) AS issuer,
+    set_config('comuni.bootstrap_subject',
+               secret ->> 'COMUNI_BOOTSTRAP_SUBJECT', true) AS subject,
+    set_config('comuni.bootstrap_ticket',
+               secret ->> 'COMUNI_BOOTSTRAP_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.bootstrap_approver',
+               secret ->> 'COMUNI_BOOTSTRAP_APPROVER', true) AS approver
+FROM private_json
 \gset
 
 DO $bootstrap$
