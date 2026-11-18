@@ -87,5 +87,16 @@ class OrganizationRegistrationPrivateCopyTests(unittest.TestCase):
                 self.assertNotIn("Traceback", result.stderr)
 
 
+    def test_json_expansion_beyond_envelope_limit_is_rejected(self):
+        # Each field is at most 1023 UTF-8 bytes. Escaping expands this
+        # all-CJK JSON payload past the 8192-byte transport envelope cap.
+        values = {key: "漢" * 341 for key in KEYS}
+        result = invoke(values)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual("Private input transport rejected", result.stderr.strip())
+        self.assertNotIn("漢", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
