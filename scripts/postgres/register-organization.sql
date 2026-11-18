@@ -3,7 +3,7 @@
 -- OWNER-ONLY, OFFLINE registration of a NEW municipality. The operator must
 -- independently verify municipality identity, authorization and the change
 -- ticket before invoking psql over a private PostgreSQL connection.
--- Do NOT use -a/-e or set -x. No names/tickets are printed or used as SQL.
+-- Do NOT use -a/-e or set -x. Do not echo inputs; private COPY avoids SQL literal interpolation (#100).
 \getenv register_org COMUNI_REGISTER_ORGANIZATION_ID
 \getenv register_name COMUNI_REGISTER_ORGANIZATION_NAME
 \getenv register_ticket COMUNI_REGISTER_CHANGE_TICKET
@@ -32,13 +32,30 @@
 
 BEGIN;
 
--- psql literal quoting is mandatory for untrusted operator-supplied values.
--- SET LOCAL lasts only during this transaction, and \gset suppresses output.
+-- Fixed, allowlisted client-side COPY program: neither UUID, municipality
+-- name, change ticket nor reviewer appears in server-side SQL literals.
+-- The COPY payload is reversible base64(JSON), NOT encryption. Run psql only
+-- from a trusted repository checkout root, on a private connection.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py register-organization' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.register_org', :'register_org', true) AS org,
-    set_config('comuni.register_name', :'register_name', true) AS name,
-    set_config('comuni.register_ticket', :'register_ticket', true) AS ticket,
-    set_config('comuni.register_approver', :'register_approver', true) AS approver
+    set_config('comuni.register_org',
+               secret ->> 'COMUNI_REGISTER_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.register_name',
+               secret ->> 'COMUNI_REGISTER_ORGANIZATION_NAME', true) AS name,
+    set_config('comuni.register_ticket',
+               secret ->> 'COMUNI_REGISTER_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.register_approver',
+               secret ->> 'COMUNI_REGISTER_APPROVER', true) AS approver
+FROM private_json
 \gset
 
 DO $register$
