@@ -32,13 +32,29 @@
 
 BEGIN;
 
--- Store in transaction-local settings; quoted psql variables prevent SQL
--- injection and \gset avoids writing supplied names/refs into stdout.
+-- Fixed client-side COPY program transports exactly four allowlisted inputs
+-- (UUID, municipality label, change ticket, reviewer) outside SQL literal
+-- statements. Trusted checkout root required; base64(JSON) is reversible.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py provision-organization' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.provision_org', :'provision_org', true) AS org,
-    set_config('comuni.provision_name', :'provision_name', true) AS name,
-    set_config('comuni.provision_ticket', :'provision_ticket', true) AS ticket,
-    set_config('comuni.provision_approver', :'provision_approver', true) AS approver
+    set_config('comuni.provision_org',
+               secret ->> 'COMUNI_PROVISION_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.provision_name',
+               secret ->> 'COMUNI_PROVISION_ORGANIZATION_NAME', true) AS name,
+    set_config('comuni.provision_ticket',
+               secret ->> 'COMUNI_PROVISION_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.provision_approver',
+               secret ->> 'COMUNI_PROVISION_APPROVER', true) AS approver
+FROM private_json
 \gset
 
 DO $provision$
