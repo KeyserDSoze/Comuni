@@ -252,8 +252,13 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (AssertionError, OSError, subprocess.TimeoutExpired):
-        # Security test failures must not print captured SQL, env or logs.
-        print("FAIL: pgAudit ROLE/DDL verifier-redaction gate (see ADR 0076)",
+    except AssertionError as error:
+        # Internal assertion messages contain only fixed stage labels, safe
+        # role names and generic checks, NEVER query text or secrets.
+        print("FAIL: pgAudit ROLE/DDL verifier-redaction gate: " + str(error),
+              file=sys.stderr)
+        sys.exit(1)
+    except (OSError, subprocess.TimeoutExpired):
+        print("FAIL: pgAudit ROLE/DDL verifier-redaction gate unavailable",
               file=sys.stderr)
         sys.exit(1)
