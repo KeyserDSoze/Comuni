@@ -19,3 +19,7 @@ Il validatore `scripts/azure/check-legacy-postgres-handoff-plan.py` aveva un req
 ## Limiti e operazioni autorizzative
 
 Un piano Terraform validato mostra **solo una snapshot di metadata** e non dimostra che la stable riceva davvero il 100% o che la candidata sia ancora 0% **al momento dell'apply**; traffico, revoche, Key Vault versioni, secret bytes/CA, RLS e tutte le revisioni inattive vanno verificati con un preflight live autorizzato e approvazione indipendente. Lo script non verifica il possessore del secret né lo stato reale del backend Terraform e non può essere collegato automaticamente a `terraform apply`. Il piano può contenere password di produzione: leggerlo in stdin su runner privato, non caricarlo su issue/log, evitare pipe che stampano JSON. Questa misura non autorizza la rimozione della secret legacy, la rotazione del SQL login o il passaggio in produzione. L'epica #49 rimane aperta, come #6/#19/#5.
+
+## Emendamento #107 / ADR 0090 — stessa identità server del gate di staging
+
+L'invariante ACA Multiple stable 100% / candidata 0% di #106 è necessario ma **non sufficiente** al passaggio di gestione del secret legacy. Il gate handoff verifica ora anche il server PostgreSQL managed presente nei `planned_values` del **medesimo** piano e il `RuntimePostgres__ExpectedHost` della candidata, rifiutando in modo fail-closed mismatch, duplicati, campi non trusted e riferimenti a secret. La verifica è **metadata only**; il vecchio `postgres-connection` rimane intatto. Vedere ADR 0090 e la suite RED→GREEN #107.
