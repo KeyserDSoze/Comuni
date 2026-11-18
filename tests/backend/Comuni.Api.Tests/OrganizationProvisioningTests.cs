@@ -36,13 +36,16 @@ public sealed class OrganizationProvisioningTests(ApiFactory factory) : IClassFi
         Guid organizationId, string? name = "Comune di Prova",
         string? ticket = "CHANGE-2026-00032",
         string? approver = "reviewer-independent",
-        string? connectionOverride = null)
+        string? connectionOverride = null, bool logStatements = false)
     {
         var script = ProvisioningScript;
         Assert.True(File.Exists(script), "Owner-only organization provisioning script is missing.");
         var db = new NpgsqlConnectionStringBuilder(connectionOverride ?? OwnerConnection);
         var start = new ProcessStartInfo("psql")
         {
+            // Required for the static private COPY program; use a trusted checkout root.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(script)!, "..", "..")),
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
@@ -55,6 +58,9 @@ public sealed class OrganizationProvisioningTests(ApiFactory factory) : IClassFi
         })
             start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = db.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         start.Environment["COMUNI_PROVISION_ORGANIZATION_ID"] = organizationId.ToString("D");
         if (name is null) start.Environment.Remove("COMUNI_PROVISION_ORGANIZATION_NAME");
         else start.Environment["COMUNI_PROVISION_ORGANIZATION_NAME"] = name;
@@ -224,5 +230,90 @@ public sealed class OrganizationProvisioningTests(ApiFactory factory) : IClassFi
         Assert.Equal(0, (await ProvisionAsync(id,
             name: tries[0].ExitCode == 0 ? "Comune Prima Prova" : "Comune Seconda Prova")).ExitCode);
         Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+    }
+
+    [Fact]
+    public async Task Provisioning_SQL_must_not_inline_private_change_or_municipality_inputs()
+    {
+        var sql = await File.ReadAllTextAsync(ProvisioningScript);
+        foreach (var name in new[] {
+            "provision_org", "provision_name", "provision_ticket", "provision_approver"
+        })
+            Assert.DoesNotContain(":'" + name + "'", sql);
+        Assert.Contains("FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py provision-organization'", sql);
+    }
+
+    [Fact]
+    public async Task Owner_provisioning_private_name_ticket_reviewer_do_not_appear_in_real_Postgres_statement_logs()
+    {
+        // Only synthetic unique markers; never report canaries or raw log contents.
+        // A missing PostgreSQL 17 service log is a CI test failure, never a skip.
+        var marker = Guid.NewGuid().ToString("N");
+        var id = Guid.NewGuid();
+        var name = "Comune Sintetico Provision " + marker;
+        var ticket = "CHANGE-2026-PROVISION-" + marker;
+        var reviewer = "synthetic-reviewer-" + marker;
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+
+        var created = await ProvisionAsync(id, name, ticket, reviewer, logStatements: true);
+        Assert.Equal(0, created.ExitCode);
+        Assert.False(created.Output.Contains(name, StringComparison.Ordinal)
+                     || created.Output.Contains(ticket, StringComparison.Ordinal)
+                     || created.Output.Contains(reviewer, StringComparison.Ordinal),
+            "psql output exposed a synthetic private provisioning marker.");
+        Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "ps", "--filter", "ancestor=postgres:17-alpine",
+                                    "--format", "{{.ID}}" })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "Real PostgreSQL 17 service logs must be available in CI.");
+            return;
+        }
+        var containerIds = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(containerIds))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "Real PostgreSQL 17 service logs must be inspectable in CI.");
+            return;
+        }
+        Assert.DoesNotContain('\n', containerIds);
+
+        using var logs = new Process();
+        logs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, containerIds })
+            logs.StartInfo.ArgumentList.Add(arg);
+        logs.Start();
+        var stdout = logs.StandardOutput.ReadToEndAsync();
+        var stderr = logs.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await logs.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, logs.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(name, StringComparison.Ordinal)
+                     || serverLog.Contains(ticket, StringComparison.Ordinal)
+                     || serverLog.Contains(reviewer, StringComparison.Ordinal),
+            "PostgreSQL statement log exposed a synthetic provisioning marker; raw logs withheld.");
     }
 }
