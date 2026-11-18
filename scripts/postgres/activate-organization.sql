@@ -3,6 +3,7 @@
 -- Owner-only approved transition from CREATED/PENDING to ACTIVE.
 -- The first Admin OIDC must already be verified and bootstrapped separately.
 -- Do not use psql -a/-e, shell tracing, API runtime credentials, or echo input.
+-- Execute from a trusted checkout root for private COPY helper (#99/ADR 0083).
 \getenv activate_org COMUNI_ACTIVATE_ORGANIZATION_ID
 \getenv activate_ticket COMUNI_ACTIVATE_CHANGE_TICKET
 \getenv activate_approver COMUNI_ACTIVATE_APPROVER
@@ -25,11 +26,27 @@
 
 BEGIN;
 
--- Escaped psql literals; no dynamic SQL or leaked actor/identity data.
+-- A fixed local COPY program transports exactly three allowlisted inputs;
+-- no org, ticket or reviewer literal reaches the server SQL statement log.
+-- Requires trusted checkout root; base64(JSON) is NOT encryption.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py activate-organization' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.activate_org', :'activate_org', true) AS org,
-    set_config('comuni.activate_ticket', :'activate_ticket', true) AS ticket,
-    set_config('comuni.activate_approver', :'activate_approver', true) AS approver
+    set_config('comuni.activate_org',
+               secret ->> 'COMUNI_ACTIVATE_ORGANIZATION_ID', true) AS org,
+    set_config('comuni.activate_ticket',
+               secret ->> 'COMUNI_ACTIVATE_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.activate_approver',
+               secret ->> 'COMUNI_ACTIVATE_APPROVER', true) AS approver
+FROM private_json
 \gset
 
 DO $activation$
