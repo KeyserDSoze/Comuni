@@ -202,6 +202,9 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
         var database = new NpgsqlConnectionStringBuilder(OwnerConnection);
         var start = new ProcessStartInfo("psql")
         {
+            // Bootstrap private COPY resolves a fixed helper from repo root.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(Script("bootstrap-initial-admin.sql"))!, "..", "..")),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false

@@ -35,6 +35,8 @@ public sealed class OrganizationActivationTests(ApiFactory factory) : IClassFixt
         var db = new NpgsqlConnectionStringBuilder(connection ?? Owner);
         var start = new ProcessStartInfo("psql")
         {
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(file)!, "..", "..")),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
