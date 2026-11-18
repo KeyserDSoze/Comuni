@@ -38,6 +38,9 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
         var b = new NpgsqlConnectionStringBuilder(connectionOverride ?? Owner);
         var start = new ProcessStartInfo("psql")
         {
+            // Private client-side COPY FROM PROGRAM resolves the reviewed helper.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(Script)!, "..", "..")),
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true

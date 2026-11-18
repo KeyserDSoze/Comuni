@@ -3,6 +3,7 @@
 -- OFFLINE ONLY: schema-owner and independent external approval required.
 -- This script NEVER authenticates a real IdP account, MFA or reviewer.
 -- NEVER run with psql -a/-e or shell tracing; inputs are private.
+-- COPY helper requires psql working directory at a trusted checkout root (#97).
 \getenv operator_issuer COMUNI_PLATFORM_OPERATOR_IDENTITY_ISSUER
 \getenv operator_subject COMUNI_PLATFORM_OPERATOR_SUBJECT
 \getenv operator_action COMUNI_PLATFORM_OPERATOR_ACTION
@@ -37,14 +38,31 @@
 
 BEGIN;
 
--- Quoted psql variable substitution avoids SQL injection. \gset does not
--- print values; SET LOCAL values are scoped to this transaction.
+-- A fixed local COPY command transports exactly five allowlisted inputs,
+-- not issuer/sub/ticket literals in the server SQL statement log.
+-- Base64(JSON) is reversible, NOT encryption; use trusted checkout root.
+CREATE TEMP TABLE pg_temp.comuni_private_input (
+    payload text NOT NULL
+) ON COMMIT DROP;
+
+\copy pg_temp.comuni_private_input(payload) FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py platform-operator' WITH (FORMAT csv)
+
+WITH private_json AS (
+    SELECT convert_from(decode(payload, 'base64'), 'UTF8')::jsonb AS secret
+    FROM pg_temp.comuni_private_input
+)
 SELECT
-    set_config('comuni.operator_issuer', :'operator_issuer', true) AS issuer,
-    set_config('comuni.operator_subject', :'operator_subject', true) AS subject,
-    set_config('comuni.operator_action', :'operator_action', true) AS action,
-    set_config('comuni.operator_ticket', :'operator_ticket', true) AS ticket,
-    set_config('comuni.operator_approver', :'operator_approver', true) AS approver
+    set_config('comuni.operator_issuer',
+               secret ->> 'COMUNI_PLATFORM_OPERATOR_IDENTITY_ISSUER', true) AS issuer,
+    set_config('comuni.operator_subject',
+               secret ->> 'COMUNI_PLATFORM_OPERATOR_SUBJECT', true) AS subject,
+    set_config('comuni.operator_action',
+               secret ->> 'COMUNI_PLATFORM_OPERATOR_ACTION', true) AS action,
+    set_config('comuni.operator_ticket',
+               secret ->> 'COMUNI_PLATFORM_OPERATOR_CHANGE_TICKET', true) AS ticket,
+    set_config('comuni.operator_approver',
+               secret ->> 'COMUNI_PLATFORM_OPERATOR_APPROVER', true) AS approver
+FROM private_json
 \gset
 
 DO $operator$
