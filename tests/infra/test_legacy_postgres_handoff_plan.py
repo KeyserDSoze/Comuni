@@ -35,12 +35,24 @@ def plan():
         "value": SENTINEL, "id": "synthetic-id-not-to-log",
     }
     app = {
+        "revision_mode": "Multiple",
+        "ingress": [{
+            "external_enabled": True,
+            "target_port": 8080,
+            "traffic_weight": [
+                {"latest_revision": False, "revision_suffix": "r111111111111",
+                 "percentage": 100},
+                {"latest_revision": True, "label": "r222222222222",
+                 "percentage": 0},
+            ],
+        }],
         "secret": [
             {"name": "postgres-connection", "key_vault_secret_id": URI},
             {"name": "pg-dddddddddddddddd",
              "key_vault_secret_id": "https://comuni-itn-001-kv.vault.azure.net/secrets/postgres-runtime-connection/" + "d" * 32},
         ],
         "template": [{
+            "revision_suffix": "r222222222222",
             "container": [{
                 "env": [
                     {"name": "ConnectionStrings__Default",
@@ -139,6 +151,60 @@ class LegacyPostgresHandoffPlanTests(unittest.TestCase):
         cases.append(p)
         for case in cases:
             self.deny(case)
+
+    @staticmethod
+    def risky_aca(mutate):
+        case = plan()
+        app_change = case["resource_changes"][1]["change"]
+        # Both snapshots mutate identically. A plain no-op comparison MUST
+        # NOT turn a dangerous pre-existing routing state into an approval.
+        mutate(app_change["before"])
+        mutate(app_change["after"])
+        return case
+
+    def test_legacy_handoff_requires_multiple_revision_mode_and_staged_traffic(self):
+        for mutate in (
+            lambda app: app.update(revision_mode="Single"),
+            lambda app: app.pop("revision_mode"),
+            lambda app: app.update(revision_mode="multiple"),
+            lambda app: app.pop("ingress"),
+            lambda app: app.update(ingress=[]),
+            lambda app: app.update(ingress={}),
+            lambda app: app["ingress"][0].pop("traffic_weight"),
+            lambda app: app["ingress"][0].update(traffic_weight=[]),
+            lambda app: app["ingress"][0]["traffic_weight"].pop(),
+            lambda app: app["ingress"][0]["traffic_weight"].append({
+                "latest_revision": False, "revision_suffix": "other", "percentage": 0,
+            }),
+            lambda app: app["ingress"][0]["traffic_weight"][0].update(percentage=90),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(percentage=10),
+            lambda app: app["ingress"][0]["traffic_weight"][0].update(percentage=True),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(percentage=False),
+            lambda app: app["ingress"][0]["traffic_weight"][0].update(latest_revision=True),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(latest_revision=False),
+            lambda app: app["ingress"][0]["traffic_weight"][0].update(revision_suffix=""),
+            lambda app: app["ingress"][0]["traffic_weight"][0].pop("revision_suffix"),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(revision_suffix="r222222222222"),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(label="other"),
+            lambda app: app["ingress"][0]["traffic_weight"][1].pop("label"),
+            lambda app: app["ingress"][0]["traffic_weight"][0].update(revision_suffix="r222222222222"),
+            lambda app: app["template"][0].update(revision_suffix="other"),
+            lambda app: app["template"][0].pop("revision_suffix"),
+            lambda app: app["template"][0].update(revision_suffix=""),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(label="r111111111111"),
+        ):
+            with self.subTest(mutate=mutate):
+                self.deny(self.risky_aca(mutate))
+
+    def test_legacy_handoff_rejects_state_or_ingress_changes_even_if_safe_after(self):
+        case = plan()
+        case["resource_changes"][1]["change"]["before"]["ingress"][0][
+            "traffic_weight"][0]["percentage"] = 90
+        self.deny(case)
+        case = plan()
+        case["resource_changes"][1]["change"]["after"]["ingress"][0][
+            "traffic_weight"][1]["percentage"] = 1
+        self.deny(case)
 
     def test_unrelated_terraform_mutations_and_duplicate_resources_are_denied(self):
         for addr, t in [
