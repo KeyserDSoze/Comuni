@@ -21,3 +21,7 @@ La revisione #87 ha conservato `SELECT set_config('comuni.add_admin_subject', :'
 ## Fuori scope e responsabilità
 
 Il resto degli script (bootstrap iniziale, revoca, lifecycle, platform operator, onboarding organizzazioni e altri owner-only) usa ancora approcci non interamente migrati: **#86 resta aperta**. Una prova nel container PostgreSQL 17 con `log_statement=all` NON certifica che pgAudit Azure, SIEM, log errori, proxy, tracce dei payload COPY, backup, IdP reale o audit esterno non conservino dati: richiedono verifica sul deployment e approvazione Security/Privacy. Le stringhe ticket/reviewer non autenticano la persona, e non sostituiscono MFA, controllo a quattro occhi e revoca sessioni IdP (#84). I digest `md5(org|Admin|sub|issuer)::uuid` sono pseudonimi, non dati anonimi per GDPR. In caso di qualsiasi dubbio lasciare il Comune sospeso e bloccare il change.
+
+## Estensione distinta: bootstrap iniziale (#95 / ADR 0079)
+
+Il riferimento al bootstrap iniziale come script *non migrato* era corretto alla data di questo ADR. La #95 / ADR 0079 ha successivamente riutilizzato il canale COPY per il **primo** Admin OIDC, preservando un'altra policy di authorization; la #86 resta aperta per revoca, lifecycle, altri owner-only e verifiche Azure/SIEM. Non confondere i due workflow né la loro approvazione umana.

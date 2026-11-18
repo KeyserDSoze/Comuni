@@ -21,3 +21,7 @@ Nell'API già esistono controllo di membership OIDC per coppia esatta `iss`+`sub
 ## Limiti
 
 Il comando non verifica OIDC discovery, possesso dell'account, MFA, approvazione realmente firmata, migrazioni IdP, revoca sessioni o compliance. Deve essere eseguito **solo** in un ambiente autorizzato con rete privata PostgreSQL, TLS e account owner segreto, dopo migrazioni EF e prima di abilitare il login. La CI testa con due organization sintetiche, psql e PostgreSQL 17: **nessun bootstrap production live è stato eseguito**. Un proprietario DB compromesso conserva ampi privilegi; servono controllo accessi e separation of duties esterni. I workflow Superadmin/gestione di altri Admin restano nella #3/#10 e l'IdP effettivo nella #2.
+
+## Emendamento sul trasporto degli identificativi (#95 / ADR 0079)
+
+La descrizione originaria dei `quoted literals` `psql :'var'` resta documentazione della **versione precedente**, non dell'implementazione corrente. Per ridurre la raccolta di issuer/sub nei log PostgreSQL delle statement, il bootstrap usa adesso `\\copy` locale e input da temp table secondo ADR 0079. I controlli schema owner, tenant, first Admin, audit append-only e idempotenza descritti sopra restano invariati. L'aggiornamento non autorizza procedure reali senza #84/#86 e verifica delle pipeline di logging.
