@@ -30,13 +30,14 @@ public sealed class AdditionalAdminEnrollmentTests
     private static async Task<(int Code, string Output)> Run(
         string file, Guid organization, string? issuer = Issuer, string? subject = Second,
         string? ticket = Ticket, string? reviewer = "independent-reviewer",
-        string? connection = null)
+        string? connection = null, bool logStatements = false)
     {
         var script = Path.Combine(Root(), "scripts", "postgres", file);
         Assert.True(File.Exists(script), "RED: additional Admin enrollment must be implemented.");
         var db = new NpgsqlConnectionStringBuilder(connection ?? Owner);
         var processInfo = new ProcessStartInfo("psql")
         {
+            WorkingDirectory = Root(),
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false
         };
         foreach (var arg in new[]
@@ -47,6 +48,9 @@ public sealed class AdditionalAdminEnrollmentTests
         })
             processInfo.ArgumentList.Add(arg);
         processInfo.Environment["PGPASSWORD"] = db.Password;
+        if (logStatements)
+            processInfo.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         void SetEnv(string name, string? value)
         {
             if (value is null) processInfo.Environment.Remove(name);
@@ -92,8 +96,10 @@ public sealed class AdditionalAdminEnrollmentTests
 
     private static Task<(int Code, string Output)> Add(Guid org,
         string? issuer = Issuer, string? subject = Second, string? ticket = Ticket,
-        string? reviewer = "independent-reviewer", string? connection = null) =>
-        Run("enroll-additional-admin.sql", org, issuer, subject, ticket, reviewer, connection);
+        string? reviewer = "independent-reviewer", string? connection = null,
+        bool logStatements = false) =>
+        Run("enroll-additional-admin.sql", org, issuer, subject, ticket, reviewer,
+            connection, logStatements);
 
     private static async Task<(long Admins, long Active, long Added, long Initialized)> Counts(Guid org)
     {
@@ -302,4 +308,74 @@ public sealed class AdditionalAdminEnrollmentTests
         Assert.All(identical, result => Assert.Equal(0, result.Code));
         Assert.Equal((2L, 2L, 1L, 1L), await Counts(another));
     }
+    [Fact]
+    public async Task Additional_Admin_issuer_and_subject_do_not_appear_in_Postgres_statement_logs()
+    {
+        // An SQL source check complements the real PostgreSQL 17 log probe.
+        // Never emit raw logs in CI diagnostics, even when the assertion fails.
+        var sql = await File.ReadAllTextAsync(
+            Path.Combine(Root(), "scripts", "postgres", "enroll-additional-admin.sql"));
+        Assert.DoesNotContain(":'add_admin_subject'", sql);
+        Assert.DoesNotContain(":'add_admin_issuer'", sql);
+
+        var org = await Seed();
+        Assert.Equal(0, (await Bootstrap(org)).Code);
+        var subject = "synthetic-private-admin-" + Guid.NewGuid().ToString("N");
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+        var result = await Add(org, subject: subject, logStatements: true);
+        Assert.Equal(0, result.Code);
+        Assert.False(result.Output.Contains(subject, StringComparison.Ordinal),
+            "psql output included a synthetic OIDC subject.");
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI must expose PostgreSQL 17 logs for the privacy assertion.");
+            return; // A developer machine without Docker cannot prove server logging.
+        }
+
+        var ids = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(ids))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "The CI PostgreSQL service logs must be inspectable.");
+            return;
+        }
+        Assert.DoesNotContain('\n', ids);
+        using var dockerLog = new Process();
+        dockerLog.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, ids })
+            dockerLog.StartInfo.ArgumentList.Add(arg);
+        dockerLog.Start();
+        var stdout = dockerLog.StandardOutput.ReadToEndAsync();
+        var stderr = dockerLog.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await dockerLog.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, dockerLog.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(subject, StringComparison.Ordinal),
+            "PostgreSQL server statement logs contained a synthetic OIDC subject; raw logs withheld.");
+    }
+
 }
