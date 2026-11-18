@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOYMENT = ROOT / "docs/deployment.md"
 OWNER_EXAMPLE = re.compile(
-    r'^\s*psql\s+"([^"\n]*\bsslmode=[^"\n]+)"\s*\\\s*$',
+    r'^\s*psql\s+"([^"\n]*\buser=<schema-owner>[^"\n]*)"\s*\\\s*$',
     re.MULTILINE,
 )
 
@@ -22,7 +22,9 @@ class OwnerPsqlVerifyFullRunbookTests(unittest.TestCase):
         # Guard the real inventory so a missing/removed example cannot
         # silently pass or accidentally weaken to a bare psql command.
         self.assertEqual(10, len(examples))
-        self.assertNotIn("sslmode=require", text.lower())
+        # Prose may explicitly warn against require; only executable
+        # owner psql examples must forbid weaker TLS modes.
+        self.assertFalse(any("sslmode=require" in e.lower() for e in examples))
         for connection in examples:
             with self.subTest(connection=connection.split(" dbname=")[0]):
                 self.assertIn("sslmode=verify-full", connection.lower())
