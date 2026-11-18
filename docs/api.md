@@ -197,3 +197,7 @@ Il solo script offline owner-only `stage-emergency-admin-replacement.sql` acquis
 ## Nessuna variazione API per i segreti di firma tenant RLS (#90)
 
 Le procedure SQL offline `provision-tenant-proof.sql` e `stage-tenant-proof-key.sql` ora acquisiscono chiavi da COPY client-side e temp table invece che da SQL literal. Non sono nuovi endpoint HTTP, né modifiche agli issuer JWT, ai contratti REST, al verifier `platform.verified_tenant_id()`, alle policy RLS, alla firma HMAC o alla configurazione dei moduli; l'identificazione del Comune rimane server-side e fail-closed. L'API non può leggere o ruotare la chiave. ADR 0074 e issue #90; test solo PostgreSQL 17 sintetici, non rollout Azure live.
+
+## Password dei login PostgreSQL: nessuna nuova API (#91)
+
+I login SQL di runtime e inventario platform sono gestiti solo dalla procedura offline schema-owner. Il passaggio a verificatori SCRAM generati sul client, temp table e COPY non crea endpoint di provisioning, non cambia JWT/OIDC, moduli, ruoli applicativi, RLS, Admin/Superadmin o tenant isolation. `comuni_app_runtime` e `comuni_platform_reader` restano con grants distinti e invariati; la modifica riguarda esclusivamente il trasferimento del segreto e il DDL per creare/aggiornare le rispettive password. Vedere ADR 0075, docs/deployment e #91; **non** autorizza credenziali di produzione né l'uso in Azure live.
