@@ -40,6 +40,41 @@ def only_entry(entries, name):
     return matches[0]
 
 
+def validate_existing_staged_traffic(app, template):
+    # This is a READ-ONLY state handoff, not a deployment. Even a Terraform
+    # app no-op is unsafe as approval evidence if ACA is ALREADY promoting the
+    # candidate or the active revision cannot be identified unambiguously.
+    require(app.get("revision_mode") == "Multiple")
+    ingress = app.get("ingress")
+    require(isinstance(ingress, list) and len(ingress) == 1
+            and isinstance(ingress[0], dict))
+    weights = ingress[0].get("traffic_weight")
+    require(isinstance(weights, list) and len(weights) == 2
+            and all(isinstance(w, dict) for w in weights))
+    stable = [w for w in weights if w.get("latest_revision") is False]
+    candidate = [w for w in weights if w.get("latest_revision") is True]
+    require(len(stable) == 1 and len(candidate) == 1)
+    stable_weight, candidate_weight = stable[0], candidate[0]
+
+    # Check exact types: bool is an int subclass in Python (True == 1).
+    require(type(stable_weight.get("percentage")) is int
+            and stable_weight["percentage"] == 100)
+    require(type(candidate_weight.get("percentage")) is int
+            and candidate_weight["percentage"] == 0)
+
+    stable_suffix = stable_weight.get("revision_suffix")
+    candidate_suffix = template.get("revision_suffix")
+    require(isinstance(stable_suffix, str)
+            and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}[a-z0-9]",
+                             stable_suffix) is not None)
+    require(isinstance(candidate_suffix, str)
+            and re.fullmatch(r"r[a-z0-9]{12}", candidate_suffix) is not None
+            and candidate_suffix != stable_suffix)
+    require(not candidate_weight.get("revision_suffix")
+            and candidate_weight.get("label") == candidate_suffix
+            and stable_weight.get("label") != candidate_suffix)
+
+
 def validate_app(app_before, legacy_uri):
     # A state-only handoff must NOT update the application-scoped secret or
     # any revision. The legacy Key Vault secret must stay in Azure.
@@ -54,6 +89,7 @@ def validate_app(app_before, legacy_uri):
     containers = template[0].get("container")
     require(isinstance(containers, list) and len(containers) == 1
             and isinstance(containers[0], dict))
+    validate_existing_staged_traffic(app_before, template[0])
     default = only_entry(containers[0].get("env"), "ConnectionStrings__Default")
     runtime_name = default.get("secret_name")
     require(isinstance(runtime_name, str)
