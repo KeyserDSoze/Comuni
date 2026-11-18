@@ -25,13 +25,16 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
     private static async Task<(int Code, string Output)> RegisterAsync(
         string organization, string? name = "Comune Sintetico di Prova",
         string? ticket = "CHANGE-2026-00043", string? reviewer = "independent-reviewer",
-        string? connectionOverride = null)
+        string? connectionOverride = null, bool logStatements = false)
     {
         var path = Script("register-organization.sql");
         Assert.True(File.Exists(path), "Owner-only organization registration script missing (RED).");
         var database = new NpgsqlConnectionStringBuilder(connectionOverride ?? OwnerConnection);
         var start = new ProcessStartInfo("psql")
         {
+            // The static \\copy FROM PROGRAM helper must resolve from trusted repo root.
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(path)!, "..", "..")),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
@@ -43,6 +46,9 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
             "-d", database.Database, "-f", path
         }) start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = database.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         start.Environment["COMUNI_REGISTER_ORGANIZATION_ID"] = organization;
         void Optional(string key, string? value)
         {
@@ -272,5 +278,92 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
         Assert.True(state.Suspended);
         Assert.Equal(0L, state.EnabledModules);
         Assert.Equal(1L, state.Audit);
+    }
+
+    [Fact]
+    public async Task Registration_SQL_does_not_inline_any_owner_private_input()
+    {
+        var sql = await File.ReadAllTextAsync(Script("register-organization.sql"));
+        foreach (var name in new[] {
+            "register_org", "register_name", "register_ticket", "register_approver"
+        })
+            Assert.DoesNotContain(":'" + name + "'", sql);
+        Assert.Contains("FROM PROGRAM 'python3 scripts/postgres/stream-private-input.py register-organization'", sql);
+    }
+
+    [Fact]
+    public async Task Owner_registration_private_name_ticket_reviewer_are_absent_from_real_Postgres_statement_logs()
+    {
+        // All markers are synthetic. Never print PostgreSQL logs or the markers
+        // on failure. CI must fail if real PostgreSQL 17 docker logs are unavailable.
+        var suffix = Guid.NewGuid().ToString("N");
+        var id = Guid.NewGuid();
+        var name = "Comune Sintetico Registro " + suffix;
+        var ticket = "CHANGE-2026-REGISTER-" + suffix;
+        var reviewer = "synthetic-reviewer-" + suffix;
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+
+        var result = await RegisterAsync(id.ToString("D"), name, ticket, reviewer,
+            logStatements: true);
+        Assert.Equal(0, result.Code);
+        Assert.False(result.Output.Contains(name, StringComparison.Ordinal)
+                     || result.Output.Contains(ticket, StringComparison.Ordinal)
+                     || result.Output.Contains(reviewer, StringComparison.Ordinal),
+            "psql exposed private synthetic registration markers.");
+        var state = await StateAsync(id);
+        Assert.Equal((1L, 1L, 0L, 0L, 1L),
+            (state.Organizations, state.Modules, state.EnabledModules, state.Memberships, state.Audit));
+        Assert.Equal(name, state.Name);
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "ps", "--filter", "ancestor=postgres:17-alpine",
+                                   "--format", "{{.ID}}" })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "Real PostgreSQL 17 service logs must be available in CI.");
+            return;
+        }
+        var containerIds = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(containerIds))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "Real PostgreSQL 17 service logs must be inspectable in CI.");
+            return;
+        }
+        Assert.DoesNotContain('\n', containerIds);
+
+        using var logs = new Process();
+        logs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, containerIds })
+            logs.StartInfo.ArgumentList.Add(arg);
+        logs.Start();
+        var stdout = logs.StandardOutput.ReadToEndAsync();
+        var stderr = logs.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await logs.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, logs.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(name, StringComparison.Ordinal)
+                     || serverLog.Contains(ticket, StringComparison.Ordinal)
+                     || serverLog.Contains(reviewer, StringComparison.Ordinal),
+            "PostgreSQL statement logs exposed a synthetic registration marker; raw logs withheld.");
     }
 }
