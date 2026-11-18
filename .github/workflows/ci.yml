@@ -84,6 +84,10 @@ jobs:
             echo "ERROR: a retired key was reactivated" >&2
             exit 1
           fi
+      - name: Verify pgAudit ROLE/DDL SCRAM redaction in isolated PostgreSQL 17
+        run: |
+          docker build -f tests/postgres/pgaudit/Dockerfile -t comuni-pgaudit-roles:ci tests/postgres/pgaudit
+          python3 tests/postgres/pgaudit/verify_role_audit.py
       - name: API integration and isolation tests
         run: dotnet test tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj --configuration Release
 
