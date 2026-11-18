@@ -65,16 +65,16 @@ def plan():
             }]
         }],
     }
+    managed_pg = {"name": "comuni-itn-001-pg", "fqdn": EXPECTED_HOST}
     return {
         "format_version": "1.2",
-        "planned_values": {"root_module": {"resources": [{
-            "address": POSTGRES_ADDRESS,
-            "type": "azurerm_postgresql_flexible_server",
-            "values": {
-                "name": "comuni-itn-001-pg",
-                "fqdn": EXPECTED_HOST,
-            },
-        }]}},
+        "planned_values": {"root_module": {"resources": [
+            {"address": POSTGRES_ADDRESS,
+             "type": "azurerm_postgresql_flexible_server",
+             "values": copy.deepcopy(managed_pg)},
+            {"address": APP_ADDRESS, "type": "azurerm_container_app",
+             "values": copy.deepcopy(app)},
+        ]}},
         "resource_changes": [
             resource(SECRET_ADDRESS, "azurerm_key_vault_secret",
                      ["forget"], legacy_before, None),
@@ -82,6 +82,9 @@ def plan():
                      app, copy.deepcopy(app)),
             resource("azurerm_key_vault.main", "azurerm_key_vault", ["no-op"],
                      {"name": "comuni-itn-001-kv"}, {"name": "comuni-itn-001-kv"}),
+            resource(POSTGRES_ADDRESS, "azurerm_postgresql_flexible_server",
+                     ["no-op"], copy.deepcopy(managed_pg),
+                     copy.deepcopy(managed_pg)),
         ],
         "resource_drift": [],
         "output_changes": {},
@@ -222,6 +225,90 @@ class LegacyPostgresHandoffPlanTests(unittest.TestCase):
         case["resource_changes"][1]["change"]["after"]["template"][0][
             "container"][0]["env"][1]["value"] = SENTINEL_HOST
         self.deny(case)
+
+    @staticmethod
+    def planned(apply_change):
+        case = plan()
+        apply_change(case["planned_values"]["root_module"]["resources"])
+        return case
+
+    def test_managed_postgres_resource_changes_must_match_planned_values(self):
+        for mutation in (
+            lambda p: p["resource_changes"].pop(3),
+            lambda p: p["resource_changes"][3].update(type="azurerm_key_vault_secret"),
+            lambda p: p["resource_changes"][3]["change"].update(actions=["update"]),
+            lambda p: p["resource_changes"][3]["change"].update(before=None),
+            lambda p: p["resource_changes"][3]["change"].update(after=None),
+            lambda p: p["resource_changes"][3]["change"]["before"].update(
+                name="different-pg", fqdn="different-pg.postgres.database.azure.com"),
+            lambda p: p["resource_changes"][3]["change"]["after"].update(
+                name="different-pg", fqdn="different-pg.postgres.database.azure.com"),
+            lambda p: p["resource_changes"][3]["change"]["before"].update(
+                fqdn="different-pg.postgres.database.azure.com"),
+            lambda p: p["resource_changes"][3]["change"]["after"].update(
+                fqdn="different-pg.postgres.database.azure.com"),
+        ):
+            with self.subTest(mutation=mutation):
+                p = plan()
+                mutation(p)
+                self.deny(p)
+
+    def test_managed_planned_postgres_must_agree_with_noop_change(self):
+        for mutate in (
+            lambda resources: resources[0]["values"].update(
+                name="alternate-pg", fqdn="alternate-pg.postgres.database.azure.com"),
+            lambda resources: resources[0]["values"].update(
+                name="comuni-itn-001-pg-new",
+                fqdn="comuni-itn-001-pg-new.postgres.database.azure.com"),
+        ):
+            p = self.planned(mutate)
+            changed_host = p["planned_values"]["root_module"]["resources"][0]["values"]["fqdn"]
+            # Make ACA internally consistent with the altered managed FQDN.
+            # Only the separate PostgreSQL no-op change still states the truth.
+            for snapshot in ("before", "after"):
+                p["resource_changes"][1]["change"][snapshot]["template"][0][
+                    "container"][0]["env"][1]["value"] = changed_host
+            self.deny(p)
+
+    def test_aca_planned_snapshot_must_match_security_relevant_noop_values(self):
+        mutations = (
+            lambda app: app.update(revision_mode="Single"),
+            lambda app: app["ingress"][0]["traffic_weight"][0].update(percentage=99),
+            lambda app: app["ingress"][0]["traffic_weight"][1].update(percentage=1),
+            lambda app: app["template"][0].update(revision_suffix="r333333333333"),
+            lambda app: app["template"][0]["container"][0]["env"][0].update(
+                secret_name="pg-aaaaaaaaaaaaaaaa"),
+            lambda app: app["template"][0]["container"][0]["env"][1].update(
+                value="alternate-pg.postgres.database.azure.com"),
+            lambda app: app["secret"][0].update(key_vault_secret_id="https://other.vault.azure.net/secrets/postgres-connection"),
+            lambda app: app["secret"][1].update(key_vault_secret_id="https://other.vault.azure.net/secrets/postgres-runtime-connection/" + "a" * 32),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                self.deny(self.planned(lambda resources: mutate(resources[1]["values"])))
+
+        for change in (
+            lambda rows: rows.pop(1),
+            lambda rows: rows.append(copy.deepcopy(rows[1])),
+            lambda rows: rows[1].update(type="azurerm_key_vault_secret"),
+            lambda rows: rows[1].pop("values"),
+            lambda rows: rows[1].update(values=None),
+        ):
+            with self.subTest(change=change):
+                self.deny(self.planned(change))
+
+    def test_aca_planned_and_change_noop_consistency_must_hold_for_both_directions(self):
+        p = plan()
+        for snapshot in ("before", "after"):
+            p["resource_changes"][1]["change"][snapshot]["secret"][1][
+                "key_vault_secret_id"] = (
+                    "https://comuni-itn-001-kv.vault.azure.net/secrets/postgres-runtime-connection/"
+                    + "e" * 32)
+            p["resource_changes"][1]["change"][snapshot]["secret"][1]["name"] = (
+                "pg-eeeeeeeeeeeeeeee")
+            p["resource_changes"][1]["change"][snapshot]["template"][0]["container"][0][
+                "env"][0]["secret_name"] = "pg-eeeeeeeeeeeeeeee"
+        self.deny(p)
 
     @staticmethod
     def risky_aca(mutate):
