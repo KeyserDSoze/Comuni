@@ -25,6 +25,11 @@ INPUTS: dict[str, tuple[str, ...]] = {
     # NEVER forward the caller's complete environment to PostgreSQL.
     "tenant-legacy": ("TENANT_PROOF_KEY",),
     "tenant-stage": ("TENANT_PROOF_KEY_ID", "TENANT_PROOF_KEY"),
+    "retire-tenant-proof": (
+        "TENANT_PROOF_RETIRE_KEY_ID",
+        "TENANT_PROOF_REPLACEMENT_KEY_ID",
+        "TENANT_PROOF_GRACE_SECONDS",
+    ),
     "provision-organization": (
         "COMUNI_PROVISION_ORGANIZATION_ID",
         "COMUNI_PROVISION_ORGANIZATION_NAME",
