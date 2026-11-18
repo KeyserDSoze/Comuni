@@ -220,6 +220,20 @@ public sealed class TenantProofRetirementGuardTests
     }
 
     [Fact]
+    public async Task Invalid_grace_input_never_surfaces_in_PostgreSQL_integer_cast_error()
+    {
+        var target = FreshId();
+        var successor = FreshId();
+        await SeedAsync(target, OldKey);
+        await SeedAsync(successor, NewKey);
+        var invalid = "private-grace-canary-" + Guid.NewGuid().ToString("N");
+        var result = await RetireAsync(target, successor, invalid, logStatements: true);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.DoesNotContain(invalid, result.Output);
+        Assert.Null((await ReadAsync(target)).Revoked);
+    }
+
+    [Fact]
     public async Task Retirement_private_copy_transport_does_not_interpolate_metadata()
     {
         var sql = await File.ReadAllTextAsync(Script());
