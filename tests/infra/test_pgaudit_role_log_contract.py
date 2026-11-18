@@ -33,7 +33,7 @@ class PgAuditRoleLoggingContractTests(unittest.TestCase):
             "<REDACTED>", "log_statement=all",
             "log_parameter_max_length=-1",
             "pg_authid", "rollback", "comuni_app_runtime",
-            "comuni_platform_reader", "docker logs",
+            "comuni_platform_reader", '["docker", "logs", name]',
         ):
             self.assertIn(requirement, code)
         for forbidden in ("SET pgaudit.log = 'none'", "SET log_statement = 'none'"):
