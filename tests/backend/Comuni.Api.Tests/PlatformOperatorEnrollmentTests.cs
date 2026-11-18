@@ -32,7 +32,7 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
     private static async Task<(int Code, string Output)> ChangeAsync(
         string? issuer, string? subject, string? action = "enroll",
         string? ticket = "CHANGE-2026-00035", string? approver = "independent-reviewer",
-        string? connectionOverride = null)
+        string? connectionOverride = null, bool logStatements = false)
     {
         Assert.True(File.Exists(Script), "Owner-only platform operator management script is missing.");
         var b = new NpgsqlConnectionStringBuilder(connectionOverride ?? Owner);
@@ -48,6 +48,9 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
             "-d", b.Database, "-f", Script })
             start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = b.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         void Set(string key, string? value)
         {
             if (value is null) start.Environment.Remove(key);
@@ -286,4 +289,88 @@ public sealed class PlatformOperatorEnrollmentTests(OidcApiFactory factory) : IC
         Assert.NotEqual(0, denied.Code);
         Assert.Equal(0L, (await StateAsync(issuer, subject)).Operators);
     }
+    [Fact]
+    public async Task Platform_operator_script_must_not_inline_subject_or_issuer_as_SQL_literals()
+    {
+        var sql = await File.ReadAllTextAsync(Script);
+        Assert.DoesNotContain(":'operator_subject'", sql);
+        Assert.DoesNotContain(":'operator_issuer'", sql);
+    }
+
+    [Fact]
+    public async Task Platform_operator_enrollment_and_revocation_do_not_leak_identity_in_server_statement_logs()
+    {
+        // These two canaries are synthetic. Never expose raw logs or private
+        // values in CI diagnostics, including when the assertion fails.
+        var suffix = Guid.NewGuid().ToString("N");
+        var issuer = "https://operator-" + suffix + ".example.test";
+        var subject = "private-platform-operator-" + suffix;
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+        var enroll = await ChangeAsync(issuer, subject, logStatements: true);
+        Assert.Equal(0, enroll.Code);
+        Assert.False(enroll.Output.Contains(subject, StringComparison.Ordinal)
+            || enroll.Output.Contains(issuer, StringComparison.Ordinal),
+            "psql output exposed synthetic platform identity.");
+        var revoke = await ChangeAsync(issuer, subject, action: "revoke",
+            ticket: "CHANGE-2026-REVOKE97", logStatements: true);
+        Assert.Equal(0, revoke.Code);
+        Assert.False(revoke.Output.Contains(subject, StringComparison.Ordinal)
+            || revoke.Output.Contains(issuer, StringComparison.Ordinal),
+            "psql output exposed synthetic platform identity.");
+        var state = await StateAsync(issuer, subject);
+        Assert.Equal((1L, false, 1L, 1L, 0L),
+            (state.Operators, state.Active, state.Enrolls, state.Revokes, state.Reactivations));
+
+        using var ps = new Process();
+        ps.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        })
+            ps.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            ps.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "PostgreSQL 17 Docker logs must be available in CI.");
+            return;
+        }
+        var containerId = (await ps.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await ps.StandardError.ReadToEndAsync();
+        await ps.WaitForExitAsync();
+        if (ps.ExitCode != 0 || string.IsNullOrWhiteSpace(containerId))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "CI PostgreSQL server statement logs must be inspectable.");
+            return;
+        }
+        Assert.DoesNotContain('\n', containerId);
+
+        using var logProcess = new Process();
+        logProcess.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, containerId })
+            logProcess.StartInfo.ArgumentList.Add(arg);
+        logProcess.Start();
+        var stdout = logProcess.StandardOutput.ReadToEndAsync();
+        var stderr = logProcess.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await logProcess.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, logProcess.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(subject, StringComparison.Ordinal)
+            || serverLog.Contains(issuer, StringComparison.Ordinal),
+            "PostgreSQL statement log leaked a synthetic OIDC identity; raw log withheld.");
+    }
+
 }
