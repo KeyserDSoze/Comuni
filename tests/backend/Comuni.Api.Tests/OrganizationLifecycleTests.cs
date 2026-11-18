@@ -52,7 +52,8 @@ public sealed class OrganizationLifecycleTests(ApiFactory factory) : IClassFixtu
     private static async Task<(int Code, string Output)> LifecycleAsync(
         Guid org, string? action = "suspend",
         string? ticket = "CHANGE-2026-00033", string? approver = "independent-reviewer",
-        string? reason = "security-incident", string? connection = null)
+        string? reason = "security-incident", string? connection = null,
+        bool logStatements = false)
     {
         Assert.True(File.Exists(ScriptPath), "Owner-only lifecycle SQL script is missing.");
         var builder = new NpgsqlConnectionStringBuilder(connection ?? OwnerConnection);
@@ -70,6 +71,9 @@ public sealed class OrganizationLifecycleTests(ApiFactory factory) : IClassFixtu
         })
             start.ArgumentList.Add(arg);
         start.Environment["PGPASSWORD"] = builder.Password;
+        if (logStatements)
+            start.Environment["PGOPTIONS"] =
+                "-c log_statement=all -c log_parameter_max_length=-1 -c log_parameter_max_length_on_error=-1";
         start.Environment["COMUNI_LIFECYCLE_ORGANIZATION_ID"] = org.ToString("D");
         void SetOptional(string key, string? value)
         {
@@ -217,4 +221,91 @@ public sealed class OrganizationLifecycleTests(ApiFactory factory) : IClassFixtu
         Assert.Equal(0, (await LifecycleAsync(id, "reactivate")).Code);
         Assert.Equal((false, true, 2L, 0L, 0L), await StateAsync(id));
     }
+    [Fact]
+    public async Task Lifecycle_owner_script_never_inlines_change_reviewer_or_ticket_in_SQL()
+    {
+        var sql = await File.ReadAllTextAsync(ScriptPath);
+        Assert.DoesNotContain(":'lifecycle_ticket'", sql);
+        Assert.DoesNotContain(":'lifecycle_approver'", sql);
+        Assert.DoesNotContain(":'lifecycle_reason'", sql);
+    }
+
+    [Fact]
+    public async Task Suspend_and_reactivate_keep_private_change_canaries_out_of_Postgres_statement_logs()
+    {
+        // These canaries are synthetic. Never print raw logs or private values
+        // when an assertion fails; actual PostgreSQL 17 Docker logs are required in CI.
+        var org = await SeedAsync();
+        var suffix = Guid.NewGuid().ToString("N");
+        var ticket = "CHANGE-2026-LIFECYCLE-" + suffix;
+        var approver = "reviewer-" + suffix;
+        var since = DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O");
+
+        var suspended = await LifecycleAsync(org, ticket: ticket, approver: approver,
+            logStatements: true);
+        Assert.Equal(0, suspended.Code);
+        Assert.False(suspended.Output.Contains(ticket, StringComparison.Ordinal)
+                     || suspended.Output.Contains(approver, StringComparison.Ordinal),
+            "psql output contained private synthetic change inputs.");
+        Assert.Equal((true, true, 2L, 1L, 0L), await StateAsync(org));
+
+        var reactivated = await LifecycleAsync(org, action: "reactivate",
+            ticket: ticket, approver: approver, logStatements: true);
+        Assert.Equal(0, reactivated.Code);
+        Assert.False(reactivated.Output.Contains(ticket, StringComparison.Ordinal)
+                     || reactivated.Output.Contains(approver, StringComparison.Ordinal),
+            "psql output contained private synthetic change inputs.");
+        Assert.Equal((false, true, 2L, 1L, 1L), await StateAsync(org));
+
+        using var dockerPs = new Process();
+        dockerPs.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] {
+            "ps", "--filter", "ancestor=postgres:17-alpine", "--format", "{{.ID}}"
+        })
+            dockerPs.StartInfo.ArgumentList.Add(arg);
+        try
+        {
+            dockerPs.Start();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "The CI PostgreSQL service container logs must be available.");
+            return;
+        }
+        var id = (await dockerPs.StandardOutput.ReadToEndAsync()).Trim();
+        _ = await dockerPs.StandardError.ReadToEndAsync();
+        await dockerPs.WaitForExitAsync();
+        if (dockerPs.ExitCode != 0 || string.IsNullOrWhiteSpace(id))
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "The CI PostgreSQL statement log must be inspectable.");
+            return;
+        }
+        Assert.DoesNotContain('\n', id);
+        using var dockerLog = new Process();
+        dockerLog.StartInfo = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var arg in new[] { "logs", "--since", since, id })
+            dockerLog.StartInfo.ArgumentList.Add(arg);
+        dockerLog.Start();
+        var stdout = dockerLog.StandardOutput.ReadToEndAsync();
+        var stderr = dockerLog.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        await dockerLog.WaitForExitAsync(timeout.Token);
+        Assert.Equal(0, dockerLog.ExitCode);
+        var serverLog = await stdout + await stderr;
+        Assert.Contains("statement: COPY", serverLog);
+        Assert.False(serverLog.Contains(ticket, StringComparison.Ordinal)
+                     || serverLog.Contains(approver, StringComparison.Ordinal),
+            "PostgreSQL SQL statement log exposed synthetic change canaries; raw log withheld.");
+    }
+
 }
