@@ -51,6 +51,12 @@ class TenantRetirementPrivateCopyTests(unittest.TestCase):
         self.assertIn("LOCK TABLE platform.tenant_proof_keys IN SHARE ROW EXCLUSIVE MODE", sql)
         self.assertIn("interval '300 seconds'", sql)
         self.assertIn("least(valid_until,", sql)
+        # PostgreSQL may reorder boolean AND terms, so bad grace values
+        # must be protected by a nested CASE *before* integer casting.
+        self.assertIn(
+            "THEN CASE WHEN current_setting('comuni.grace_secs', true)::integer BETWEEN 0 AND 3600",
+            sql,
+        )
 
     def test_single_record_exact_allowlist_without_unrelated_environment(self):
         values = payload()
