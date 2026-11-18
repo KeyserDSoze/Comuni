@@ -203,7 +203,7 @@ public sealed class PostEmergencyAdminEnrollmentTests(OidcApiFactory factory)
         var org = await Staged();
         await InjectAudit(org, action, "emergency:" + Incident, subject);
         Assert.NotEqual(0, await Enroll(org));
-        Assert.Equal((1L, 1L, 0L, 2L, 1L).Added, (await Counts(org)).Added);
+        Assert.Equal(0L, (await Counts(org)).Added);
     }
 
     [Fact]
