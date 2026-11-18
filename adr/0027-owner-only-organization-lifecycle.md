@@ -20,3 +20,7 @@ L'ADR 0008 ha già introdotto `platform.organizations.is_suspended` e la policy 
 ## Rischi e limiti
 
 Non è una revoca OIDC, non invalida necessariamente **operazioni già in volo** o sessioni nell'IdP. L'effetto 403 è verificato per **nuove autorizzazioni/richieste** dopo commit; operazioni di emergenza potrebbero richiedere mitigazioni infrastrutturali aggiuntive. Il superuser/owner PostgreSQL rimane potente: change ticket, approver e reason sono attestazioni esterne non firmate, e il loro uso non sostituisce RBAC platform, separation of duties, human approval verificabile o recovery/audit federato. Una successiva vera console Superadmin richiede identità platform-level, policy, workflow e audit definiti in #3/#10. Non dichiarare go-live Azure, conformità GDPR/AgID, SPID/CIE, login reale, BFF o rotazione senza ulteriori controlli.
+
+## Nota di compatibilità input e logging SQL (#98 / ADR 0082)
+
+Il riferimento originale a `SET LOCAL` tramite `psql :'var'` descrive **la prima versione**, non la procedura attuale. La sospensione/riattivazione owner-only ora legge cinque campi allowlisted via `\copy` client-side e TEMP table, senza inviare i valori come literal delle statement. Il blocco owner, il lock, il 403 sulle nuove richieste, l'audit append-only e l'idempotenza restano invariati. Il payload base64(JSON) COPY è reversibile, e non sono attestati Azure/pgAudit/SIEM, identity proof e privacy review (#86/#84/#92).

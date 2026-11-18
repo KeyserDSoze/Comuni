@@ -35,3 +35,7 @@ La **riattivazione non è rollback dello staging**: ogni ritorno al servizio ric
 ## Compatibilità con enrollment post-riattivazione (#87, ADR 0077)
 
 Lo stage emergenziale qui definito continua a lasciare il Comune **sospeso**. Una volta intervenuta una **separata** riattivazione owner auditata, l'ADR 0077 consente un enrollment ordinario successivo solo se la revoca e lo staging dello stesso incident sono entrambi univoci, appartengono agli issuer+subject esatti e sono coerenti con un Admin recuperato ancora attivo; non modifica stage, grant, revoca o autorizzazioni di produzione.
+
+## Dipendenza lifecycle aggiornata (#98 / ADR 0082)
+
+Il passo preliminare di sospensione del Comune descritto in questo ADR usa adesso `set-organization-suspension.sql` con un client-side `\copy` privato e cinque input allowlisted. Le condizioni che richiedono una **sospensione auditata e indipendente** prima dell'emergency staging sono immutate, così come il blocco contro la riattivazione senza review: il cambio riguarda soltanto il trasporto della procedura lifecycle, non un'autorizzazione di break-glass. Base64 è reversibile; il canale, l'IdP e i reviewer reali restano da verificare (#84/#86/#92).
