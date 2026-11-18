@@ -80,7 +80,7 @@ Il primo Admin OIDC non è assegnabile da HTTP, né dal menu Amministrazione, n�
 
 ## Onboarding organization (nessun endpoint HTTP, #32)
 
-La creazione di una nuova organization **non è** accessibile agli Admin comunali né al browser. `scripts/postgres/provision-organization.sql` è un'operazione owner-only offline (ADR 0026) con UUID e nome approvati esternamente; inserisce `platform.organizations`, il flag `protocol` **disabled** e l'audit `platform.organization.created` atomicamente, senza creare membership. Un nuovo Comune resta 403 per tutte le route tenant protette finché non è predisposto un primo Admin OIDC tramite il diverso strumento owner (#31 / ADR 0025), e il Protocollo richiede successiva attivazione Admin. Nessun endpoint Superadmin o tenant override è stato aggiunto.
+La creazione di una nuova organization **non è** accessibile agli Admin comunali né al browser. `scripts/postgres/provision-organization.sql` è un'operazione owner-only offline (ADR 0026) con UUID e nome approvati esternamente; inserisce `platform.organizations`, il flag `protocol` **disabled** e l'audit `platform.organization.created` atomicamente, senza creare membership. Un nuovo Comune nasce **created (`is_activated=FALSE`)** e resta 403 per tutte le route tenant protette **anche dopo** il primo Admin OIDC tramite lo strumento owner (#31 / ADR 0025); richiede un nuovo ticket e il comando owner-only `activate-organization.sql` prima dell'accesso (ADR 0086/#102). Il Protocollo richiede inoltre una successiva abilitazione Admin. Nessun endpoint Superadmin o tenant override è stato aggiunto.
 
 
 ## Stato sospensione Comune — effetto API (#33, ADR 0008/0027)
@@ -205,3 +205,7 @@ I login SQL di runtime e inventario platform sono gestiti solo dalla procedura o
 ## Nessuna API per audit pgAudit dei login SQL (#92)
 
 La suite offline con pgAudit della #92 verifica i due script SQL di provisioning dei ruoli già introdotti dalla #91. Non introduce endpoint, permessi applicativi, JWT, bypass tenant, impersonificazione, feature flag o altre organizzazioni nel database reale. Il test PostgreSQL 17 usa un cluster CI disposable separato e controlla la presenza di audit ROLE/DDL e la redazione SCRAM nei log, secondo [ADR 0076](../adr/0076-pgaudit-role-scram-verifier-logging.md). La verifica delle configurazioni Azure/pgAuditLogToFile/SIEM e il go-live rimangono esplicitamente non eseguiti.
+
+## Correzione lifecycle provisioning legacy owner-only (#102 / ADR 0086)
+
+Nessun nuovo endpoint: lo script `provision-organization.sql` ora inserisce esplicitamente `is_activated=FALSE`, conservando audit `platform.organization.created` e il modulo Protocollo disattivato. Il bootstrap OIDC non rende operativo l'ente: `IsOperationalAsync` impone `activated AND NOT suspended`; soltanto `activate-organization.sql` (owner, change distinto, primo Admin OIDC valido e moduli off) crea un evento `platform.organization.activated`. I token municipali restano 403 fino all'attivazione, anche con membership valida; nessun override `organizationId` nei parametri HTTP o claim role bypass. Il DEFAULT TRUE PostgreSQL rimane per la sola compatibilità legacy.
