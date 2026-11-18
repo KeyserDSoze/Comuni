@@ -174,16 +174,22 @@ def main() -> None:
         container_started = True
         ready = False
         for _ in range(50):
+            # Docker's internal pg_isready may pass before the published host
+            # port is available. Probe the actual TCP+SCRAM path that every
+            # subsequent test uses to avoid flaky CI startup races.
             probe = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-U", OWNER, "-d", DB],
+                ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
+                 "-h", "127.0.0.1", "-p", PORT, "-U", OWNER,
+                 "-d", DB, "-A", "-t", "-c", "SELECT 1"],
+                cwd=ROOT, env=psql_env(PGOPTIONS=""),
                 capture_output=True, text=True, check=False, timeout=5,
             )
-            if probe.returncode == 0:
+            if probe.returncode == 0 and probe.stdout.strip() == "1":
                 ready = True
                 break
             time.sleep(1)
         if not ready:
-            raise AssertionError("pgAudit test PostgreSQL 17 did not become ready")
+            raise AssertionError("pgAudit test PostgreSQL 17 TCP/auth was not ready")
 
         # CREATE EXTENSION before enabling ROLE and DDL pgAudit session logging.
         sql("CREATE EXTENSION IF NOT EXISTS pgaudit", "enable real pgAudit",
