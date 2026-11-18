@@ -133,8 +133,11 @@ BEGIN
 
     -- Empty membership roster and feature flag off enforce server-side
     -- deny-by-default until a separately approved first Admin bootstrap.
-    INSERT INTO platform.organizations (id, name, is_suspended)
-    VALUES (v_id, v_name, FALSE);
+    -- The migration keeps DEFAULT TRUE for existing legacy rows, but a new
+    -- municipality must remain CREATED until an independently approved owner
+    -- activation after first Admin OIDC bootstrap (#102 / ADR 0086).
+    INSERT INTO platform.organizations (id, name, is_suspended, is_activated)
+    VALUES (v_id, v_name, FALSE, FALSE);
     INSERT INTO platform.organization_modules
         (organization_id, module_key, enabled)
     VALUES (v_id, 'protocol', FALSE);
