@@ -39,7 +39,13 @@ class PlatformReaderRoleContractTests(unittest.TestCase):
         self.assertIn("NOINHERIT", PROVISION)
         self.assertIn("NOBYPASSRLS", PROVISION)
         self.assertIn("NOCREATEROLE", PROVISION)
-        self.assertIn("PLATFORM_READ_DB_PASSWORD", PROVISION)
+        # The plaintext key name is intentionally absent from the SQL script.
+        # Only the fixed client-side helper reads this environment variable.
+        source = (ROOT / "scripts/postgres/stream-private-input.py").read_text()
+        self.assertIn("PLATFORM_READ_DB_PASSWORD", source)
+        self.assertIn("stream-private-input.py platform-role", PROVISION)
+        self.assertNotIn(":'platform_password'", PROVISION)
+        self.assertNotIn("\\gexec", PROVISION)
         self.assertNotIn("GRANT ALL PRIVILEGES ON ALL TABLES", PROVISION)
         self.assertNotIn("GRANT SELECT ON TABLE platform.organizations", PROVISION)
 
