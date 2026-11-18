@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import time
@@ -33,7 +32,7 @@ def run(args: list[str], label: str, env: dict[str, str] | None = None,
     try:
         p = subprocess.run(args, cwd=ROOT, env=env, capture_output=True,
                            text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except (OSError, subprocess.TimeoutExpired):
         raise AssertionError(f"pgAudit check unavailable at {label}") from None
     if expected == 0 and p.returncode != 0:
         raise AssertionError(
@@ -79,6 +78,10 @@ def script(name: str, role_password: str | None,
         env[key] = role_password
     if owner_password is not None:
         env["PGPASSWORD"] = owner_password
+    if runtime:
+        # Restricted SQL users must not set superuser-only pgAudit GUCs.
+        # This negative path must actually reach the schema-owner SQL guard.
+        env["PGOPTIONS"] = ""
     role = "comuni_app_runtime" if runtime else OWNER
     run(
         ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
@@ -101,7 +104,7 @@ def verifier(role: str) -> str:
 
 
 def assert_auth(role: str, password: str) -> None:
-    env = psql_env(PGPASSWORD=password)
+    env = psql_env(PGPASSWORD=password, PGOPTIONS="")
     who = sql("SELECT current_user", "SCRAM password login", env=env, role=role)
     if who != role:
         raise AssertionError("Password did not authenticate the expected role")
