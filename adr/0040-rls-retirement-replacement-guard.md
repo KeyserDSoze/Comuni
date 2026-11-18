@@ -20,3 +20,9 @@ Il ritiro originale `scripts/postgres/retire-tenant-proof-key.sql` poteva revoca
 ## Alternative scartate
 
 Un controllo non transazionale di `COUNT(*)` chiavi attive sarebbe vulnerabile al race del ritiro reciproco. Permettere `force=true` nello script ordinario aggirerebbe la guardia senza un processo di emergency review. Fidarsi dei soli metadati Key Vault non prova l'effettivo materiale HMAC in PostgreSQL. L'opzione scelta mantiene una sola API, un solo frontend e un solo PostgreSQL.
+
+## Evoluzione trasporto input (#103 / ADR 0087)
+
+Questa ADR descrive le invarianti originarie della guardia (successore active per grace+300 secondi, lock SHARE ROW EXCLUSIVE, update monotono, retry e concorrenza). Dopo #103 il trasporto **non** interpola più `:'retire_id'`, `:'replacement_id'`, `:'grace_secs'` in SQL: i tre metadati owner-only transitano tramite `\\copy` client-side statico da `stream-private-input.py retire-tenant-proof` con allowlist, TEMP `ON COMMIT DROP` e `current_setting` transaction-local. La validazione di formato ora si svolge **dentro** la stessa transazione, prima del lock; in caso di errore `psql ON_ERROR_STOP` chiude e PostgreSQL annulla TEMP/GUC e qualsiasi scrittura, senza alterare la guardia.
+
+I metadati ID e grace restano sensibili e **base64(JSON) è reversibile**: il test PostgreSQL17 verifica solo il testo degli statement sotto `log_statement=all` e non copre payload COPY, estensioni pgAudit, Azure/SIEM, backup o retention. Nessun permesso in più al runtime, né prova di rollout effettivo o autorizzazione alla rotazione di chiavi reali. #19/#86/#49/#92 restano aperte.
