@@ -78,6 +78,69 @@ public sealed class OrganizationProvisioningTests(ApiFactory factory) : IClassFi
         return (process.ExitCode, await stdout + await stderr);
     }
 
+
+    private static async Task<(int ExitCode, string Output)> OwnerLifecycleAsync(
+        string scriptName, Guid organizationId)
+    {
+        // Separate, approved owner-only steps: provisioning never bootstraps
+        // identities or activates an organization as a side effect.
+        var script = Path.Combine(Path.GetDirectoryName(ProvisioningScript)!, scriptName);
+        var db = new NpgsqlConnectionStringBuilder(OwnerConnection);
+        var start = new ProcessStartInfo("psql")
+        {
+            WorkingDirectory = Path.GetFullPath(Path.Combine(
+                Path.GetDirectoryName(script)!, "..", "..")),
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var arg in new[]
+        {
+            "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", db.Host,
+            "-p", db.Port.ToString(), "-U", db.Username, "-d", db.Database,
+            "-f", script
+        })
+            start.ArgumentList.Add(arg);
+        start.Environment["PGPASSWORD"] = db.Password;
+        start.Environment["COMUNI_BOOTSTRAP_ORGANIZATION_ID"] = organizationId.ToString("D");
+        start.Environment["COMUNI_BOOTSTRAP_IDENTITY_ISSUER"] =
+            "https://identity.example.test/tenant/v2.0";
+        start.Environment["COMUNI_BOOTSTRAP_SUBJECT"] = "synthetic-provisioning-first-admin";
+        start.Environment["COMUNI_BOOTSTRAP_CHANGE_TICKET"] = "CHANGE-2026-ADMIN102";
+        start.Environment["COMUNI_BOOTSTRAP_APPROVER"] = "synthetic-reviewer";
+        start.Environment["COMUNI_ACTIVATE_ORGANIZATION_ID"] = organizationId.ToString("D");
+        start.Environment["COMUNI_ACTIVATE_CHANGE_TICKET"] = "CHANGE-2026-ACTIVATE102";
+        start.Environment["COMUNI_ACTIVATE_APPROVER"] = "synthetic-reviewer";
+
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Owner lifecycle psql process unavailable.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await process.WaitForExitAsync(timeout.Token);
+        return (process.ExitCode, await stdout + await stderr);
+    }
+
+    private static async Task<(bool Activated, bool Suspended, long ActiveAdmins,
+        long Activations)> LifecycleAsync(Guid id)
+    {
+        await using var db = new NpgsqlConnection(OwnerConnection);
+        await db.OpenAsync();
+        await using var cmd = new NpgsqlCommand("""
+            SELECT o.is_activated, o.is_suspended,
+                   (SELECT count(*) FROM platform.organization_memberships
+                    WHERE organization_id=@id AND role='Admin' AND is_active),
+                   (SELECT count(*) FROM platform.audit_events
+                    WHERE organization_id=@id AND action='platform.organization.activated')
+            FROM platform.organizations o
+            WHERE o.id=@id
+            """, db);
+        cmd.Parameters.AddWithValue("id", id);
+        await using var rd = await cmd.ExecuteReaderAsync();
+        Assert.True(await rd.ReadAsync());
+        return (rd.GetBoolean(0), rd.GetBoolean(1), rd.GetInt64(2), rd.GetInt64(3));
+    }
+
     private static async Task<(long Organizations, long Modules, long Memberships, long Events)> CountsAsync(Guid id)
     {
         await using var connection = new NpgsqlConnection(OwnerConnection);
@@ -315,5 +378,81 @@ public sealed class OrganizationProvisioningTests(ApiFactory factory) : IClassFi
                      || serverLog.Contains(ticket, StringComparison.Ordinal)
                      || serverLog.Contains(reviewer, StringComparison.Ordinal),
             "PostgreSQL statement log exposed a synthetic provisioning marker; raw logs withheld.");
+    }
+
+    [Fact]
+    public async Task Legacy_owner_provisioning_creates_pending_and_requires_separate_Admin_and_activation()
+    {
+        var id = Guid.NewGuid();
+        Assert.Equal(0, (await ProvisionAsync(id)).ExitCode);
+        Assert.Equal((false, false, 0L, 0L), await LifecycleAsync(id));
+        Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+
+        // Without the first verified OIDC Admin, even the owner activation
+        // must reject and preserve the created state.
+        Assert.NotEqual(0, (await OwnerLifecycleAsync("activate-organization.sql", id)).ExitCode);
+        Assert.Equal((false, false, 0L, 0L), await LifecycleAsync(id));
+
+        Assert.Equal(0, (await OwnerLifecycleAsync("bootstrap-initial-admin.sql", id)).ExitCode);
+        Assert.Equal((false, false, 1L, 0L), await LifecycleAsync(id));
+
+        // Explicit test-only Reader membership exercises the real API gate
+        // with a valid DevelopmentJwt while OIDC Admin uses an issuer-bound ID.
+        await using (var db = new NpgsqlConnection(OwnerConnection))
+        {
+            await db.OpenAsync();
+            await using var add = new NpgsqlCommand("""
+                INSERT INTO platform.organization_memberships
+                    (organization_id,subject,role,is_active)
+                VALUES (@org,'legacy-provision-reader','Reader',TRUE)
+                """, db);
+            add.Parameters.AddWithValue("org", id);
+            await add.ExecuteNonQueryAsync();
+        }
+        using var reader = factory.ClientFor(id.ToString(), "Reader", "legacy-provision-reader");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await reader.GetAsync("/api/v1/context")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await reader.GetAsync("/api/v1/protocol/records")).StatusCode);
+
+        // An idempotent retry may not bypass approval or change memberships.
+        Assert.Equal(0, (await ProvisionAsync(id)).ExitCode);
+        Assert.Equal((false, false, 1L, 0L), await LifecycleAsync(id));
+
+        Assert.Equal(0, (await OwnerLifecycleAsync("activate-organization.sql", id)).ExitCode);
+        Assert.Equal((true, false, 1L, 1L), await LifecycleAsync(id));
+        Assert.Equal(HttpStatusCode.OK,
+            (await reader.GetAsync("/api/v1/context")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await reader.GetAsync("/api/v1/protocol/records")).StatusCode);
+
+        // No duplicate activation audit or implicit state changes on retry.
+        Assert.Equal(0, (await ProvisionAsync(id)).ExitCode);
+        Assert.Equal(0, (await OwnerLifecycleAsync("activate-organization.sql", id)).ExitCode);
+        Assert.Equal((true, false, 1L, 1L), await LifecycleAsync(id));
+        Assert.Equal((1L, 1L, 2L, 1L), await CountsAsync(id));
+    }
+
+    [Fact]
+    public async Task Existing_legacy_active_and_suspended_organizations_keep_their_default_state()
+    {
+        // Compatibility default TRUE is intentionally retained for existing
+        // legacy inserts; only newly provisioned tenants must override FALSE.
+        var active = Guid.NewGuid();
+        var suspended = Guid.NewGuid();
+        await using var db = new NpgsqlConnection(OwnerConnection);
+        await db.OpenAsync();
+        await using var insert = new NpgsqlCommand("""
+            INSERT INTO platform.organizations(id,name,is_suspended)
+            VALUES (@active, 'Existing Active Synthetic', FALSE),
+                   (@suspended, 'Existing Suspended Synthetic', TRUE)
+            """, db);
+        insert.Parameters.AddWithValue("active", active);
+        insert.Parameters.AddWithValue("suspended", suspended);
+        await insert.ExecuteNonQueryAsync();
+        Assert.Equal((true, false, 0L, 0L), await LifecycleAsync(active));
+        Assert.Equal((true, true, 0L, 0L), await LifecycleAsync(suspended));
+        Assert.NotEqual(0, (await ProvisionAsync(active, "Existing Active Synthetic")).ExitCode);
+        Assert.Equal((true, false, 0L, 0L), await LifecycleAsync(active));
     }
 }
