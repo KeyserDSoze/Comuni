@@ -156,3 +156,7 @@ Per le API, oltre a `UnambiguousPrincipalTests` (#57), eseguire `SignedDuplicate
 ## #60 — Regressioni JWT JOSE dopo validazione JwtBearer (ADR 0052)
 
 Per la verifica locale eseguire `dotnet test tests/backend/Comuni.Api.Tests/Comuni.Api.Tests.csproj` con PostgreSQL 17 di test e `TEST_DATABASE_CONNECTION` valido. La suite `SignedDuplicateJoseHeaderTests` costruisce JWT compatti HS256 finti (solo `Testing`) e RS256 con chiave/JWKS di prova, controlla duplicati `alg/kid/typ`, escape Unicode, JSON nested e limite header 8 KiB, senza raccogliere token di persone reali. Il guard usa **esclusivamente** i bytes del `SecurityToken` accettato dal framework `JwtBearer`; non analizza il token dell'header Authorization come fonte attendibile. La CI 7/7 prova il codice, non gli IdP o i certificati Azure di produzione. #2/#5/#49 rimangono epiche aperte.
+
+## Lifecycle del provisioning legacy dopo #102 (ADR 0086)
+
+Anche `provision-organization.sql` (procedura legacy owner-only) ora crea **created/is_activated=FALSE**, non active: `bootstrap-initial-admin.sql` associa il primo Admin OIDC ma lascia tutte le route tenant 403; è obbligatoria una distinta `activate-organization.sql` owner per la transizione a active, con evento audit e modulo Protocollo ancora off. `register-organization.sql` resta il percorso canonico per la registrazione pending. Nessun comando di test con valori sintetici equivale a onboarding reale o a verifiche indipendenti di identità/mandato/MFA.
