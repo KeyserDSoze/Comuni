@@ -51,12 +51,134 @@ FROM private_json
 \gset
 
 -- Preserve the existing strict metadata validation without SQL literals.
-SELECT CASE WHEN current_setting('comuni.retire_id', true) ~ '^[a-z][a-z0-9_-]{0,31}$'
-          AND current_setting('comuni.replacement_id', true) ~ '^[a-z][a-z0-9_-]{0,31}$'
+-- Guard the cast with a nested CASE: boolean AND is not guaranteed to
+-- short-circuit, and a cast error could echo invalid private input in logs.
+SELECT CASE
+         WHEN current_setting('comuni.retire_id', true) ~ '^[a-z][a-z0-9_-]{0,31}
+\if :valid
+\else
+    \echo 'Invalid key IDs or grace seconds (0..3600).'
+    DO $$ BEGIN RAISE EXCEPTION 'Retirement refused by safety guard'; END $$;
+\endif
+
+SET LOCAL lock_timeout = '10s';
+-- Serializes successive or reciprocal retirements and concurrent staging.
+-- Does not block ordinary SELECT by the volatile RLS verifier.
+LOCK TABLE platform.tenant_proof_keys IN SHARE ROW EXCLUSIVE MODE;
+
+SELECT CASE WHEN
+    EXISTS (SELECT 1 FROM platform.tenant_proof_keys WHERE key_id = current_setting('comuni.retire_id', true))
+    AND EXISTS (
+        SELECT 1 FROM platform.tenant_proof_keys
+        WHERE key_id = current_setting('comuni.replacement_id', true)
+          AND revoked_at IS NULL
+          AND not_before <= clock_timestamp()
+          AND valid_until > clock_timestamp()
+              + (current_setting('comuni.grace_secs', true))::integer * interval '1 second'
+              + interval '300 seconds'
+    ) THEN 'true' ELSE 'false' END AS replacement_safe \gset
+
+\if :replacement_safe
+    -- A retry may shorten, but can NEVER lengthen the acceptance window or
+    -- clear an already committed revocation timestamp.
+    UPDATE platform.tenant_proof_keys
+    SET valid_until = least(valid_until,
+                            clock_timestamp() + (current_setting('comuni.grace_secs', true))::integer * interval '1 second'),
+        revoked_at = CASE WHEN (current_setting('comuni.grace_secs', true))::integer = 0
+            THEN coalesce(revoked_at, clock_timestamp()) ELSE revoked_at END
+    WHERE key_id = current_setting('comuni.retire_id', true);
+    COMMIT;
+\else
+    ROLLBACK;
+    \echo 'No safe active replacement; retirement blocked.'
+    DO $$ BEGIN RAISE EXCEPTION 'Retirement refused by safety guard'; END $$;
+\endif
+
+          AND current_setting('comuni.replacement_id', true) ~ '^[a-z][a-z0-9_-]{0,31}
+\if :valid
+\else
+    \echo 'Invalid key IDs or grace seconds (0..3600).'
+    DO $$ BEGIN RAISE EXCEPTION 'Retirement refused by safety guard'; END $$;
+\endif
+
+SET LOCAL lock_timeout = '10s';
+-- Serializes successive or reciprocal retirements and concurrent staging.
+-- Does not block ordinary SELECT by the volatile RLS verifier.
+LOCK TABLE platform.tenant_proof_keys IN SHARE ROW EXCLUSIVE MODE;
+
+SELECT CASE WHEN
+    EXISTS (SELECT 1 FROM platform.tenant_proof_keys WHERE key_id = current_setting('comuni.retire_id', true))
+    AND EXISTS (
+        SELECT 1 FROM platform.tenant_proof_keys
+        WHERE key_id = current_setting('comuni.replacement_id', true)
+          AND revoked_at IS NULL
+          AND not_before <= clock_timestamp()
+          AND valid_until > clock_timestamp()
+              + (current_setting('comuni.grace_secs', true))::integer * interval '1 second'
+              + interval '300 seconds'
+    ) THEN 'true' ELSE 'false' END AS replacement_safe \gset
+
+\if :replacement_safe
+    -- A retry may shorten, but can NEVER lengthen the acceptance window or
+    -- clear an already committed revocation timestamp.
+    UPDATE platform.tenant_proof_keys
+    SET valid_until = least(valid_until,
+                            clock_timestamp() + (current_setting('comuni.grace_secs', true))::integer * interval '1 second'),
+        revoked_at = CASE WHEN (current_setting('comuni.grace_secs', true))::integer = 0
+            THEN coalesce(revoked_at, clock_timestamp()) ELSE revoked_at END
+    WHERE key_id = current_setting('comuni.retire_id', true);
+    COMMIT;
+\else
+    ROLLBACK;
+    \echo 'No safe active replacement; retirement blocked.'
+    DO $$ BEGIN RAISE EXCEPTION 'Retirement refused by safety guard'; END $$;
+\endif
+
           AND current_setting('comuni.retire_id', true) <> current_setting('comuni.replacement_id', true)
-          AND current_setting('comuni.grace_secs', true) ~ '^[0-9]{1,4}$'
-          AND current_setting('comuni.grace_secs', true)::integer BETWEEN 0 AND 3600
-       THEN 'true' ELSE 'false' END AS valid \gset
+          AND current_setting('comuni.grace_secs', true) ~ '^[0-9]{1,4}
+\if :valid
+\else
+    \echo 'Invalid key IDs or grace seconds (0..3600).'
+    DO $$ BEGIN RAISE EXCEPTION 'Retirement refused by safety guard'; END $$;
+\endif
+
+SET LOCAL lock_timeout = '10s';
+-- Serializes successive or reciprocal retirements and concurrent staging.
+-- Does not block ordinary SELECT by the volatile RLS verifier.
+LOCK TABLE platform.tenant_proof_keys IN SHARE ROW EXCLUSIVE MODE;
+
+SELECT CASE WHEN
+    EXISTS (SELECT 1 FROM platform.tenant_proof_keys WHERE key_id = current_setting('comuni.retire_id', true))
+    AND EXISTS (
+        SELECT 1 FROM platform.tenant_proof_keys
+        WHERE key_id = current_setting('comuni.replacement_id', true)
+          AND revoked_at IS NULL
+          AND not_before <= clock_timestamp()
+          AND valid_until > clock_timestamp()
+              + (current_setting('comuni.grace_secs', true))::integer * interval '1 second'
+              + interval '300 seconds'
+    ) THEN 'true' ELSE 'false' END AS replacement_safe \gset
+
+\if :replacement_safe
+    -- A retry may shorten, but can NEVER lengthen the acceptance window or
+    -- clear an already committed revocation timestamp.
+    UPDATE platform.tenant_proof_keys
+    SET valid_until = least(valid_until,
+                            clock_timestamp() + (current_setting('comuni.grace_secs', true))::integer * interval '1 second'),
+        revoked_at = CASE WHEN (current_setting('comuni.grace_secs', true))::integer = 0
+            THEN coalesce(revoked_at, clock_timestamp()) ELSE revoked_at END
+    WHERE key_id = current_setting('comuni.retire_id', true);
+    COMMIT;
+\else
+    ROLLBACK;
+    \echo 'No safe active replacement; retirement blocked.'
+    DO $$ BEGIN RAISE EXCEPTION 'Retirement refused by safety guard'; END $$;
+\endif
+
+         THEN CASE WHEN current_setting('comuni.grace_secs', true)::integer BETWEEN 0 AND 3600
+              THEN 'true' ELSE 'false' END
+         ELSE 'false'
+       END AS valid \gset
 \if :valid
 \else
     \echo 'Invalid key IDs or grace seconds (0..3600).'
