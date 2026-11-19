@@ -25,3 +25,7 @@ L'ADR 0035 ha aperto `GET /api/v1/admin/audit` soltanto all'Admin attivo della p
 - La presente API non documenta un registro di accesso a norma, non registra i 401/403 né fornisce notifiche di intrusioni, catene crittografiche, WORM, backup/restore verificati, tempi di retention o prova d'immutabilità contro il proprietario del DB. Nessun dato storico viene riscritto.
 - L'attore memorizzato è l'ID tecnico `sub`; la sua liceità e conservazione devono essere valutate per finalità GDPR/PA. La risposta al browser non include tale ID e la PWA non lo stampa.
 - **Nessun rollout Azure o IdP live**: la CI è eseguita su PostgreSQL e dati di test sintetici. Gli epic #4/#5 rimangono aperti; questa ADR non riguarda l'audit globale della platform né l'impersonificazione Superadmin.
+
+## Emendamento #112 / ADR 0095 — rimozione bypass applicativo di lettura non tracciata
+
+La route `GET /api/v1/admin/audit` era già atomica e tracciata, ma l'interfaccia `IOrganizationAuditReader` esponeva ancora `ListRecentAsync` per letture senza evento. La superficie pubblica del Business è ora limitata a `ListRecentAndRecordAsync`; la query bounded e a proiezione minima resta **privata** dentro `OrganizationAuditReader`. I test PostgreSQL del runtime ristretto passano anch'essi dal percorso con evento e transazione tenant firmata, con rollback dei probe. Una guardia xUnit reflection impedisce la reintroduzione del metodo pubblico, con RED realmente registrato in CI. Si tratta di un controllo C#, non di un divieto di SELECT SQL diretto: #4/#5/#92 restano aperte (ADR 0095).
