@@ -144,6 +144,56 @@ public sealed class MembershipAdministrationIntegrityTests
     }
 
     [Fact]
+    public async Task Oidc_issuer_bound_memberships_keep_exact_pseudonym_and_conflicts_fail_closed()
+    {
+        var own = await SeedAsync();
+        const string subject = "oidc-member-synthetic";
+        const string issuer = "https://issuer.synthetic.example.test/tenant";
+        const string otherIssuer = "https://other.synthetic.example.test/tenant";
+        var signer = Signer();
+        await using (var db = Db(own))
+        {
+            await using var transaction = await TenantDatabaseTransaction.BeginAsync(
+                db, signer, CancellationToken.None);
+            var repository = new MembershipAdministrationRepository(
+                db, signer, new MembershipIssuerPolicy(true));
+
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                repository.SetActiveAsync(own, subject, "Reader", true, null,
+                    Audit(own, subject, "Reader", true), CancellationToken.None));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                repository.SetActiveAsync(own, subject, "Reader", true, "http://issuer.synthetic.example.test",
+                    Audit(own, subject, "Reader", true, "http://issuer.synthetic.example.test"),
+                    CancellationToken.None));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                repository.SetActiveAsync(own, subject, "Reader", true, issuer,
+                    Audit(own, subject, "Reader", true, otherIssuer), CancellationToken.None));
+
+            Assert.Equal(MembershipUpdateStatus.Updated,
+                await repository.SetActiveAsync(own, subject, "Reader", true, issuer,
+                    Audit(own, subject, "Reader", true, issuer), CancellationToken.None));
+            Assert.Equal(MembershipUpdateStatus.IssuerConflict,
+                await repository.SetActiveAsync(own, subject, "Reader", true, otherIssuer,
+                    Audit(own, subject, "Reader", true, otherIssuer), CancellationToken.None));
+            Assert.Equal(MembershipUpdateStatus.Unchanged,
+                await repository.SetActiveAsync(own, subject, "Reader", true, issuer,
+                    Audit(own, subject, "Reader", true, issuer), CancellationToken.None));
+            await transaction.CommitAsync();
+        }
+
+        Assert.Equal((1L, 1L, (bool?)true), await CountsAsync(own, subject, "Reader"));
+        await using var owner = new NpgsqlConnection(OwnerConnection);
+        await owner.OpenAsync();
+        await using var audit = new NpgsqlCommand("""
+            SELECT resource_id FROM platform.audit_events
+            WHERE organization_id=@org AND resource_type='platform.membership'
+            """, owner);
+        audit.Parameters.AddWithValue("org", own);
+        Assert.Equal(Pseudonym(own, subject, "Reader", issuer),
+            (Guid)(await audit.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task Correct_grants_revocations_idempotence_and_rollback_remain_atomic()
     {
         var own = await SeedAsync();
