@@ -6,19 +6,41 @@ namespace Comuni.Infrastructures.Persistence;
 
 public sealed class ModuleAdministrationRepository(ComuniDbContext db, TenantProofSigner signer) : IModuleAdministrationStore
 {
-    public async Task<IReadOnlyList<ModuleState>> ListAsync(Guid organizationId, CancellationToken cancellationToken) =>
-        await db.OrganizationModules.AsNoTracking()
+    public async Task<IReadOnlyList<ModuleState>> ListAsync(Guid organizationId, CancellationToken cancellationToken)
+    {
+        RequireCurrentOrganization(organizationId);
+        return await db.OrganizationModules.AsNoTracking()
             .Where(m => m.OrganizationId == organizationId && m.ModuleKey == "protocol")
             .OrderBy(m => m.ModuleKey)
             .Select(m => new ModuleState(m.ModuleKey, m.Enabled))
             .ToListAsync(cancellationToken);
+    }
+
+    private void RequireCurrentOrganization(Guid organizationId)
+    {
+        // Fail explicitly before a query; EF filters and PostgreSQL signed
+        // tenant RLS remain independent guards on the database connection.
+        if (organizationId == Guid.Empty || db.CurrentOrganizationId != organizationId)
+            throw new UnauthorizedAccessException("Module administration tenant context mismatch.");
+    }
 
     public async Task<ModuleUpdateStatus> SetEnabledAsync(
         Guid organizationId, string moduleKey, bool enabled,
         AuditEvent audit, CancellationToken cancellationToken)
     {
-        if (audit.OrganizationId != organizationId || audit.ResourceId != organizationId)
-            throw new ArgumentException("Audit entry must belong to the current organization.", nameof(audit));
+        RequireCurrentOrganization(organizationId);
+        // A repository caller cannot persist a module state beside an
+        // unrelated or reversed audit action. Enforce the Business contract
+        // again before the first SQL statement and before attaching the event.
+        var expectedAction = enabled
+            ? "platform.module.protocol.enabled"
+            : "platform.module.protocol.disabled";
+        if (moduleKey != "protocol" ||
+            audit.OrganizationId != organizationId ||
+            audit.ResourceId != organizationId ||
+            audit.ResourceType != "platform.module" ||
+            audit.Action != expectedAction)
+            throw new UnauthorizedAccessException("Module administration audit contract mismatch.");
 
         var ownsTransaction = db.Database.CurrentTransaction is null;
         await using var transaction = ownsTransaction
