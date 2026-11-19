@@ -161,9 +161,12 @@ public sealed class RuntimeDatabasePrivilegesTests
             ?? throw new InvalidOperationException("Tenant proof key is required."));
         await using var transaction = await TenantDatabaseTransaction.BeginAsync(db, signer, CancellationToken.None);
         var store = new MembershipAdministrationRepository(db, signer, new MembershipIssuerPolicy(false));
+        // The restricted runtime test must supply the canonical target audit
+        // pseudonym, not an arbitrary GUID that the repository must reject.
         var audit = AuditEvent.Create(org, "runtime-test-admin",
             "platform.membership.officer.activated", "platform.membership",
-            Guid.NewGuid(), "runtime-member-trace");
+            MembershipAuditResourceIdentity.Create(org, "Officer", "runtime-new-officer", null),
+            "runtime-member-trace");
         Assert.Equal(MembershipUpdateStatus.Updated, await store.SetActiveAsync(
             org, "runtime-new-officer", "Officer", true, null, audit, CancellationToken.None));
 
