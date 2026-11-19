@@ -27,3 +27,7 @@ Il database e le API convalidano membership Admin/Officer/Reader, ma non esistev
 ## Evoluzione ADR 0022
 
 La gestione Reader/Officer da parte dell'Admin vincola ora le membership OIDC all'**issuer autenticato** dell'Admin. Il binding non è sovrascrivibile da body e non viene riassegnato automaticamente per righe con issuer NULL o diverso; un conflitto restituisce 409. Vedere ADR 0022 per runbook fail-closed di migrazione identità.
+
+## Emendamento #110 / ADR 0093 — integrità semantica dell'audit Reader/Officer
+
+La validazione dell'audit in `MembershipAdministrationRepository` ora verifica in modo fail-closed action, tipo risorsa, pseudonimo di `organization|role|sub|issuer` e contesto tenant prima di ogni SQL, in aggiunta a ruoli Reader/Officer, issuer OIDC e RLS già previsti. Il calcolo SHA256 originale è stato estratto in `MembershipAuditResourceIdentity` e condiviso fra Business e Persistence, senza cambiare gli ID emessi e senza aggiungere plaintext del target all'evento. Anche `ListAsync` nega in modo esplicito letture richieste per un Comune diverso dal contesto. Vedere ADR 0093 e test con login PostgreSQL runtime ristretto; non sostituisce la review della privacy, l'IdP reale o la protezione dell'audit contro owner DB.
