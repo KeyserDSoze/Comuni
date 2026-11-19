@@ -12,23 +12,45 @@ public sealed class MembershipAdministrationRepository(ComuniDbContext db, Tenan
     MembershipIssuerPolicy issuerPolicy)
     : IMembershipAdministrationStore
 {
-    public async Task<IReadOnlyList<MembershipState>> ListAsync(Guid organizationId, CancellationToken ct) =>
-        await db.OrganizationMemberships.AsNoTracking()
+    public async Task<IReadOnlyList<MembershipState>> ListAsync(Guid organizationId, CancellationToken ct)
+    {
+        RequireCurrentOrganization(organizationId);
+        return await db.OrganizationMemberships.AsNoTracking()
             .Where(x => x.OrganizationId == organizationId)
             .OrderBy(x => x.Subject).ThenBy(x => x.Role)
             .Select(x => new MembershipState(x.Subject, x.Role, x.IsActive, x.IdentityIssuer))
             .ToListAsync(ct);
+    }
+
+    private void RequireCurrentOrganization(Guid organizationId)
+    {
+        if (organizationId == Guid.Empty || db.CurrentOrganizationId != organizationId)
+            throw new UnauthorizedAccessException("Membership administration tenant context mismatch.");
+    }
 
     public async Task<MembershipUpdateStatus> SetActiveAsync(
         Guid organizationId, string subject, string role,
         bool enabled, string? validatedIssuer, AuditEvent audit, CancellationToken ct)
     {
-        if (organizationId == Guid.Empty || db.CurrentOrganizationId != organizationId ||
-            audit.OrganizationId != organizationId ||
-            role is not ("Reader" or "Officer") ||
+        RequireCurrentOrganization(organizationId);
+        if (role is not ("Reader" or "Officer") ||
+            string.IsNullOrWhiteSpace(subject) || subject.Length > 160 ||
+            subject != subject.Trim() || subject.Any(char.IsControl) ||
             (issuerPolicy.RequiresOidcBinding &&
                 !MembershipIssuerPolicy.IsTrustedFormat(validatedIssuer)))
-            throw new UnauthorizedAccessException("Cannot edit memberships outside the authorized tenant/roles.");
+            throw new UnauthorizedAccessException("Invalid membership administration operation.");
+
+        // The repository cannot trust an event assembled by another caller.
+        // The resource ID is stable, issuer-bound and pseudonymous, exactly as
+        // in the original Business contract. Never put the target sub into audit.
+        var expectedAction =
+            $"platform.membership.{role.ToLowerInvariant()}.{(enabled ? "activated" : "deactivated")}";
+        if (audit.OrganizationId != organizationId ||
+            audit.Action != expectedAction ||
+            audit.ResourceType != "platform.membership" ||
+            audit.ResourceId != MembershipAuditResourceIdentity.Create(
+                organizationId, role, subject, validatedIssuer))
+            throw new UnauthorizedAccessException("Membership administration audit contract mismatch.");
 
         // Demo values remain unbound and never turn into OIDC entitlements.
         var identityIssuer = issuerPolicy.RequiresOidcBinding ? validatedIssuer : null;
