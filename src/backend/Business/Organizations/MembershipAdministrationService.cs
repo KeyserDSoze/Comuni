@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Comuni.Business.Audit;
 using Comuni.Domains.Audit;
 using Comuni.Domains.Organizations;
@@ -50,9 +48,8 @@ public sealed class MembershipAdministrationService(
         // A stable pseudonymous audit resource id references this specific
         // membership without storing the external subject in the audit payload.
         // This is a deterministic identifier, NOT an anonymization guarantee.
-        var hashed = SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"{organizationId:D}|{role}|{subject}|{actor.IdentityIssuer ?? ""}"));
-        var resourceId = new Guid(hashed.AsSpan(0, 16));
+        var resourceId = MembershipAuditResourceIdentity.Create(
+            organizationId, role, subject, actor.IdentityIssuer);
         var audit = AuditEvent.Create(organizationId, actor.ActorSubject,
             $"platform.membership.{role.ToLowerInvariant()}.{(enabled ? "activated" : "deactivated")}",
             "platform.membership", resourceId, actor.CorrelationId);
