@@ -21,3 +21,7 @@ Nessuna API pubblica di lettura/scrittura audit viene esposta. Le eventuali cons
 ## Correzione difensiva successiva — modulo Protocollo (#109 / ADR 0092)
 
 Il principio di transazione atomica documento/stato+audit non basta se il chiamante passa un'azione audit semanticamente incompatibile con la modifica. Il repository di amministrazione moduli ora verifica nel confine Infrastructure `moduleKey`, `audit.Action`, `audit.ResourceType`, `audit.OrganizationId`, `audit.ResourceId` e uguaglianza con `CurrentOrganizationId` prima di eseguire SQL. I test PostgreSQL con runtime ristretto e tenant assertion firmata esercitano anche rollback, idempotenza e impossibilità di cambiare un altro Comune. Non estende le garanzie verso DB owner/superuser, retention o prova crittografica di integrità; vedere ADR 0092.
+
+## Emendamento #111 / ADR 0094 — record Protocollo e audit devono descrivere la stessa operazione
+
+Oltre all'atomicità fra registrazione e evento, `ProtocolRepository` ora richiede tenant del record identico a `CurrentOrganizationId` e audit **semanticamente esatto**: action `protocol.record.created`, tipo `protocol.record`, resourceId e organizationId uguali al record. Il rifiuto avviene prima della query/inizio transazione. `ListAsync` rifiuta esplicitamente org vuota o differente. Test xUnit/PostgreSQL17 con login runtime ristretto e firma tenant verificano negazione, atomicità, rollback e assenza di effetti cross-tenant. La vertical slice non dimostra conformità AgID o integrità del registro contro schema-owner; vedere ADR 0094.
