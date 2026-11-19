@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Comuni.Domains.Audit;
 using Comuni.Infrastructures.Persistence;
 using Comuni.Business.Organizations;
 using Microsoft.EntityFrameworkCore;
@@ -181,12 +182,15 @@ public sealed class MunicipalAuditApiTests(ApiFactory factory) : IClassFixture<A
         {
             await using var signed = await TenantDatabaseTransaction.BeginAsync(
                 ownDb, signer, CancellationToken.None);
-            var listed = await new OrganizationAuditReader(ownDb)
-                .ListRecentAsync(own, CancellationToken.None);
+            var consultation = AuditEvent.Create(own, "synthetic-runtime-admin",
+                "platform.audit.consulted", "platform.audit", own, "synthetic-probe-audit");
+            var reader = new OrganizationAuditReader(ownDb);
+            var listed = await reader.ListRecentAndRecordAsync(
+                own, consultation, CancellationToken.None);
             Assert.Equal(2, listed.Count);
             Assert.All(listed, item => Assert.Equal("platform.module.protocol.enabled", item.Action));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-                new OrganizationAuditReader(ownDb).ListRecentAsync(Guid.NewGuid(), CancellationToken.None));
+                reader.ListRecentAndRecordAsync(Guid.NewGuid(), consultation, CancellationToken.None));
         }
 
         var second = await SeedAsync(1);
@@ -194,8 +198,10 @@ public sealed class MunicipalAuditApiTests(ApiFactory factory) : IClassFixture<A
         {
             await using var signed = await TenantDatabaseTransaction.BeginAsync(
                 otherDb, signer, CancellationToken.None);
+            var consultation = AuditEvent.Create(second, "synthetic-runtime-admin",
+                "platform.audit.consulted", "platform.audit", second, "other-synthetic-probe-audit");
             var listed = await new OrganizationAuditReader(otherDb)
-                .ListRecentAsync(second, CancellationToken.None);
+                .ListRecentAndRecordAsync(second, consultation, CancellationToken.None);
             Assert.Single(listed);
         }
     }

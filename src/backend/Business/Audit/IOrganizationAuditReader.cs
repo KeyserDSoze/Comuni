@@ -11,8 +11,7 @@ public sealed record MunicipalAuditEntry(Guid Id, string Action,
 
 public interface IOrganizationAuditReader
 {
-    Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAsync(
-        Guid organizationId, CancellationToken cancellationToken);
+    // No public unlogged reader: consultations must be appended atomically.
 
     // An authenticated Admin HTTP read must append the consultation event
     // in the same signed RLS transaction, or fail without returning data.

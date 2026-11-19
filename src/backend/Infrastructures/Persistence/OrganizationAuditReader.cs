@@ -12,7 +12,7 @@ namespace Comuni.Infrastructures.Persistence;
 /// </summary>
 public sealed class OrganizationAuditReader(ComuniDbContext db) : IOrganizationAuditReader
 {
-    public async Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAsync(
+    private async Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAsync(
         Guid organizationId, CancellationToken cancellationToken)
     {
         if (organizationId == Guid.Empty || db.CurrentOrganizationId != organizationId)
