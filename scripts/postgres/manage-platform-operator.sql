@@ -38,6 +38,17 @@
 
 BEGIN;
 
+-- pgAudit may expose PL/pgSQL bind values from WRITE statements even when
+-- client inputs arrive via private COPY. Deny parameter-value audit logging
+-- BEFORE the COPY helper runs; keep ROLE/DDL/WRITE/FUNCTION metadata active.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only identity operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 -- A fixed local COPY command transports exactly five allowlisted inputs,
 -- not issuer/sub/ticket literals in the server SQL statement log.
 -- Base64(JSON) is reversible, NOT encryption; use trusted checkout root.

@@ -249,6 +249,7 @@ def private_owner_script(file: str, values: dict[str, str],
         "register-organization.sql", "bootstrap-initial-admin.sql",
         "activate-organization.sql", "enroll-additional-admin.sql",
         "revoke-admin.sql", "set-organization-suspension.sql",
+        "manage-platform-operator.sql", "provision-organization.sql",
     ):
         raise AssertionError("Unreviewed owner identity script")
     env = psql_env(**values)
@@ -470,6 +471,163 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
     )
     assert_identity_privacy(after[len(prefix):], client_output, canaries)
 
+
+def assert_operator_provision_privacy(server_log: str, client_output: str,
+                                      canaries: tuple[str, ...]) -> None:
+    """Prove operator/provision metadata exists without leaking canary values.
+
+    This handles only the log suffix after previous municipal onboarding.
+    Neither secrets nor log lines are included in assertion messages.
+    """
+    categories = (
+        "second-organization-id", "second-organization-name",
+        "second-provision-ticket", "second-provision-reviewer",
+        "platform-issuer", "platform-subject", "operator-enroll-ticket",
+        "operator-revoke-ticket", "operator-reviewer",
+        "invalid-platform-subject",
+    )
+    if len(canaries) != len(categories) or any(not item for item in canaries):
+        raise AssertionError("Invalid synthetic operator canary inventory")
+    for category, canary in zip(categories, canaries, strict=True):
+        if canary in client_output:
+            raise AssertionError("Synthetic operator canary in client output: " +
+                                 category)
+        if canary in server_log:
+            # We never print the value or even the line where it appeared.
+            raise AssertionError("Synthetic operator canary in PostgreSQL logs: " +
+                                 category)
+
+    for marker in ("DO $provision$", "DO $operator$"):
+        if marker not in server_log:
+            raise AssertionError("Owner-only operator/provision DO audit missing")
+    audit_lines = [
+        line for line in server_log.splitlines()
+        if "AUDIT: SESSION" in line
+    ]
+    if sum(",FUNCTION,DO," in line for line in audit_lines) < 2:
+        raise AssertionError("Operator/provision pgAudit FUNCTION events missing")
+    if not any(",WRITE,INSERT," in line for line in audit_lines):
+        raise AssertionError("Operator/provision pgAudit INSERT events missing")
+    if not any(",WRITE,UPDATE," in line for line in audit_lines):
+        raise AssertionError("Operator revoke pgAudit UPDATE event missing")
+    if server_log.count("statement: COPY") < 2:
+        raise AssertionError("Operator/provision native COPY audit missing")
+
+
+def verify_platform_and_provision_under_pgaudit(container_name: str) -> None:
+    """Real second-municipality provisioning and platform operator lifecycle.
+
+    A new log window isolates this from the six owner-only operations already
+    tested. The operators are a platform scope, not municipality memberships.
+    All private values are synthetic and travel only through client COPY.
+    """
+    prefix = run(["docker", "logs", container_name],
+                 "baseline platform operation audit", include_stderr=True)
+    marker = uuid.uuid4().hex[:12]
+    second_id = str(uuid.uuid4())
+    second_name = "Comune Secondario Sintetico " + marker
+    provision_ticket = "PROV-2026-" + marker
+    provision_reviewer = "reviewer-provision-" + marker
+    operator_issuer = "https://platform-ci.example.test/operator-" + marker
+    operator_subject = "platform-sub-" + marker
+    enroll_ticket = "OP-ENROLL-" + marker
+    revoke_ticket = "OP-REVOKE-" + marker
+    operator_reviewer = "platform-reviewer-" + marker
+    invalid_subject = " invalid-platform-sub-" + marker
+
+    second_provision = {
+        "COMUNI_PROVISION_ORGANIZATION_ID": second_id,
+        "COMUNI_PROVISION_ORGANIZATION_NAME": second_name,
+        "COMUNI_PROVISION_CHANGE_TICKET": provision_ticket,
+        "COMUNI_PROVISION_APPROVER": provision_reviewer,
+    }
+    operator_enroll = {
+        "COMUNI_PLATFORM_OPERATOR_IDENTITY_ISSUER": operator_issuer,
+        "COMUNI_PLATFORM_OPERATOR_SUBJECT": operator_subject,
+        "COMUNI_PLATFORM_OPERATOR_ACTION": "enroll",
+        "COMUNI_PLATFORM_OPERATOR_CHANGE_TICKET": enroll_ticket,
+        "COMUNI_PLATFORM_OPERATOR_APPROVER": operator_reviewer,
+    }
+    operator_revoke = dict(operator_enroll)
+    operator_revoke["COMUNI_PLATFORM_OPERATOR_ACTION"] = "revoke"
+    operator_revoke["COMUNI_PLATFORM_OPERATOR_CHANGE_TICKET"] = revoke_ticket
+
+    output = ""
+    # Both unsafe executions must abort before the COPY producer starts and
+    # leave no additional municipality or platform operator in the database.
+    for script_name, inputs in (
+        ("provision-organization.sql", second_provision),
+        ("manage-platform-operator.sql", operator_enroll),
+    ):
+        rejected = private_owner_script(
+            script_name, inputs, expect_failure=True, metadata_only=False)
+        if ("Owner-only identity operation requires parameter-free audit metadata"
+                not in rejected):
+            raise AssertionError("Unsafe platform owner pgAudit profile not rejected")
+        output += rejected
+
+    before = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.organizations) = 1
+        AND (SELECT count(*) FROM platform.platform_operators) = 0
+        AND (SELECT count(*) FROM platform.platform_operator_audit_events) = 0
+        """, "guarded platform owner operations are side effect free")
+    if before != "t":
+        raise AssertionError("Parameter-on guard changed platform state")
+
+    output += private_owner_script("provision-organization.sql", second_provision)
+    output += private_owner_script("manage-platform-operator.sql", operator_enroll)
+
+    # Exact retries are no-op and cannot duplicate owner audits.
+    output += private_owner_script("provision-organization.sql", second_provision)
+    output += private_owner_script("manage-platform-operator.sql", operator_enroll)
+
+    invalid = dict(operator_enroll)
+    invalid["COMUNI_PLATFORM_OPERATOR_SUBJECT"] = invalid_subject
+    output += private_owner_script("manage-platform-operator.sql", invalid,
+                                   expect_failure=True)
+
+    output += private_owner_script("manage-platform-operator.sql", operator_revoke)
+    output += private_owner_script("manage-platform-operator.sql", operator_revoke)
+
+    # No secret or canary in SQL: the static query checks tenant separation,
+    # default-disabled services, correct operator lifecycle and audit counts.
+    verified = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.organizations) = 2
+        AND (SELECT count(*) FROM platform.organizations
+             WHERE is_activated=FALSE AND is_suspended=FALSE) = 1
+        AND (SELECT count(*) FROM platform.organizations
+             WHERE is_activated=TRUE AND is_suspended=TRUE) = 1
+        AND (SELECT count(*) FROM platform.organization_modules
+             WHERE module_key='protocol' AND enabled=FALSE) = 2
+        AND (SELECT count(*) FROM platform.organization_memberships) = 2
+        AND (SELECT count(*) FROM platform.audit_events
+             WHERE action='platform.organization.created') = 1
+        AND (SELECT count(*) FROM platform.audit_events) = 7
+        AND (SELECT count(*) FROM platform.platform_operators
+             WHERE is_active=FALSE AND identity_issuer IS NOT NULL) = 1
+        AND (SELECT count(*) FROM platform.platform_operator_audit_events
+             WHERE action IN ('platform.operator.enrolled',
+                              'platform.operator.revoked')) = 2
+        AND (SELECT count(*) FROM platform.platform_operator_audit_events) = 2
+        """, "isolated platform operator and second municipality invariants")
+    if verified != "t":
+        raise AssertionError("Platform owner operations violated expected invariants")
+
+    after = run(["docker", "logs", container_name],
+                "collect isolated platform pgAudit log suffix",
+                include_stderr=True)
+    if not after.startswith(prefix):
+        raise AssertionError("Cannot isolate platform owner pgAudit log window")
+    canaries = (
+        second_id, second_name, provision_ticket, provision_reviewer,
+        operator_issuer, operator_subject, enroll_ticket, revoke_ticket,
+        operator_reviewer, invalid_subject,
+    )
+    assert_operator_provision_privacy(after[len(prefix):], output, canaries)
+
+
 def main() -> None:
     name = "comuni-pgaudit-ci-" + uuid.uuid4().hex[:8]
     container_started = False
@@ -572,8 +730,10 @@ def main() -> None:
                    include_stderr=True)
         assert_audits(logs, observed_verifiers, test_passwords)
         verify_identity_under_pgaudit(name)
-        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and owner identity COPY verified; "
-              "synthetic SCRAM and OIDC canaries absent from captured logs.")
+        verify_platform_and_provision_under_pgaudit(name)
+        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and eight owner-only COPY "
+              "operations verified; synthetic SCRAM/OIDC/organization canaries "
+              "absent from captured logs.")
     finally:
         if container_started:
             # Always delete the synthetic roles and entire ephemeral cluster.
