@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -99,7 +100,7 @@ def sql(command: str, label: str, env: dict[str, str] | None = None,
 
 def script(name: str, role_password: str | None,
            runtime: bool = False, expect_failure: bool = False,
-           owner_password: str | None = None) -> None:
+           owner_password: str | None = None) -> str:
     env = psql_env()
     key = ("RUNTIME_DB_PASSWORD" if name == "provision-runtime-role.sql"
            else "PLATFORM_READ_DB_PASSWORD")
@@ -112,12 +113,14 @@ def script(name: str, role_password: str | None,
         # This negative path must actually reach the schema-owner SQL guard.
         env["PGOPTIONS"] = ""
     role = "comuni_app_runtime" if runtime else OWNER
-    run(
+    # Capture stdout AND stderr privately, including failed COPY/owner checks.
+    # The caller audits them only after collecting all verifier canaries.
+    return run(
         ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
          "-p", PORT, "-U", role, "-d", DB, "-f",
          str(ROOT / "scripts" / "postgres" / name)],
         f"offline role script {name}" + (" denied" if expect_failure else ""),
-        env=env, expected=1 if expect_failure else 0,
+        env=env, expected=1 if expect_failure else 0, include_stderr=True,
     )
 
 
@@ -166,17 +169,27 @@ def scram_components(verifier: str) -> tuple[str, str, str]:
 
 
 def assert_audits(log: str, verifiers: list[str],
-                  passwords: list[str]) -> None:
-    # The complete verifier is not the only secret-equivalent representation:
-    # fail if any salt, StoredKey or ServerKey is present anywhere in native,
-    # extension or error-context logs, even without the full verifier.
+                  passwords: list[str], client_output: str = "") -> None:
+    # Base64 transport is reversible, not redaction. The exact single-record
+    # CSV payload is base64(canonical JSON {"SCRAM_VERIFIER": verifier}).
+    # Also reject bare base64(verifier/password), raw SCRAM components, and
+    # raw plaintext in BOTH server logs and private psql stdout/stderr.
     sensitive = [item for item in passwords + verifiers if item]
     for item in verifiers:
         sensitive.extend(scram_components(item))
-    if any(value in log for value in sensitive):
-        # Never print the candidate or raw server log.
+        envelope = json.dumps(
+            {"SCRAM_VERIFIER": item}, ensure_ascii=True,
+            separators=(",", ":"), sort_keys=True,
+        ).encode("ascii")
+        sensitive.append(base64.b64encode(envelope).decode("ascii"))
+    for item in passwords + verifiers:
+        if item:
+            sensitive.append(base64.b64encode(item.encode("ascii")).decode("ascii"))
+    if any(value in output for output in (log, client_output)
+           for value in sensitive):
+        # Never print a candidate, envelope, client output or raw server log.
         raise AssertionError(
-            "Sensitive SCRAM material leaked into PostgreSQL/pgAudit server logs")
+            "Sensitive SCRAM material in PostgreSQL/pgAudit or psql output")
 
     audit_lines = [
         line for line in log.splitlines()
@@ -1177,6 +1190,7 @@ def main() -> None:
     container_started = False
     test_passwords: list[str] = []
     observed_verifiers: list[str] = []
+    client_outputs: list[str] = []
     try:
         # The image is built from postgres:17-bookworm with the matching
         # postgresql-17-pgaudit package. No Azure or external database.
@@ -1243,11 +1257,11 @@ def main() -> None:
             initial = "ci-private-audit-" + role + "-" + uuid.uuid4().hex
             rotated = "ci-private-audit-rotation-" + role + "-" + uuid.uuid4().hex
             test_passwords.extend([initial, rotated])
-            script(file, initial)
+            client_outputs.append(script(file, initial))
             old_verifier = verifier(role)
             observed_verifiers.append(old_verifier)
             assert_auth(role, initial)
-            script(file, rotated)
+            client_outputs.append(script(file, rotated))
             current_verifier = verifier(role)
             observed_verifiers.append(current_verifier)
             if current_verifier == old_verifier:
@@ -1256,29 +1270,37 @@ def main() -> None:
 
             # A failed COPY/input validation must rollback and preserve the
             # existing verifier and role permissions.
-            script(file, None, expect_failure=True)
+            client_outputs.append(script(file, None, expect_failure=True))
             if verifier(role) != current_verifier:
                 raise AssertionError("Invalid role input did not rollback")
             assert_auth(role, rotated)
 
             # The restricted app account cannot grant or rotate SQL roles.
             if role == "comuni_platform_reader":
-                script(file, "synthetic-runtime-denied-credential-" +
-                       uuid.uuid4().hex, runtime=True,
-                       owner_password=test_passwords[1], expect_failure=True)
+                denied_password = ("synthetic-runtime-denied-credential-" +
+                                   uuid.uuid4().hex)
+                test_passwords.append(denied_password)
+                client_outputs.append(script(
+                    file, denied_password, runtime=True,
+                    owner_password=test_passwords[1], expect_failure=True,
+                ))
                 if verifier(role) != current_verifier:
                     raise AssertionError("Restricted runtime changed reader password")
 
         # Real pgAudit and native logs; never print their raw contents.
         logs = run(["docker", "logs", name], "collect private pgAudit logs",
                    include_stderr=True)
-        assert_audits(logs, observed_verifiers, test_passwords)
+        assert_audits(
+            logs, observed_verifiers, test_passwords,
+            client_output="".join(client_outputs),
+        )
         identity_context = verify_identity_under_pgaudit(name)
         verify_platform_and_provision_under_pgaudit(name)
         staged_id = verify_tenant_signing_keys_under_pgaudit(name)
         verify_emergency_under_pgaudit(name, identity_context)
         verify_tenant_retirement_under_pgaudit(name, staged_id)
-        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and twelve owner-only COPY "
+        print("PASS: PostgreSQL17 pgAudit ROLE/DDL, SCRAM transport/client output " 
+              "and twelve owner-only COPY "
               "operations verified; synthetic SCRAM/OIDC/signing-key/emergency/"
               "retirement canaries absent from captured logs.")
     finally:
