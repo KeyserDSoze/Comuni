@@ -1,0 +1,12 @@
+# Test reale file sink PostgreSQL17/pgAudit — #125
+
+## Test-first e contratti
+
+- `tests/infra/test_pgaudit_file_collector_privacy.py` (unittest Python nel job Terraform) usa solo password/verifier chiave sintetici. Verifica che `assert_file_collector_privacy` richieda **entrambi** i `ROLE,ALTER ROLE` redatti, GRANT, FUNCTION/DO, WRITE/INSERT e COPY; rifiuti log vuoto, ogni categoria audit mancante, password, verifier SCRAM, componenti salt/StoredKey/ServerKey, chiave signing e envelope `base64(JSON)` nel server file o output client. Il contratto statica richiede invocazione del vero collector dalla fixture backend.
+- `tests/postgres/pgaudit/verify_role_audit.py` è eseguito **obbligatoriamente** nel job backend GitHub Actions, prima dei test API, su PostgreSQL17/pgAudit via Docker. Dopo tutte le prove #123/#124, il test cambia il solo cluster disposable in `logging_collector=on`, usa `pg_current_logfile()`, legge il file privato `audit-ci.log`, riesegue i veri provisioner su ALTER con credenziali fittizie nuove, login SCRAM e stage signing key, con read-back SQL statico. Log e output non sono pubblicati; il polling della file sink è limitato. Non vengono creati altri microservizi o risorse Azure.
+- TDD RED [`e396e37`](https://github.com/KeyserDSoze/Comuni/commit/e396e37793cc6028c42aaf3196441152dbf20e96), [run 44771491898](https://github.com/KeyserDSoze/Comuni/actions/runs/44771491898): **6 failure e 24 error** del job Python attesi, nuovo analizzatore e invocazione reali assenti. GREEN in verifica via CI dopo [`62ad77e`](https://github.com/KeyserDSoze/Comuni/commit/62ad77eb09d2e2a8903349bfe28e4e8cd8eb82ad) e [`a75970b`](https://github.com/KeyserDSoze/Comuni/commit/a75970b2e021336951661555e26a341400b006a5).
+- Chiusura #125 **solo dopo GitHub Actions 7/7 success sullo stesso commit SHA HEAD di `main`**, inclusa la prova file collector reale. Documentare la run, il numero test xUnit e il rischio residuo nelle issue correlate.
+
+## Limiti di interpretazione
+
+Non equivale a leggere i log di Azure PostgreSQL Flexible Server, `pgAuditLogToFile`, Azure Monitor, Log Analytics, SIEM, tracing di proxy, DBAs, retention o backup. Non garantisce che nessun payload parzialmente codificato o trasformato da collector esterni trapeli. Non incollare mai raw file logs o contenuti `psql` nei job e nei commenti issue. Rimangono necessarie prove vere con permessi e mandati espliciti.
