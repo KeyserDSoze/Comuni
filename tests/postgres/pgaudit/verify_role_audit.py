@@ -176,7 +176,10 @@ def scram_components(verifier: str) -> tuple[str, str, str]:
 
 
 def assert_audits(log: str, verifiers: list[str],
-                  passwords: list[str], client_output: str = "") -> None:
+                  passwords: list[str], client_output: str = "",
+                  required_commands: tuple[str, ...] = (
+                      "CREATE ROLE", "ALTER ROLE",
+                  )) -> None:
     # Base64 transport is reversible, not redaction. The exact single-record
     # CSV payload is base64(canonical JSON {"SCRAM_VERIFIER": verifier}).
     # Also reject bare base64(verifier/password), raw SCRAM components, and
@@ -211,7 +214,7 @@ def assert_audits(log: str, verifiers: list[str],
     # Every CREATE/ALTER for the known login must carry its own redaction.
     # A single redacted audit line elsewhere cannot hide a missing redaction.
     for role in ("comuni_app_runtime", "comuni_platform_reader"):
-        for command in ("CREATE ROLE", "ALTER ROLE"):
+        for command in required_commands:
             expected = [
                 line for line in audit_lines
                 if "," + command + "," in line and role in line
@@ -257,6 +260,145 @@ def assert_private_copy_envelopes_absent(
         encoded = base64.b64encode(envelope).decode("ascii")
         if encoded in server_log or encoded in client_output:
             raise AssertionError("Private COPY envelope leaked in audited logs")
+
+
+def assert_file_collector_privacy(
+    server_log: str, client_output: str,
+    verifiers: list[str], passwords: list[str],
+    owner_values: dict[str, str],
+) -> None:
+    """Enforce the same private audit contract on PostgreSQL's real file sink.
+
+    The fixture runs only ALTER after restart. The original CREATE and other
+    12 procedures are already checked against the Docker stderr sink.
+    All errors and external diagnostics must be constant/no private values.
+    """
+    if not isinstance(server_log, str) or not server_log:
+        raise AssertionError("Empty PostgreSQL pgAudit file collector")
+    assert_audits(
+        server_log, verifiers, passwords, client_output,
+        required_commands=("ALTER ROLE",),
+    )
+    assert_private_copy_envelopes_absent(
+        server_log, client_output, [owner_values],
+    )
+    # Individual material is also prohibited outside its full COPY envelope.
+    if any(value in output
+           for value in owner_values.values()
+           if isinstance(value, str) and value
+           for output in (server_log, client_output)):
+        raise AssertionError("Synthetic signing-key metadata leaked in collector")
+    if any(base64.b64encode(value.encode("utf-8")).decode("ascii") in output
+           for value in owner_values.values()
+           if isinstance(value, str) and value
+           for output in (server_log, client_output)):
+        raise AssertionError("Encoded signing-key metadata leaked in collector")
+    audit_lines = [line for line in server_log.splitlines()
+                   if "AUDIT: SESSION" in line]
+    if ("DO $tenant_stage$" not in server_log or
+            not any(",FUNCTION,DO," in line for line in audit_lines) or
+            not any(",WRITE,INSERT," in line for line in audit_lines)):
+        raise AssertionError("Missing pgAudit owner signing key operation in file sink")
+
+
+def verify_file_collector_under_pgaudit(name: str) -> None:
+    """Switch disposable PostgreSQL17 to real file collection, then re-audit.
+
+    This does not emulate Azure pgAuditLogToFile/SQL proxies/SIEM. A real
+    postgres logging_collector, pg_current_logfile() and pgAudit are exercised
+    with new synthetic password rotations and a single owner-only COPY stage.
+    """
+    # Switch only AFTER the previous 12/14 and role validations have finished.
+    # A server restart is required by PostgreSQL 17 for logging_collector.
+    sql("ALTER SYSTEM SET logging_collector = 'on'",
+        "configure synthetic PostgreSQL file collector")
+    sql("ALTER SYSTEM SET log_destination = 'stderr'",
+        "keep standard stderr log format for pgAudit file")
+    sql("ALTER SYSTEM SET log_filename = 'audit-ci.log'",
+        "use fixed synthetic PostgreSQL file name")
+    run(["docker", "restart", name], "restart disposable pgAudit file sink",
+        timeout=90)
+
+    # Probe the actual TCP+owner connection, not only an in-container socket.
+    ready = False
+    for _ in range(40):
+        probe = subprocess.run(
+            ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
+             "-p", PORT, "-U", OWNER, "-d", DB, "-A", "-t", "-c", "SELECT 1"],
+            cwd=ROOT, env=psql_env(PGOPTIONS=""),
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        if probe.returncode == 0 and probe.stdout.strip() == "1":
+            ready = True
+            break
+        time.sleep(1)
+    if not ready:
+        raise AssertionError("Disposable pgAudit file-collector DB unavailable")
+    if sql("SELECT current_setting('logging_collector') || ':' || "
+           "current_setting('log_destination')",
+           "verify real pgAudit file logging profile") != "on:stderr":
+        raise AssertionError("PostgreSQL logging collector not active")
+    if sql("SELECT pg_current_logfile()",
+           "verify actual pgAudit collector path") != "log/audit-ci.log":
+        raise AssertionError("Unverified PostgreSQL file sink path")
+
+    collector_file = ["docker", "exec", name, "cat",
+                      "/var/lib/postgresql/data/log/audit-ci.log"]
+    # Capture a before snapshot. Nothing from this collector is sent to CI.
+    initial_log = run(collector_file, "read synthetic pgAudit collector baseline",
+                      include_stderr=True)
+    client_output = ""
+    observed: list[str] = []
+    passwords: list[str] = []
+    for role, filename in (
+        ("comuni_app_runtime", "provision-runtime-role.sql"),
+        ("comuni_platform_reader", "provision-platform-read-role.sql"),
+    ):
+        password = "ci-file-collector-private-" + role + "-" + uuid.uuid4().hex
+        passwords.append(password)
+        client_output += script(filename, password)
+        observed.append(verifier(role))
+        assert_auth(role, password)
+
+    token = uuid.uuid4().hex[:12]
+    owner_values = {
+        "TENANT_PROOF_KEY_ID": "synthetic_file_" + token,
+        "TENANT_PROOF_KEY": (
+            "synthetic-file-sink-signing-key-not-real-2026-" + token
+        ),
+    }
+    # The exact script uses pgaudit.log_parameter=off for values, while
+    # pgAudit ROLE/DDL/WRITE/FUNCTION and native statement logging remain on.
+    client_output += private_owner_script(
+        "stage-tenant-proof-key.sql", owner_values,
+    )
+    # Read-back is static SQL only: no input or secret in query text.
+    if sql("""
+        SELECT count(*) = 1
+        FROM platform.tenant_proof_keys
+        WHERE key_id LIKE 'synthetic_file_%' AND revoked_at IS NULL
+            AND valid_until > clock_timestamp()
+        """, "verify synthetic file sink key staging") != "t":
+        raise AssertionError("Synthetic pgAudit file collector staging failed")
+
+    # File log collector is asynchronous. Poll a bounded number of times for
+    # both ROLE events and the owner COPY/INSERT events. Never echo file bytes.
+    latest = ""
+    for _ in range(12):
+        full = run(collector_file, "read private PostgreSQL file collector",
+                   include_stderr=True)
+        if not full.startswith(initial_log):
+            raise AssertionError("Unstable PostgreSQL file collector log boundary")
+        latest = full[len(initial_log):]
+        if (",ROLE,ALTER ROLE," in latest and
+                ",FUNCTION,DO," in latest and
+                ",WRITE,INSERT," in latest and
+                "statement: COPY" in latest):
+            break
+        time.sleep(0.5)
+    assert_file_collector_privacy(
+        latest, client_output, observed, passwords, owner_values,
+    )
 
 
 def assert_identity_privacy(server_log: str, client_output: str,
@@ -1360,9 +1502,10 @@ def main() -> None:
             owner_logs, "".join(PRIVATE_OWNER_CLIENT_OUTPUTS),
             PRIVATE_OWNER_INPUTS,
         )
+        verify_file_collector_under_pgaudit(name)
         print("PASS: PostgreSQL17 pgAudit ROLE/DDL, SCRAM transport/client output " 
-              "and twelve owner-only COPY envelopes "
-              "operations verified; synthetic SCRAM/OIDC/signing-key/emergency/"
+              "and twelve owner-only COPY envelopes plus real file collector "
+              "verified; synthetic SCRAM/OIDC/signing-key/emergency/"
               "retirement canaries absent from captured logs.")
     finally:
         if container_started:
