@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Comuni.Infrastructures.Persistence;
+using Comuni.Business.Audit;
 using Comuni.Business.Organizations;
-using Comuni.Domains.Audit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -137,39 +137,40 @@ public sealed class MunicipalAuditConsultationTests(ApiFactory factory) : IClass
         var options = new DbContextOptionsBuilder<ComuniDbContext>()
             .UseNpgsql(connection).Options;
 
-        var audit = AuditEvent.Create(id, "signed-runtime-admin", Action,
-            "platform.audit", id, "server-correlation");
-
         // The repository must never start an unsigned, autonomous read/append
         // outside the existing SQL proof transaction.
         await using (var outside = new ComuniDbContext(options, new TestOrganization(id)))
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                new OrganizationAuditReader(outside).ListRecentAndRecordAsync(
-                    id, audit, CancellationToken.None));
+                new OrganizationAuditReader(outside, new TestActor("signed-runtime-admin", "server-correlation")).ListRecentAndRecordAsync(
+                    id, CancellationToken.None));
 
         await using (var db = new ComuniDbContext(options, new TestOrganization(id)))
         {
             await using var tx = await TenantDatabaseTransaction.BeginAsync(
                 db, signer, CancellationToken.None);
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-                new OrganizationAuditReader(db).ListRecentAndRecordAsync(
-                    Guid.NewGuid(), audit, CancellationToken.None));
-            var result = await new OrganizationAuditReader(db)
-                .ListRecentAndRecordAsync(id, audit, CancellationToken.None);
+                new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", "server-correlation")).ListRecentAndRecordAsync(
+                    Guid.NewGuid(), CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                new OrganizationAuditReader(db, new TestActor(" ", "server-correlation"))
+                    .ListRecentAndRecordAsync(id, CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", " "))
+                    .ListRecentAndRecordAsync(id, CancellationToken.None));
+            var result = await new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", "server-correlation"))
+                .ListRecentAndRecordAsync(id, CancellationToken.None);
             Assert.Single(result);
             Assert.Equal("platform.module.protocol.enabled", result[0].Action);
             await tx.RollbackAsync();
         }
         Assert.Empty(await ReadConsultationsAsync(id));
 
-        var newAudit = AuditEvent.Create(id, "signed-runtime-admin", Action,
-            "platform.audit", id, "second-server-correlation");
         await using (var db = new ComuniDbContext(options, new TestOrganization(id)))
         {
             await using var tx = await TenantDatabaseTransaction.BeginAsync(
                 db, signer, CancellationToken.None);
-            Assert.Single(await new OrganizationAuditReader(db)
-                .ListRecentAndRecordAsync(id, newAudit, CancellationToken.None));
+            Assert.Single(await new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", "second-server-correlation"))
+                .ListRecentAndRecordAsync(id, CancellationToken.None));
             await tx.CommitAsync();
         }
 
@@ -178,6 +179,12 @@ public sealed class MunicipalAuditConsultationTests(ApiFactory factory) : IClass
         Assert.Equal("second-server-correlation", committed.Correlation);
         Assert.Equal(id, committed.Organization);
         Assert.Equal(id, committed.Resource);
+    }
+
+    private sealed class TestActor(string subject, string correlation) : ICurrentActorContext
+    {
+        public string ActorSubject => subject;
+        public string CorrelationId => correlation;
     }
 
     private sealed class TestOrganization(Guid id) : ICurrentOrganization

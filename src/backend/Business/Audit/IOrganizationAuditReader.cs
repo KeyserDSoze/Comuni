@@ -1,5 +1,3 @@
-using Comuni.Domains.Audit;
-
 namespace Comuni.Business.Audit;
 
 /// <summary>
@@ -16,14 +14,14 @@ public interface IOrganizationAuditReader
     // An authenticated Admin HTTP read must append the consultation event
     // in the same signed RLS transaction, or fail without returning data.
     Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAndRecordAsync(
-        Guid organizationId, AuditEvent consultation, CancellationToken cancellationToken);
+        Guid organizationId, CancellationToken cancellationToken);
 }
 
 /// <summary>
-/// The use case builds the event from server-owned identity and correlation,
-/// never user-provided query parameters or request headers.
+/// Business verifies the tenant; Infrastructure constructs the event from
+/// the scoped, verified server actor and correlation.
 /// </summary>
-public sealed class MunicipalAuditService(IOrganizationAuditReader reader, ICurrentActorContext actor)
+public sealed class MunicipalAuditService(IOrganizationAuditReader reader)
 {
     public Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAsync(
         Guid organizationId, CancellationToken cancellationToken)
@@ -31,9 +29,6 @@ public sealed class MunicipalAuditService(IOrganizationAuditReader reader, ICurr
         if (organizationId == Guid.Empty)
             throw new UnauthorizedAccessException("Verified municipality is required.");
 
-        var audit = AuditEvent.Create(
-            organizationId, actor.ActorSubject, "platform.audit.consulted",
-            "platform.audit", organizationId, actor.CorrelationId);
-        return reader.ListRecentAndRecordAsync(organizationId, audit, cancellationToken);
+        return reader.ListRecentAndRecordAsync(organizationId, cancellationToken);
     }
 }

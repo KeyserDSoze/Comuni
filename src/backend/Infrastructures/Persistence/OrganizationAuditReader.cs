@@ -10,7 +10,7 @@ namespace Comuni.Infrastructures.Persistence;
 /// PostgreSQL grants SELECT on only the five columns needed for filtering and
 /// projection; actor, correlation and resource identifiers are not readable.
 /// </summary>
-public sealed class OrganizationAuditReader(ComuniDbContext db) : IOrganizationAuditReader
+public sealed class OrganizationAuditReader(ComuniDbContext db, ICurrentActorContext actor) : IOrganizationAuditReader
 {
     private async Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAsync(
         Guid organizationId, CancellationToken cancellationToken)
@@ -34,14 +34,10 @@ public sealed class OrganizationAuditReader(ComuniDbContext db) : IOrganizationA
     /// reader response without a durable audit append is permitted.
     /// </summary>
     public async Task<IReadOnlyList<MunicipalAuditEntry>> ListRecentAndRecordAsync(
-        Guid organizationId, AuditEvent consultation, CancellationToken cancellationToken)
+        Guid organizationId, CancellationToken cancellationToken)
     {
         if (organizationId == Guid.Empty ||
-            db.CurrentOrganizationId != organizationId ||
-            consultation.OrganizationId != organizationId ||
-            consultation.ResourceId != organizationId ||
-            consultation.Action != "platform.audit.consulted" ||
-            consultation.ResourceType != "platform.audit")
+            db.CurrentOrganizationId != organizationId)
             throw new UnauthorizedAccessException("Municipal audit scope mismatch.");
 
         if (db.Database.CurrentTransaction is null)
@@ -49,6 +45,11 @@ public sealed class OrganizationAuditReader(ComuniDbContext db) : IOrganizationA
 
         // Capture the response BEFORE appending this consultation. The request
         // never reports its own event; the next authorized read may see it.
+        // Caller cannot submit an event with forged actor/correlation.
+        // Invalid actor metadata fails before the sensitive SELECT.
+        var consultation = AuditEvent.Create(
+            organizationId, actor.ActorSubject, "platform.audit.consulted",
+            "platform.audit", organizationId, actor.CorrelationId);
         var entries = await ListRecentAsync(organizationId, cancellationToken);
         await db.AuditEvents.AddAsync(consultation, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);

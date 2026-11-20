@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using Comuni.Domains.Audit;
+using Comuni.Business.Audit;
 using Comuni.Infrastructures.Persistence;
 using Comuni.Business.Organizations;
 using Microsoft.EntityFrameworkCore;
@@ -182,15 +182,13 @@ public sealed class MunicipalAuditApiTests(ApiFactory factory) : IClassFixture<A
         {
             await using var signed = await TenantDatabaseTransaction.BeginAsync(
                 ownDb, signer, CancellationToken.None);
-            var consultation = AuditEvent.Create(own, "synthetic-runtime-admin",
-                "platform.audit.consulted", "platform.audit", own, "synthetic-probe-audit");
-            var reader = new OrganizationAuditReader(ownDb);
+            var reader = new OrganizationAuditReader(ownDb, new TestActor("synthetic-runtime-admin", "synthetic-probe-audit"));
             var listed = await reader.ListRecentAndRecordAsync(
-                own, consultation, CancellationToken.None);
+                own, CancellationToken.None);
             Assert.Equal(2, listed.Count);
             Assert.All(listed, item => Assert.Equal("platform.module.protocol.enabled", item.Action));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-                reader.ListRecentAndRecordAsync(Guid.NewGuid(), consultation, CancellationToken.None));
+                reader.ListRecentAndRecordAsync(Guid.NewGuid(), CancellationToken.None));
         }
 
         var second = await SeedAsync(1);
@@ -198,12 +196,16 @@ public sealed class MunicipalAuditApiTests(ApiFactory factory) : IClassFixture<A
         {
             await using var signed = await TenantDatabaseTransaction.BeginAsync(
                 otherDb, signer, CancellationToken.None);
-            var consultation = AuditEvent.Create(second, "synthetic-runtime-admin",
-                "platform.audit.consulted", "platform.audit", second, "other-synthetic-probe-audit");
-            var listed = await new OrganizationAuditReader(otherDb)
-                .ListRecentAndRecordAsync(second, consultation, CancellationToken.None);
+            var listed = await new OrganizationAuditReader(otherDb, new TestActor("synthetic-runtime-admin", "other-synthetic-probe-audit"))
+                .ListRecentAndRecordAsync(second, CancellationToken.None);
             Assert.Single(listed);
         }
+    }
+
+    private sealed class TestActor(string subject, string correlation) : ICurrentActorContext
+    {
+        public string ActorSubject => subject;
+        public string CorrelationId => correlation;
     }
 
     private sealed class TestOrganization(Guid id) : ICurrentOrganization

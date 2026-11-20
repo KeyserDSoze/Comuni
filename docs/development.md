@@ -111,7 +111,7 @@ La PWA unica dispone ora nell'area **Amministrazione** della tabella read-only `
 
 ## #42 — Ogni lettura Admin dell'audit viene tracciata (ADR 0036)
 
-Dalla #42 un `GET /api/v1/admin/audit` autorizzato 200 registra nella stessa signed-RLS transaction `platform.audit.consulted`. La `MunicipalAuditService` Business crea l'evento con `ICurrentActorContext` già verificato; `OrganizationAuditReader.ListRecentAndRecordAsync` in Infrastructure esegue SELECT dei 25 metadata e `SaveChangesAsync` dell'audit. L'evento **non** è mostrato nella propria risposta, ma può comparire al refresh successivo. Query 400 e accessi anonimi/Reader/Officer 401/403 non scrivono eventi. Lo stesso componente Admin React mostra una nota IT/EN che spiega il logging, senza nuove API o permessi. Test xUnit con role PostgreSQL ristretto e signed proof verificano commit/rollback; Playwright controlla la nota. Nessuna modifica agli endpoint di impersonificazione, al login o alla conservazione/retention.
+Dalla #42 un `GET /api/v1/admin/audit` autorizzato 200 registra nella stessa signed-RLS transaction `platform.audit.consulted`. La `MunicipalAuditService` Business inoltra soltanto l'organization verificata; `OrganizationAuditReader.ListRecentAndRecordAsync` in Infrastructure costruisce l'evento tramite `ICurrentActorContext` della stessa richiesta, poi esegue SELECT dei 25 metadata e `SaveChangesAsync` dell'audit. L'evento **non** è mostrato nella propria risposta, ma può comparire al refresh successivo. Query 400 e accessi anonimi/Reader/Officer 401/403 non scrivono eventi. Lo stesso componente Admin React mostra una nota IT/EN che spiega il logging, senza nuove API o permessi. Test xUnit con role PostgreSQL ristretto e signed proof verificano commit/rollback; Playwright controlla la nota. Nessuna modifica agli endpoint di impersonificazione, al login o alla conservazione/retention.
 
 
 ## #43 — New-organization registration, owner-only (ADR 0037)
@@ -160,3 +160,7 @@ Per la verifica locale eseguire `dotnet test tests/backend/Comuni.Api.Tests/Comu
 ## Lifecycle del provisioning legacy dopo #102 (ADR 0086)
 
 Anche `provision-organization.sql` (procedura legacy owner-only) ora crea **created/is_activated=FALSE**, non active: `bootstrap-initial-admin.sql` associa il primo Admin OIDC ma lascia tutte le route tenant 403; è obbligatoria una distinta `activate-organization.sql` owner per la transizione a active, con evento audit e modulo Protocollo ancora off. `register-organization.sql` resta il percorso canonico per la registrazione pending. Nessun comando di test con valori sintetici equivale a onboarding reale o a verifiche indipendenti di identità/mandato/MFA.
+
+## #113 — Verifica delle consultazioni e dell'actor
+
+I test PostgreSQL con login runtime limitato ora iniettano l'actor sintetico nel `OrganizationAuditReader`, senza passare eventi preassemblati. Verificano che actor/correlation vuoti falliscano prima della SELECT e che il commit contenga solo metadati server-owned; la route reale continua a rifiutare header falsificati. Eseguire la suite xUnit con PostgreSQL 17 e poi l'intera CI su `main`.

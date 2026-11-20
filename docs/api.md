@@ -225,3 +225,7 @@ I contratti HTTP Protocollo rimangono invariati: organizzazione derivata esclusi
 ## Registro audit comunale: nessuna lettura non tracciata nel contratto interno (#112 / ADR 0095)
 
 L'endpoint `GET /api/v1/admin/audit` e il JSON di risposta **non cambiano**: sola membership Admin attiva del Comune ricavato dal JWT validato, query-string non consentite, max 25 eventi `id,action,resourceType,occurredAt` e `Cache-Control: no-store`. Ogni consultazione autorizzata aggiunge `platform.audit.consulted` nel medesimo commit tenant RLS; la richiesta corrente non restituisce il proprio evento. Per impedire un futuro bypass applicativo, `IOrganizationAuditReader` non offre più il metodo non tracciato `ListRecentAsync`; la query è privata e usata esclusivamente dal metodo pubblico `ListRecentAndRecordAsync`. Nessun campo personale o endpoint aggiunto, nessun cambio ai contratti React; la protezione SQL e dei log resta nei gate Security indipendenti.
+
+## Consultazione audit: actor server-owned (#113 / ADR 0096)
+
+Il contratto HTTP non cambia: `GET /api/v1/admin/audit` resta Admin-only, senza parametri di query, restituisce massimo 25 metadati con `Cache-Control: no-store` e non mostra il proprio evento. Il port interno `ListRecentAndRecordAsync(Guid, CancellationToken)` non accetta più un parametro `AuditEvent`: è il repository a costruire il singolo evento `platform.audit.consulted` da actor/correlation del contesto API verificato, dopo il controllo della transazione firmata. Nessun endpoint per scrivere/modificare il registro audit.

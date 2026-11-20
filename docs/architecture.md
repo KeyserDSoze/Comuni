@@ -147,7 +147,7 @@ L'API restituisce soltanto `id/action/resourceType/occurredAt` sugli **ultimi 25
 
 ## #42 — Read + audit insert nello stesso tenant transaction (ADR 0036)
 
-La route esistente `GET /api/v1/admin/audit` passa ora dal Business `MunicipalAuditService`, che genera `platform.audit.consulted` con l'attore e la correlazione del server, all'Infrastructure `OrganizationAuditReader.ListRecentAndRecordAsync`. Il repository rifiuta il mismatch di organization/risorsa/azione e **pretende una transaction SQL già aperta** dal middleware con tenant-proof HMAC. Prima legge max 25 metadata in ordine fisso, poi inserisce l'evento append-only e salva; il middleware fa commit solo se HTTP 2xx/3xx. Il frontend mostra una breve informativa IT/EN senza esporre attore/correlation/risorsa. Nessuna nuova API, servizio, database, query cross-org o privilegio SQL.
+La route esistente `GET /api/v1/admin/audit` passa ora dal Business `MunicipalAuditService`, che delega la lettura all'Infrastructure `OrganizationAuditReader.ListRecentAndRecordAsync`, che costruisce `platform.audit.consulted` con l'attore e la correlazione del contesto server verificato. Il repository rifiuta il mismatch di organization e costruisce internamente risorsa/azione canoniche e **pretende una transaction SQL già aperta** dal middleware con tenant-proof HMAC. Prima legge max 25 metadata in ordine fisso, poi inserisce l'evento append-only e salva; il middleware fa commit solo se HTTP 2xx/3xx. Il frontend mostra una breve informativa IT/EN senza esporre attore/correlation/risorsa. Nessuna nuova API, servizio, database, query cross-org o privilegio SQL.
 
 
 ## #43 — Prima registrazione Comune separata dal Core runtime (ADR 0037)
@@ -194,3 +194,7 @@ Il gate `OrganizationDirectory.IsOperationalAsync` controlla `is_activated AND N
 ## #112 — Confine Business audit senza consultazione pubblica priva di evento (ADR 0095)
 
 Il port Business `IOrganizationAuditReader` dispone ora del **solo** metodo `ListRecentAndRecordAsync`. `OrganizationAuditReader` applica il tenant e usa una query privata bounded, ma l'accesso Business passa obbligatoriamente per la scrittura dell'evento `platform.audit.consulted` nella stessa transazione tenant già aperta. La visibilità dei campi resta limitata, con tenant firmato e privilegi runtime invariati. La guardia Reflection xUnit protegge il contratto da una regressione verso un metodo pubblico non tracciato. L'interfaccia e il metodo privato non costituiscono un controllo contro SQL diretto o DB owner: restano #4/#5/#92.
+
+## #113 — Actor verificato anche nel repository delle consultazioni (ADR 0096)
+
+Il port `ListRecentAndRecordAsync(Guid, CancellationToken)` non accetta più eventi `AuditEvent` dal chiamante. Il repository `OrganizationAuditReader` risolve `ICurrentActorContext` tramite DI scoped dell'unica API. Dopo la verifica del tenant e della transazione già aperta, l'evento viene costruito da actor/correlation server-owned prima della query privata bounded e salvato insieme alla consultazione. Nessun cambiamento a schema, GRANT, endpoint HTTP, ruolo Admin o tenant proof HMAC. Questo non protegge da SQL diretto o owner PostgreSQL.
