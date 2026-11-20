@@ -39,6 +39,18 @@
 
 BEGIN;
 
+-- pgAudit can include PL/pgSQL bind values in FUNCTION/WRITE audit entries
+-- when pgaudit.log_parameter=on, even though the client used private COPY.
+-- Refuse BEFORE receiving any sensitive COPY payload; preserve all audit
+-- classes and normal statement logging under a metadata-only parameter policy.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only identity operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 -- Client-side COPY passes exactly five private inputs into a transaction-
 -- scoped TEMP table. No issuer, subject or ticket appears as a SQL literal.
 -- The local command is static; psql must run from a trusted repository root.

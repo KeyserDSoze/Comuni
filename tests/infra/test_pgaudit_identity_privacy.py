@@ -16,12 +16,17 @@ assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
+# Match the exact nine canary categories checked by the integration gate.
 CANARIES = (
+    "2c4f8d0c-0b1e-4625-97bb-000000000116",
     "Comune-Fittizio-Canary",
     "https://issuer-synthetic.example.test",
     "private-sub-synthetic-2026",
-    "SYNTH-CHANGE-REVIEW-2026",
-    "synthetic-independent-reviewer",
+    "REGISTER-2026-TEST",
+    "BOOTSTRAP-2026-TEST",
+    "synthetic-register-reviewer",
+    "synthetic-bootstrap-reviewer",
+    " invalid-subject-canary",
 )
 
 
@@ -47,6 +52,21 @@ class PgAuditOwnerIdentityPrivacyTests(unittest.TestCase):
                         "Owner-identity pgAudit integration is not invoked")
         self.assertTrue("assert_identity_privacy(" in source,
                         "Missing sensitive log privacy assertion")
+
+    def test_scripts_reject_parameter_logging_before_private_copy(self):
+        # pgAudit still records FUNCTION/WRITE; only the parameter *values*
+        # cannot be logged by approved owner-only identity operations.
+        for path in ("register-organization.sql", "bootstrap-initial-admin.sql"):
+            sql = (ROOT / "scripts" / "postgres" / path).read_text(encoding="utf-8")
+            guard = sql.find("current_setting('pgaudit.log_parameter', true)")
+            copy = sql.find("\\copy pg_temp.comuni_private_input")
+            with self.subTest(path=path):
+                self.assertGreaterEqual(guard, 0)
+                self.assertGreater(copy, guard)
+                self.assertIn(
+                    "Owner-only identity operation requires parameter-free audit metadata",
+                    sql,
+                )
 
     def test_clean_pgaudit_registration_and_bootstrap_are_accepted(self):
         gate.assert_identity_privacy(log_with_audit(), "", CANARIES)

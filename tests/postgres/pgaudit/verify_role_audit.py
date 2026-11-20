@@ -233,16 +233,24 @@ def assert_identity_privacy(server_log: str, client_output: str,
 
 
 def private_owner_script(file: str, values: dict[str, str],
-                         expect_failure: bool = False) -> str:
+                         expect_failure: bool = False,
+                         metadata_only: bool = True) -> str:
     """Use only static, reviewed script paths and private environment values."""
     if file not in ("register-organization.sql", "bootstrap-initial-admin.sql"):
         raise AssertionError("Unreviewed owner identity script")
+    env = psql_env(**values)
+    if metadata_only:
+        # pgAudit FUNCTION/WRITE records remain enabled. The parameter field
+        # alone must be suppressed for private owner input. Both scripts
+        # independently REFUSE parameter=on before the COPY transport begins.
+        env["PGOPTIONS"] = env["PGOPTIONS"].replace(
+            "-c pgaudit.log_parameter=on", "-c pgaudit.log_parameter=off")
     return run(
         ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
          "-p", PORT, "-U", OWNER, "-d", DB, "-f",
          str(ROOT / "scripts" / "postgres" / file)],
         "synthetic owner identity operation",
-        env=psql_env(**values),
+        env=env,
         expected=1 if expect_failure else 0,
         include_stderr=True,
     )
@@ -284,6 +292,16 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
     client_output = ""
     client_output += private_owner_script("register-organization.sql", registration)
     client_output += private_owner_script("bootstrap-initial-admin.sql", bootstrap)
+
+    # Preserve a negative safety check with pgAudit parameters ON. The
+    # server-side guard rejects BEFORE sensitive COPY; this is not a test
+    # of a successful unredacted operation and must remain fail-closed.
+    unsafe_output = private_owner_script(
+        "bootstrap-initial-admin.sql", bootstrap,
+        expect_failure=True, metadata_only=False)
+    if "Owner-only identity operation requires parameter-free audit metadata" not in unsafe_output:
+        raise AssertionError("Unsafe pgAudit parameter profile was not denied")
+    client_output += unsafe_output
 
     # Input validation must fail in the real DO, without creating membership
     # or changing audit. Keep this negative subject outside SQL and argv.
