@@ -46,7 +46,7 @@ GitHub Actions ripete queste verifiche con PostgreSQL service.
 ## Test HTTP security (#15)
 
 - Configurazione del limiter: valori invalidi su permit e finestra fanno fallire l'avvio.
-- Partizione: un IP dichiarato via `X-Forwarded-For` non aggira la quota; per JWT autenticato il bucket è differenziato per `organization_id` + `sub`.
+- Partizione: un IP dichiarato via `X-Forwarded-For` non aggira la quota; per identità comunali JWT autenticate il bucket distingue `organization_id` + `iss` + `sub`, e per identità platform tenantless distingue `iss` + `sub` in un namespace separato (#127 / ADR 0111). I fingerprint non riportano gli identificativi in chiaro; vedere [runbook](testing/rate-limit-identity-partitions.md).
 - Tre richieste API anonime consentite nel fixture di test, la quarta è `429` con `Retry-After`, anche se il client cambia `X-Forwarded-For`.
 - Health check `/health/live` non è soggetto al limiter; response headers presenti anche sulle risposte 401; risposte API hanno `Cache-Control: no-store`.
 - Tutte le altre verifiche su modulo, ruolo e isolation continuano nella suite di regressione. Test e build nel workflow CI.
