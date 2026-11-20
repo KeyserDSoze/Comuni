@@ -129,6 +129,42 @@ public sealed class TenantRlsReadinessApiTests
     private sealed class ReadinessFactory(string connection, string signerKey, string keyId)
         : WebApplicationFactory<Program>
     {
+        private static readonly object EnvironmentGate = new();
+
+        // WebApplicationFactory's minimal hosting Program reads configuration
+        // before the ConfigureWebHost callback; use a scoped environment
+        // override on startup, immediately restoring its previous values.
+        public new HttpClient CreateClient()
+        {
+            var required = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings__Default"] = connection,
+                ["Security__TenantProofKey"] = signerKey,
+                ["Security__TenantProofKeyId"] = keyId,
+                ["Authentication__Mode"] = "DevelopmentJwt",
+                ["Jwt__SigningKey"] = ApiFactory.SigningKey,
+                ["Jwt__Issuer"] = "Comuni.Tests",
+                ["Jwt__Audience"] = "Comuni.Api",
+                ["PlatformInventory__Enabled"] = "false"
+            };
+            lock (EnvironmentGate)
+            {
+                var prior = required.Keys.ToDictionary(
+                    name => name, Environment.GetEnvironmentVariable);
+                try
+                {
+                    foreach (var (name, value) in required)
+                        Environment.SetEnvironmentVariable(name, value);
+                    return base.CreateClient();
+                }
+                finally
+                {
+                    foreach (var (name, value) in prior)
+                        Environment.SetEnvironmentVariable(name, value);
+                }
+            }
+        }
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
