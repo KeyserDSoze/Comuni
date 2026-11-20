@@ -78,6 +78,116 @@ public sealed class ApiProtectionConfigurationTests
         ], "verified-token"));
         Assert.NotEqual(first, ApiProtectionSettings.PartitionKey(http));
     }
+
+    private static DefaultHttpContext Identity(string? issuer, string? subject,
+        string? organization = null, bool includeOrganization = true,
+        params Claim[] extra)
+    {
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = IPAddress.Parse("198.51.100.12");
+        var claims = new List<Claim>();
+        if (issuer is not null) claims.Add(new Claim("iss", issuer));
+        if (subject is not null) claims.Add(new Claim("sub", subject));
+        if (includeOrganization && organization is not null)
+            claims.Add(new Claim("organization_id", organization));
+        claims.AddRange(extra);
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "verified-token"));
+        return http;
+    }
+
+    [Fact]
+    public void Same_tenant_and_subject_from_two_issuers_get_independent_quotas()
+    {
+        const string org = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        const string subject = "personal-id-127-synthetic";
+        var a = Identity("https://issuer-a.example.test/", subject, org);
+        var b = Identity("https://issuer-b.example.test/", subject, org);
+        var first = ApiProtectionSettings.PartitionKey(a);
+        var second = ApiProtectionSettings.PartitionKey(b);
+        Assert.NotEqual(first, second);
+        Assert.StartsWith("tenant:", first);
+        Assert.StartsWith("tenant:", second);
+        Assert.Matches("^tenant:[0-9a-f]{64}$", first);
+        Assert.DoesNotContain(subject, first);
+        Assert.DoesNotContain("issuer-a", first);
+        Assert.DoesNotContain(org, first);
+
+        a.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.70");
+        a.Request.Headers["X-Forwarded-For"] = "203.0.113.8";
+        Assert.Equal(first, ApiProtectionSettings.PartitionKey(a));
+        Assert.NotEqual(first, ApiProtectionSettings.PartitionKey(
+            Identity("https://issuer-a.example.test/", subject,
+                     "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")));
+    }
+
+    [Fact]
+    public void Authenticated_tenantless_platform_operator_has_separate_quota_from_ip_and_other_operators()
+    {
+        const string issuer = "https://platform-idp.example.test/";
+        const string subject = "platform-operator-127-synthetic";
+        var operatorContext = Identity(issuer, subject, includeOrganization: false);
+        var first = ApiProtectionSettings.PartitionKey(operatorContext);
+        Assert.StartsWith("platform:", first);
+        Assert.Matches("^platform:[0-9a-f]{64}$", first);
+        Assert.NotEqual("ip:198.51.100.12", first);
+        Assert.DoesNotContain(subject, first);
+        Assert.DoesNotContain(issuer, first);
+        Assert.Equal(first, ApiProtectionSettings.PartitionKey(
+            Identity(issuer, subject, includeOrganization: false)));
+        Assert.NotEqual(first, ApiProtectionSettings.PartitionKey(
+            Identity(issuer, "other-operator", includeOrganization: false)));
+        Assert.NotEqual(first, ApiProtectionSettings.PartitionKey(
+            Identity("https://other-idp.example.test/", subject,
+                     includeOrganization: false)));
+        Assert.NotEqual(first, ApiProtectionSettings.PartitionKey(
+            Identity(issuer, subject,
+                     "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")));
+
+        var anonymous = new DefaultHttpContext();
+        anonymous.Connection.RemoteIpAddress = IPAddress.Parse("198.51.100.12");
+        Assert.Equal("ip:198.51.100.12", ApiProtectionSettings.PartitionKey(anonymous));
+    }
+
+    [Fact]
+    public void Ambiguous_or_unverified_claims_can_never_select_an_authenticated_quota()
+    {
+        const string issuer = "https://platform-idp.example.test/";
+        const string org = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        var invalid = new[]
+        {
+            Identity(issuer, "subject", org, extra: new Claim("iss", issuer)),
+            Identity(issuer, "subject", org, extra: new Claim("sub", "subject")),
+            Identity(issuer, "subject", org, extra: new Claim("organization_id", org)),
+            Identity(issuer, "subject", "not-a-guid"),
+            Identity(issuer, "subject", "00000000-0000-0000-0000-000000000000"),
+            Identity(issuer, "subject", includeOrganization: false,
+                     extra: new Claim("iss", issuer)),
+            Identity(issuer, "subject", organization: "", includeOrganization: false,
+                     extra: new Claim("organization_id", "")),
+            Identity(null, "subject", includeOrganization: false,
+                     extra: new Claim("role", "Superadmin")),
+            Identity(issuer, null, includeOrganization: false,
+                     extra: new Claim("role", "Superadmin")),
+        };
+        foreach (var candidate in invalid)
+        {
+            Assert.Equal("ip:198.51.100.12",
+                ApiProtectionSettings.PartitionKey(candidate));
+            candidate.Request.Headers["X-Forwarded-For"] = "203.0.113.99";
+            Assert.Equal("ip:198.51.100.12",
+                ApiProtectionSettings.PartitionKey(candidate));
+        }
+    }
+
+    [Fact]
+    public void Delimiter_shaped_issuer_and_subject_pairs_remain_collision_free()
+    {
+        const string org = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        var a = Identity("https://idp.example.test/a:b", "c", org);
+        var b = Identity("https://idp.example.test/a", "b:c", org);
+        Assert.NotEqual(ApiProtectionSettings.PartitionKey(a),
+                        ApiProtectionSettings.PartitionKey(b));
+    }
 }
 
 public sealed class ApiProtectionFactory : WebApplicationFactory<Program>
