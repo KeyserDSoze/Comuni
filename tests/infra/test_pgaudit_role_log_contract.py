@@ -39,6 +39,16 @@ class PgAuditRoleLoggingContractTests(unittest.TestCase):
         for forbidden in ("SET pgaudit.log = 'none'", "SET log_statement = 'none'"):
             self.assertNotIn(forbidden, code)
 
+    def test_scram_transport_and_psql_stderr_are_inspected_in_real_gate(self):
+        code = SMOKE.read_text(encoding="utf-8")
+        for requirement in (
+            'include_stderr=True', 'client_outputs.append(script(',
+            'client_output="".join(client_outputs)',
+            'base64.b64encode(envelope)',
+            'pgaudit.log_parameter=on',
+        ):
+            self.assertIn(requirement, code)
+
 
 if __name__ == "__main__":
     unittest.main()
