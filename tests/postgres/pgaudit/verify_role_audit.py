@@ -192,8 +192,28 @@ def assert_identity_privacy(server_log: str, client_output: str,
     """
     if not canaries or any(not canary for canary in canaries):
         raise AssertionError("No valid synthetic identity canaries to verify")
-    if any(canary in server_log or canary in client_output for canary in canaries):
-        raise AssertionError("Synthetic identity leaked into pgAudit/server/client logs")
+    # Only print the *category* and log channel, never any canary or raw line.
+    # This helps diagnose a failing privacy gate without creating a second leak
+    # in the CI job output. All canaries here are disposable synthetic inputs.
+    categories = (
+        "organization-id", "organization-name", "oidc-issuer",
+        "oidc-subject", "registration-ticket", "bootstrap-ticket",
+        "registration-reviewer", "bootstrap-reviewer", "invalid-subject",
+    )
+    if len(canaries) != len(categories):
+        raise AssertionError("Identity canary inventory mismatch")
+    for category, canary in zip(categories, canaries, strict=True):
+        if canary in client_output:
+            raise AssertionError("Synthetic identity canary in client output: " + category)
+        if canary in server_log:
+            found_line = next((line for line in server_log.splitlines()
+                               if canary in line), "")
+            source = ("pgAudit" if "AUDIT: SESSION" in found_line else
+                      "statement" if "statement:" in found_line else
+                      "error/context")
+            raise AssertionError(
+                "Synthetic identity canary in server " + source +
+                " logs: " + category)
 
     # Native statement logging identifies both owner-only DO blocks, while
     # pgAudit FUNCTION/WRITE proves that extension auditing stayed enabled.
