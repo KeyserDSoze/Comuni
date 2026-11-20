@@ -6,6 +6,18 @@
 -- All statements and row locks are inside one transaction. Base64 is NOT
 -- encryption; neither shell tracing nor client COPY output logging is allowed.
 BEGIN;
+
+-- Signing keys can appear in pgAudit FUNCTION/WRITE bind-value fields even
+-- with private client-side COPY. Reject parameter-value logging before the
+-- producer runs, but keep ROLE/DDL/WRITE/FUNCTION metadata and SQL statements.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only signing key operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 SET LOCAL lock_timeout = '10s';
 
 CREATE TEMP TABLE pg_temp.comuni_private_input (payload text NOT NULL)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -60,6 +61,10 @@ def psql_env(**additional: str) -> dict[str, str]:
     )
     values.pop("RUNTIME_DB_PASSWORD", None)
     values.pop("PLATFORM_READ_DB_PASSWORD", None)
+    # Do not inherit a runner's tenant signing key by accident. Only an
+    # explicit synthetic test input for a reviewed script may set these.
+    values.pop("TENANT_PROOF_KEY", None)
+    values.pop("TENANT_PROOF_KEY_ID", None)
     values.update(additional)
     return values
 
@@ -250,13 +255,14 @@ def private_owner_script(file: str, values: dict[str, str],
         "activate-organization.sql", "enroll-additional-admin.sql",
         "revoke-admin.sql", "set-organization-suspension.sql",
         "manage-platform-operator.sql", "provision-organization.sql",
+        "provision-tenant-proof.sql", "stage-tenant-proof-key.sql",
     ):
         raise AssertionError("Unreviewed owner identity script")
     env = psql_env(**values)
     if metadata_only:
         # pgAudit FUNCTION/WRITE records remain enabled. The parameter field
-        # alone must be suppressed for private owner input. All six scripts
-        # independently REFUSE parameter=on before COPY transport begins.
+        # alone must be suppressed for private owner input. Every script in
+        # this allowlist REFUSES parameter=on before COPY transport begins.
         env["PGOPTIONS"] = env["PGOPTIONS"].replace(
             "-c pgaudit.log_parameter=on", "-c pgaudit.log_parameter=off")
     return run(
@@ -628,6 +634,177 @@ def verify_platform_and_provision_under_pgaudit(container_name: str) -> None:
     assert_operator_provision_privacy(after[len(prefix):], output, canaries)
 
 
+
+def assert_tenant_signing_key_privacy(server_log: str, client_output: str,
+                                      canaries: tuple[str, ...]) -> None:
+    """Fail closed for raw or obviously base64-encoded signing key canaries.
+
+    This only checks the isolated log window of *real* tenant key provisioning.
+    Do not print secret values, log lines or derived hashes in diagnostics.
+    """
+    categories = ("legacy-signing-key", "versioned-signing-key",
+                  "versioned-key-id", "mismatched-legacy-signing-key",
+                  "mismatched-versioned-signing-key")
+    if len(canaries) != len(categories) or any(not key for key in canaries):
+        raise AssertionError("Invalid synthetic signing-key audit inventory")
+    for category, canary in zip(categories, canaries, strict=True):
+        encoded = base64.b64encode(canary.encode("utf-8")).decode("ascii")
+        for sensitive in (canary, encoded):
+            if sensitive in client_output:
+                raise AssertionError(
+                    "Synthetic signing-key canary in client output: " + category)
+            if sensitive in server_log:
+                raise AssertionError(
+                    "Synthetic signing-key canary in PostgreSQL logs: " + category)
+
+    for marker in ("DO $tenant_legacy$", "DO $tenant_stage$"):
+        if marker not in server_log:
+            raise AssertionError("Owner signing-key DO metadata missing")
+    audit_lines = [
+        line for line in server_log.splitlines() if "AUDIT: SESSION" in line
+    ]
+    if sum(",FUNCTION,DO," in line for line in audit_lines) < 2:
+        raise AssertionError("Owner signing-key pgAudit FUNCTION events missing")
+    if not any(",WRITE,INSERT," in line for line in audit_lines):
+        raise AssertionError("Owner signing-key pgAudit WRITE INSERT events missing")
+    if server_log.count("statement: COPY") < 2:
+        raise AssertionError("Owner signing-key native COPY statements missing")
+
+
+def verify_tenant_signing_keys_under_pgaudit(container_name: str) -> None:
+    """Execute true owner-only legacy and versioned RLS signing key scripts.
+
+    This disposable cluster must have no signing keys yet. PostgreSQL pgAudit
+    retains all ROLE/DDL/WRITE/FUNCTION categories; only bind parameter values
+    are disabled for the private owner scripts. The CI runner never prints
+    input keys, their digests, raw server logs or reversible COPY envelopes.
+    """
+    prefix = run(["docker", "logs", container_name],
+                 "baseline owner signing key pgAudit", include_stderr=True)
+    marker = uuid.uuid4().hex[:12]
+    legacy_key = "synthetic-legacy-signing-key-2026-" + marker + "-never-real"
+    staged_key = "synthetic-versioned-signing-key-2026-" + marker + "-never-real"
+    staged_id = "synthetic_" + marker
+    wrong_legacy = "different-legacy-signing-key-2026-" + marker + "-never-real"
+    wrong_staged = "different-versioned-signing-key-2026-" + marker + "-never-real"
+
+    legacy = {"TENANT_PROOF_KEY": legacy_key}
+    staged = {"TENANT_PROOF_KEY_ID": staged_id, "TENANT_PROOF_KEY": staged_key}
+    client_output = ""
+
+    empty = sql("""
+        SELECT
+           (SELECT count(*) FROM platform.tenant_proof_secret) = 0
+        AND (SELECT count(*) FROM platform.tenant_proof_keys) = 0
+        """, "preflight synthetic tenant proof secret count")
+    if empty != "t":
+        raise AssertionError("Disposable pgAudit DB unexpectedly has signing keys")
+
+    # Both scripts must refuse parameter-value auditing before COPY even for
+    # otherwise valid synthetic input. No key row can be created.
+    for filename, private_values in (
+        ("provision-tenant-proof.sql", legacy),
+        ("stage-tenant-proof-key.sql", staged),
+    ):
+        denied = private_owner_script(
+            filename, private_values,
+            expect_failure=True, metadata_only=False)
+        if ("Owner-only signing key operation requires parameter-free audit metadata"
+                not in denied):
+            raise AssertionError("Unsafe signing key pgAudit profile not rejected")
+        client_output += denied
+
+    unsafe_after = run(["docker", "logs", container_name],
+                       "check denied private COPY never started",
+                       include_stderr=True)
+    if not unsafe_after.startswith(prefix):
+        raise AssertionError("Cannot isolate rejected signing-key audit window")
+    if "statement: COPY" in unsafe_after[len(prefix):]:
+        raise AssertionError("Parameter-on signing key execution reached COPY")
+    no_keys = sql("""
+        SELECT
+           (SELECT count(*) FROM platform.tenant_proof_secret) = 0
+        AND (SELECT count(*) FROM platform.tenant_proof_keys) = 0
+        """, "rejected signing-key operations are side-effect-free")
+    if no_keys != "t":
+        raise AssertionError("Rejected signing-key operation changed database")
+
+    client_output += private_owner_script("provision-tenant-proof.sql", legacy)
+    client_output += private_owner_script("stage-tenant-proof-key.sql", staged)
+
+    # Neither a retry with identical material nor an attempt to reuse a key
+    # ID with different material may mutate the existing signing keys.
+    client_output += private_owner_script("provision-tenant-proof.sql", legacy)
+    client_output += private_owner_script("stage-tenant-proof-key.sql", staged)
+
+    different_legacy = {"TENANT_PROOF_KEY": wrong_legacy}
+    denied_legacy = private_owner_script(
+        "provision-tenant-proof.sql", different_legacy, expect_failure=True)
+    if "Legacy key mismatch or retirement" not in denied_legacy:
+        raise AssertionError("Legacy signing-key collision not rejected")
+    client_output += denied_legacy
+
+    different_staged = dict(staged)
+    different_staged["TENANT_PROOF_KEY"] = wrong_staged
+    denied_staged = private_owner_script(
+        "stage-tenant-proof-key.sql", different_staged, expect_failure=True)
+    if "Key ID already has different material" not in denied_staged:
+        raise AssertionError("Versioned signing-key collision not rejected")
+    client_output += denied_staged
+
+    # Static SQL only. No key, marker or key ID is in the query text or CLI.
+    verified = sql("""
+        SELECT
+           (SELECT count(*) FROM platform.tenant_proof_secret WHERE id=1) = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id='legacy' AND revoked_at IS NULL
+               AND valid_until > clock_timestamp()) = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id<>'legacy' AND revoked_at IS NULL
+               AND valid_until > clock_timestamp()) = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys) = 2
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE octet_length(signing_key) >= 32) = 2
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id='legacy'
+               AND signing_key=(SELECT signing_key
+                                FROM platform.tenant_proof_secret
+                                WHERE id=1)) = 1
+        AND NOT has_table_privilege('comuni_app_runtime',
+                                    'platform.tenant_proof_keys','SELECT')
+        AND NOT has_table_privilege('comuni_app_runtime',
+                                    'platform.tenant_proof_keys','INSERT')
+        """, "tenant proof secrets and runtime isolation")
+    if verified != "t":
+        raise AssertionError("Signing-key database or runtime invariants failed")
+
+    # SHA-256 is used ONLY as an in-memory test comparison. Never publish
+    # fingerprints of live keys and never pass any material into SQL literals.
+    def fingerprint(query: str) -> str:
+        return sql(query, "inspect synthetic key material fingerprint")
+    fingerprints = (
+        fingerprint("SELECT encode(public.digest(signing_key,'sha256'),'hex') "
+                    "FROM platform.tenant_proof_secret WHERE id=1"),
+        fingerprint("SELECT encode(public.digest(signing_key,'sha256'),'hex') "
+                    "FROM platform.tenant_proof_keys WHERE key_id='legacy'"),
+        fingerprint("SELECT encode(public.digest(signing_key,'sha256'),'hex') "
+                    "FROM platform.tenant_proof_keys WHERE key_id<>'legacy'"),
+    )
+    expected = (
+        hashlib.sha256(legacy_key.encode("utf-8")).hexdigest(),
+        hashlib.sha256(legacy_key.encode("utf-8")).hexdigest(),
+        hashlib.sha256(staged_key.encode("utf-8")).hexdigest(),
+    )
+    if fingerprints != expected:
+        raise AssertionError("Tenant signing material was changed by a retry")
+
+    after = run(["docker", "logs", container_name],
+                "collect isolated signing-key pgAudit logs", include_stderr=True)
+    if not after.startswith(prefix):
+        raise AssertionError("Cannot isolate signing-key pgAudit log window")
+    canaries = (legacy_key, staged_key, staged_id, wrong_legacy, wrong_staged)
+    assert_tenant_signing_key_privacy(after[len(prefix):], client_output, canaries)
+
 def main() -> None:
     name = "comuni-pgaudit-ci-" + uuid.uuid4().hex[:8]
     container_started = False
@@ -731,8 +908,9 @@ def main() -> None:
         assert_audits(logs, observed_verifiers, test_passwords)
         verify_identity_under_pgaudit(name)
         verify_platform_and_provision_under_pgaudit(name)
-        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and eight owner-only COPY "
-              "operations verified; synthetic SCRAM/OIDC/organization canaries "
+        verify_tenant_signing_keys_under_pgaudit(name)
+        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and ten owner-only COPY "
+              "operations verified; synthetic SCRAM/OIDC/signing-key canaries "
               "absent from captured logs.")
     finally:
         if container_started:
