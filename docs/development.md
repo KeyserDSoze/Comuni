@@ -172,3 +172,7 @@ Per costruire `AuditEvent`, passare actor e correlation già verificati/canonici
 ## #115 — Gate privacy log pgAudit ROLE/DDL
 
 Per modifiche a `scripts/postgres/provision-{runtime,platform-read}-role.sql` il gate sintetico analizza i log reali PostgreSQL17/pgAudit e fallisce se una singola operazione `CREATE/ALTER ROLE` non reca `<REDACTED>` o contiene parti sensibili del verificatore SCRAM. Eseguire prima `python3 -m unittest tests/infra/test_pgaudit_log_analyzer.py` (via discover di `tests/infra`) e poi la CI completa, che avvia una fixture Docker isolata. L'analizzatore non stampa mai log né canary; non usare valori veri o disabilitare `pgaudit.log`. Per Azure/pgAudit/SIEM live la #92 rimane bloccante.
+
+## #116 — Controllo pgAudit sintetico dell'onboarding
+
+Il bootstrap offline del primo Admin continua a richiedere issuer/sub OIDC approvati separatamente; non è un self-service. La CI esegue gli script `register-organization.sql` e `bootstrap-initial-admin.sql` nel PostgreSQL 17+pgAudit isolato, con valori sintetici da `stream-private-input.py` e senza nuove variabili nell'inventory. Per riprodurre la regressione Python: `python3 -m unittest discover -s tests/infra -p 'test_*.py' -v`; il test integrato è già parte del backend GitHub Actions. Non eseguire l'helper in terminale, non stampare stdout della COPY o log contenenti input, non usare `psql -a/-e`, `set -x`, segreti live o tenant reali. Le verifiche Azure/SIEM/Privacy richiedono attività separate nelle #86/#92/#84.

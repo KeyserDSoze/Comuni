@@ -39,10 +39,14 @@ def log_with_audit() -> str:
 class PgAuditOwnerIdentityPrivacyTests(unittest.TestCase):
     def test_real_pg_audit_fixture_must_execute_both_owner_scripts(self):
         source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn("register-organization.sql", source)
-        self.assertIn("bootstrap-initial-admin.sql", source)
-        self.assertIn("verify_identity_under_pgaudit()", source)
-        self.assertIn("assert_identity_privacy(", source)
+        self.assertTrue("register-organization.sql" in source,
+                        "Missing real registration script in pgAudit fixture")
+        self.assertTrue("bootstrap-initial-admin.sql" in source,
+                        "Missing real Admin bootstrap in pgAudit fixture")
+        self.assertTrue("verify_identity_under_pgaudit(name)" in source,
+                        "Owner-identity pgAudit integration is not invoked")
+        self.assertTrue("assert_identity_privacy(" in source,
+                        "Missing sensitive log privacy assertion")
 
     def test_clean_pgaudit_registration_and_bootstrap_are_accepted(self):
         gate.assert_identity_privacy(log_with_audit(), "", CANARIES)

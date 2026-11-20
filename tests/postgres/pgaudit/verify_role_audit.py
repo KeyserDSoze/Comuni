@@ -181,6 +181,131 @@ def assert_audits(log: str, verifiers: list[str],
     if "statement: COPY" not in log:
         raise AssertionError("No native COPY statement logged while pgAudit active")
 
+
+def assert_identity_privacy(server_log: str, client_output: str,
+                            canaries: tuple[str, ...]) -> None:
+    """Require audited owner-only COPY and reject recognizable private values.
+
+    The input here is only an isolated pgAudit log *slice* recorded while
+    executing actual register/bootstrap scripts, not earlier role provisioning.
+    Never echo the log, private inputs or a substring in diagnostic messages.
+    """
+    if not canaries or any(not canary for canary in canaries):
+        raise AssertionError("No valid synthetic identity canaries to verify")
+    if any(canary in server_log or canary in client_output for canary in canaries):
+        raise AssertionError("Synthetic identity leaked into pgAudit/server/client logs")
+
+    # Native statement logging identifies both owner-only DO blocks, while
+    # pgAudit FUNCTION/WRITE proves that extension auditing stayed enabled.
+    for marker in ("DO $register$", "DO $bootstrap$"):
+        if marker not in server_log:
+            raise AssertionError("Owner-only operation missing from PostgreSQL logs")
+    audit_lines = [
+        line for line in server_log.splitlines()
+        if "AUDIT: SESSION" in line
+    ]
+    if sum(",FUNCTION,DO," in line for line in audit_lines) < 2:
+        raise AssertionError("Owner-only operations missing pgAudit FUNCTION events")
+    if not any(",WRITE,INSERT," in line for line in audit_lines):
+        raise AssertionError("Owner-only operations missing pgAudit WRITE events")
+    if server_log.count("statement: COPY") < 2:
+        raise AssertionError("Private client COPY statements not logged")
+
+
+def private_owner_script(file: str, values: dict[str, str],
+                         expect_failure: bool = False) -> str:
+    """Use only static, reviewed script paths and private environment values."""
+    if file not in ("register-organization.sql", "bootstrap-initial-admin.sql"):
+        raise AssertionError("Unreviewed owner identity script")
+    return run(
+        ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
+         "-p", PORT, "-U", OWNER, "-d", DB, "-f",
+         str(ROOT / "scripts" / "postgres" / file)],
+        "synthetic owner identity operation",
+        env=psql_env(**values),
+        expected=1 if expect_failure else 0,
+        include_stderr=True,
+    )
+
+
+def verify_identity_under_pgaudit(container_name: str) -> None:
+    """Test real registration + first Admin bootstrap under full pgAudit.
+
+    This disposable cluster is populated with synthetic records only. No
+    canary is included in SQL literals, command arguments or diagnostic text.
+    A previous Docker log snapshot isolates events from these operations.
+    """
+    prefix = run(["docker", "logs", container_name],
+                 "pgAudit identity baseline", include_stderr=True)
+    organization_id = str(uuid.uuid4())
+    marker = uuid.uuid4().hex[:12]
+    organization_name = "Comune Sintetico " + marker
+    issuer = "https://oidc-ci.example.test/tenant-" + marker
+    subject = "synthetic-oidc-sub-" + marker
+    register_ticket = "REG-2026-" + marker
+    bootstrap_ticket = "BOOT-2026-" + marker
+    register_reviewer = "register-reviewer-" + marker
+    bootstrap_reviewer = "bootstrap-reviewer-" + marker
+    invalid_subject = " invalid-sub-" + marker
+
+    registration = {
+        "COMUNI_REGISTER_ORGANIZATION_ID": organization_id,
+        "COMUNI_REGISTER_ORGANIZATION_NAME": organization_name,
+        "COMUNI_REGISTER_CHANGE_TICKET": register_ticket,
+        "COMUNI_REGISTER_APPROVER": register_reviewer,
+    }
+    bootstrap = {
+        "COMUNI_BOOTSTRAP_ORGANIZATION_ID": organization_id,
+        "COMUNI_BOOTSTRAP_IDENTITY_ISSUER": issuer,
+        "COMUNI_BOOTSTRAP_SUBJECT": subject,
+        "COMUNI_BOOTSTRAP_CHANGE_TICKET": bootstrap_ticket,
+        "COMUNI_BOOTSTRAP_APPROVER": bootstrap_reviewer,
+    }
+    client_output = ""
+    client_output += private_owner_script("register-organization.sql", registration)
+    client_output += private_owner_script("bootstrap-initial-admin.sql", bootstrap)
+
+    # Input validation must fail in the real DO, without creating membership
+    # or changing audit. Keep this negative subject outside SQL and argv.
+    invalid_bootstrap = dict(bootstrap)
+    invalid_bootstrap["COMUNI_BOOTSTRAP_SUBJECT"] = invalid_subject
+    client_output += private_owner_script(
+        "bootstrap-initial-admin.sql", invalid_bootstrap, expect_failure=True)
+
+    # Exact owner-only replay must be a no-op, including the audit count.
+    client_output += private_owner_script("register-organization.sql", registration)
+    client_output += private_owner_script("bootstrap-initial-admin.sql", bootstrap)
+
+    # This query contains *only static SQL*, never organization ID, subject,
+    # issuer, ticket, or reviewer. The isolated DB starts with zero tenants.
+    verified = sql("""
+        SELECT
+           (SELECT count(*) FROM platform.organizations
+            WHERE is_activated=FALSE AND is_suspended=FALSE) = 1
+        AND (SELECT count(*) FROM platform.organization_modules
+             WHERE module_key='protocol' AND enabled=FALSE) = 1
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin' AND is_active=TRUE
+               AND identity_issuer IS NOT NULL) = 1
+        AND (SELECT count(*) FROM platform.audit_events
+             WHERE action IN ('platform.organization.registered',
+                              'platform.membership.admin.initialized')) = 2
+        """, "synthetic owner registration/bootstrap invariant")
+    if verified != "t":
+        raise AssertionError("Owner identity operations violated expected invariants")
+
+    after = run(["docker", "logs", container_name],
+                "collect isolated owner identity pgAudit logs",
+                include_stderr=True)
+    if not after.startswith(prefix):
+        raise AssertionError("Cannot isolate owner identity pgAudit log window")
+    canaries = (
+        organization_id, organization_name, issuer, subject,
+        register_ticket, bootstrap_ticket, register_reviewer,
+        bootstrap_reviewer, invalid_subject,
+    )
+    assert_identity_privacy(after[len(prefix):], client_output, canaries)
+
 def main() -> None:
     name = "comuni-pgaudit-ci-" + uuid.uuid4().hex[:8]
     container_started = False
@@ -282,9 +407,9 @@ def main() -> None:
         logs = run(["docker", "logs", name], "collect private pgAudit logs",
                    include_stderr=True)
         assert_audits(logs, observed_verifiers, test_passwords)
-        print("PASS: real PostgreSQL17 pgAudit ROLE/DDL audit retained; "
-              "CREATE/ALTER redacted, login and rollback proven; "
-              "no canary plaintext/verifier in server logs.")
+        verify_identity_under_pgaudit(name)
+        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and owner identity COPY verified; "
+              "synthetic SCRAM and OIDC canaries absent from captured logs.")
     finally:
         if container_started:
             # Always delete the synthetic roles and entire ephemeral cluster.
