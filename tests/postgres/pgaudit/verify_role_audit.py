@@ -177,14 +177,17 @@ def assert_audits(log: str, verifiers: list[str],
     sensitive = [item for item in passwords + verifiers if item]
     for item in verifiers:
         sensitive.extend(scram_components(item))
-        envelope = json.dumps(
-            {"SCRAM_VERIFIER": item}, ensure_ascii=True,
-            separators=(",", ":"), sort_keys=True,
-        ).encode("ascii")
-        sensitive.append(base64.b64encode(envelope).decode("ascii"))
     for item in passwords + verifiers:
         if item:
             sensitive.append(base64.b64encode(item.encode("ascii")).decode("ascii"))
+            # Defensively reject a synthetic password canary wrapped in the
+            # same reversible envelope too, even though normal role transport
+            # only ever wraps generated SCRAM verifiers.
+            envelope = json.dumps(
+                {"SCRAM_VERIFIER": item}, ensure_ascii=True,
+                separators=(",", ":"), sort_keys=True,
+            ).encode("ascii")
+            sensitive.append(base64.b64encode(envelope).decode("ascii"))
     if any(value in output for output in (log, client_output)
            for value in sensitive):
         # Never print a candidate, envelope, client output or raw server log.
