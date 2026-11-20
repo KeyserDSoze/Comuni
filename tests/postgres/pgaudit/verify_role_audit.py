@@ -369,9 +369,7 @@ def verify_file_collector_under_pgaudit(name: str) -> None:
     }
     # The exact script uses pgaudit.log_parameter=off for values, while
     # pgAudit ROLE/DDL/WRITE/FUNCTION and native statement logging remain on.
-    client_output += private_owner_script(
-        "stage-tenant-proof-key.sql", owner_values,
-    )
+    client_output += private_owner_script("stage-tenant-proof-key.sql", owner_values)
     # Read-back is static SQL only: no input or secret in query text.
     if sql("""
         SELECT count(*) = 1
