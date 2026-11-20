@@ -1,0 +1,10 @@
+# TDD — provisioning legacy bound al ticket originario (#130)
+
+`tests/backend/Comuni.Api.Tests/OrganizationProvisioningTests.cs` avvia **psql reale** come owner del database PostgreSQL17 sintetico. Non usa la credenziale del runtime per creare righe e non coinvolge un Comune reale. Gli input viaggiano attraverso l'helper `stream-private-input.py provision-organization`, come nelle prove di privacy precedenti.
+
+1. **RED:** provisioning ex novo (UUID unico, ticket A, nome sintetico) => successo; poi retry con **stesso UUID/nome, ticket B valido** => il codice vulnerabile rispondeva zero. La regressione richiede exit nonzero, nessuna mutazione a organization, moduli, membership o audit, `correlation_id` originario `bootstrap:A` invariato, nessun ticket/nome esposto in stdout/stderr. Il successivo retry del ticket A deve continuare a riuscire senza aggiungere audit.
+2. **RED:** owner di test inserisce una organization `created`, la riga `protocol` disabilitata e un singolo evento `platform.organization.created` con id/resource/correlation uguali all'atteso, ma `actor_subject=synthetic-untrusted-actor`. Il retry reale di `provision-organization.sql` deve essere negato (nonzero), senza alterare rowcount o stato pending.
+3. **GREEN:** il ramo retry di `provision-organization.sql` non può adottare una riga tramite solo nome e numero di eventi: deve osservare un unico evento `created` con ticket e attore owner coerenti. Non deve stampare dati nel confronto, non modificare `register-organization.sql`, non rimuovere il guard pgAudit o le verifiche della registrazione.
+4. **Regressioni:** test precedenti sul tenant pending, sugli owner/grants runtime, sulle collisioni concurrent UUID, sul no-op anche dopo activation e sulla privacy dei literal SQL/postgres logs rimangono obbligatori. Nuovi controlli non equivalgono a prova di approvazione reale.
+
+Gate CI di chiusura: **7/7 job** sullo stesso SHA HEAD main (xUnit .NET10, PostgreSQL 17/pgAudit file collector, React/Playwright, Terraform/Python, CodeQL C#/TS, NuGet/npm security, Docker). Nessuna esecuzione Azure o dati reali.

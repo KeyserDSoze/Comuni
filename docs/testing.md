@@ -651,3 +651,8 @@ La definizione di completamento richiede **7/7 job Actions success sul medesimo 
 ## #129 — TDD sulla concorrenza amministrazione moduli (ADR 0113)
 
 `ConcurrentModuleAdministrationTests` usa due sessioni reali del login PostgreSQL `comuni_app_runtime` con RLS HMAC firmata e una riga bloccata dalla fixture owner. Il monitor usa una connessione PostgreSQL **autocommit separata** per non trattenere snapshot di `pg_stat_activity`: attende due writer in `wait_event_type='Lock'` prima di rilasciare la barriera, quindi verifica un `Updated`, un `Unchanged`, **un solo audit per disable/enable**, Comune B immutato e nessuna escalation. Vedere [runbook](testing/module-toggle-concurrency.md). Chiusura solo dopo CI 7/7 su HEAD main.
+
+
+## #130 — TDD per retry legacy vincolato al change originario (ADR 0114)
+
+I test `OrganizationProvisioningTests` avviano il vero script tramite `psql` su PostgreSQL17 sintetico come owner con private COPY. Confrontano il retry dello stesso UUID/nome con ticket **B distinto da A** (rifiutato, audit originale invariato) e la riga/manual audit `platform.organization.created` con actor **non owner** anche se ticket/resource corrispondono (rifiutata). Verificano idempotenza del retry legittimo, nessuna mutazione sul rifiuto e assenza di nomi/ticket nel client output; regressioni esistenti provano lifecycle, ruolo runtime negato e privacy log PostgreSQL. RED/GREEN e gate [runbook](testing/legacy-provisioning-provenance.md). Nessun change reale/IdP live è verificato.

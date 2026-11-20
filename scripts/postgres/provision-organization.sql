@@ -77,6 +77,7 @@ DECLARE
     v_id uuid;
     v_existing_name text;
     v_created_event_count bigint;
+    v_matching_event_count bigint;
 BEGIN
     -- Confirm exact schema/table ownership before any mutation. Runtime has
     -- neither table ownership nor INSERT on platform.organizations.
@@ -123,14 +124,25 @@ BEGIN
         END IF;
 
         -- A matching legacy/manual row must not be claimed as a retry.
-        SELECT COUNT(*) INTO v_created_event_count
+        -- Exactly one genuine owner-origin event must exist. A syntactically
+        -- valid but unrelated change ticket is NOT the original approval;
+        -- a hand-written event with a forged actor must not adopt a legacy
+        -- organization as a successful provisioning retry. The audit and
+        -- change reference are compared only in SQL, never echoed in errors.
+        SELECT COUNT(*),
+               COUNT(*) FILTER (
+                   WHERE correlation_id = 'bootstrap:' || v_ticket
+                     AND actor_subject = 'db-owner:' || current_user
+               )
+        INTO v_created_event_count, v_matching_event_count
         FROM platform.audit_events
         WHERE organization_id = v_id
           AND resource_type = 'platform.organization'
           AND resource_id = v_id
           AND action = 'platform.organization.created';
 
-        IF v_created_event_count <> 1 OR NOT EXISTS (
+        IF v_created_event_count <> 1 OR v_matching_event_count <> 1
+           OR NOT EXISTS (
             SELECT 1 FROM platform.organization_modules
             WHERE organization_id = v_id AND module_key = 'protocol'
         ) THEN

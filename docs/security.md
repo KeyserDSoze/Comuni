@@ -674,3 +674,8 @@ Sono ora **12/14** le procedure owner-only inventariate sottoposte alla specific
 ## #129 — Idempotenza concorrente dei toggle dei moduli (ADR 0113)
 
 Il repository dei moduli prende ora `SELECT ... FOR UPDATE` parametrizzato sulla riga Protocollo del Comune **prima** della lettura dello stato, entro la transazione RLS firmata con `comuni_app_runtime`. Due Admin che chiedono simultaneamente lo **stesso valore** producono una sola transizione e un solo audit; il secondo request è un no-op. Nessun nuovo grant, tabella, endpoint o lock globale. Comportamenti stale / toggle opposti, DBA bypass, produzione Azure e retention richiedono review separata. Vedere [runbook concurrency](security/module-toggle-concurrency.md); #3/#4/#5 restano aperte.
+
+
+## #130 — Provenance e retry del provisioning owner legacy (ADR 0114)
+
+`provision-organization.sql` rifiuta un **retry dello stesso Comune con un nuovo ticket**: richiede esattamente un evento `platform.organization.created` riferito all'organization, con `correlation_id=bootstrap:<ticket originario>` e `actor_subject=db-owner:<schema owner corrente>`. Non adotta righe manuali con evento forged actor, non modifica flag, activation, membership o audit sul rifiuto. Il canale COPY client-side e il guard `pgaudit.log_parameter=off` non cambiano. L'owner SQL può comunque falsificare il dato o l'evento: questo non certifica reviewer, titolarità del Comune, Key Vault, privacy Azure/SIEM o immutabilità legale. [Runbook](security/legacy-provisioning-provenance.md). #3/#4/#5/#84/#86/#92 ancora aperte.
