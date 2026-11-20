@@ -201,6 +201,9 @@ def assert_identity_privacy(server_log: str, client_output: str,
         "registration-reviewer", "bootstrap-reviewer", "invalid-subject",
         "activation-ticket", "activation-reviewer", "second-admin-subject",
         "second-admin-ticket", "second-admin-reviewer", "invalid-second-subject",
+        "revocation-ticket", "revocation-reviewer", "revocation-reason",
+        "last-admin-revocation-ticket", "suspension-ticket",
+        "suspension-reviewer", "suspension-reason",
     )
     if len(canaries) != len(categories):
         raise AssertionError("Identity canary inventory mismatch")
@@ -220,20 +223,21 @@ def assert_identity_privacy(server_log: str, client_output: str,
     # Each real owner-only DO statement remains traceable in native logs.
     # pgAudit FUNCTION and WRITE prove full metadata auditing stays enabled.
     for marker in ("DO $register$", "DO $bootstrap$",
-                   "DO $activation$", "DO $enrollment$"):
+                   "DO $activation$", "DO $enrollment$",
+                   "DO $revocation$", "DO $lifecycle$"):
         if marker not in server_log:
             raise AssertionError("Owner-only operation missing from PostgreSQL logs")
     audit_lines = [
         line for line in server_log.splitlines()
         if "AUDIT: SESSION" in line
     ]
-    if sum(",FUNCTION,DO," in line for line in audit_lines) < 4:
+    if sum(",FUNCTION,DO," in line for line in audit_lines) < 6:
         raise AssertionError("Owner-only operations missing pgAudit FUNCTION events")
     if not any(",WRITE,INSERT," in line for line in audit_lines):
         raise AssertionError("Owner-only operations missing pgAudit WRITE events")
     if not any(",WRITE,UPDATE," in line for line in audit_lines):
         raise AssertionError("Municipal activation missing pgAudit UPDATE event")
-    if server_log.count("statement: COPY") < 4:
+    if server_log.count("statement: COPY") < 6:
         raise AssertionError("Private client COPY statements not logged")
 
 
@@ -244,12 +248,13 @@ def private_owner_script(file: str, values: dict[str, str],
     if file not in (
         "register-organization.sql", "bootstrap-initial-admin.sql",
         "activate-organization.sql", "enroll-additional-admin.sql",
+        "revoke-admin.sql", "set-organization-suspension.sql",
     ):
         raise AssertionError("Unreviewed owner identity script")
     env = psql_env(**values)
     if metadata_only:
         # pgAudit FUNCTION/WRITE records remain enabled. The parameter field
-        # alone must be suppressed for private owner input. All four scripts
+        # alone must be suppressed for private owner input. All six scripts
         # independently REFUSE parameter=on before COPY transport begins.
         env["PGOPTIONS"] = env["PGOPTIONS"].replace(
             "-c pgaudit.log_parameter=on", "-c pgaudit.log_parameter=off")
@@ -265,7 +270,7 @@ def private_owner_script(file: str, values: dict[str, str],
 
 
 def verify_identity_under_pgaudit(container_name: str) -> None:
-    """Test real full municipal/Admin onboarding under full pgAudit.
+    """Test owner-only onboarding, Admin revocation and tenant suspension.
 
     This disposable cluster is populated with synthetic records only. No
     canary is included in SQL literals, command arguments or diagnostic text.
@@ -289,6 +294,13 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
     additional_ticket = "ADD-2026-" + marker
     additional_reviewer = "enrollment-reviewer-" + marker
     invalid_secondary_subject = " invalid-second-admin-" + marker
+    revocation_ticket = "REVOKE-2026-" + marker
+    revocation_reviewer = "revocation-reviewer-" + marker
+    revocation_reason = "operator-departure-" + marker
+    last_admin_ticket = "LAST-2026-" + marker
+    suspension_ticket = "SUSP-2026-" + marker
+    suspension_reviewer = "suspension-reviewer-" + marker
+    suspension_reason = "security-incident-" + marker
 
     registration = {
         "COMUNI_REGISTER_ORGANIZATION_ID": organization_id,
@@ -314,6 +326,21 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
         "COMUNI_ADD_ADMIN_SUBJECT": additional_subject,
         "COMUNI_ADD_ADMIN_CHANGE_TICKET": additional_ticket,
         "COMUNI_ADD_ADMIN_APPROVER": additional_reviewer,
+    }
+    revocation = {
+        "COMUNI_REVOKE_ADMIN_ORGANIZATION_ID": organization_id,
+        "COMUNI_REVOKE_ADMIN_IDENTITY_ISSUER": issuer,
+        "COMUNI_REVOKE_ADMIN_SUBJECT": additional_subject,
+        "COMUNI_REVOKE_ADMIN_CHANGE_TICKET": revocation_ticket,
+        "COMUNI_REVOKE_ADMIN_APPROVER": revocation_reviewer,
+        "COMUNI_REVOKE_ADMIN_REASON_CODE": revocation_reason,
+    }
+    suspension = {
+        "COMUNI_LIFECYCLE_ORGANIZATION_ID": organization_id,
+        "COMUNI_LIFECYCLE_ACTION": "suspend",
+        "COMUNI_LIFECYCLE_CHANGE_TICKET": suspension_ticket,
+        "COMUNI_LIFECYCLE_APPROVER": suspension_reviewer,
+        "COMUNI_LIFECYCLE_REASON_CODE": suspension_reason,
     }
     client_output = ""
     client_output += private_owner_script("register-organization.sql", registration)
@@ -366,22 +393,62 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
     client_output += private_owner_script("activate-organization.sql", activation)
     client_output += private_owner_script("enroll-additional-admin.sql", additional_admin)
 
+    # Reject parameter logging BEFORE receiving either private COPY payload.
+    # Then revoke only the second Admin; preserve the sole survivor.
+    for script_name, private_values in (
+        ("revoke-admin.sql", revocation),
+        ("set-organization-suspension.sql", suspension),
+    ):
+        unsafe = private_owner_script(
+            script_name, private_values,
+            expect_failure=True, metadata_only=False)
+        if "Owner-only identity operation requires parameter-free audit metadata" not in unsafe:
+            raise AssertionError("Unsafe pgAudit parameter profile was not denied")
+        client_output += unsafe
+
+    client_output += private_owner_script("revoke-admin.sql", revocation)
+
+    # Replay cannot add a second revocation event.
+    client_output += private_owner_script("revoke-admin.sql", revocation)
+
+    # A distinct change ticket must not allow revoking the last remaining
+    # OIDC Admin. Use only the COPY environment, not SQL or command arguments.
+    last_admin = dict(revocation)
+    last_admin["COMUNI_REVOKE_ADMIN_SUBJECT"] = subject
+    last_admin["COMUNI_REVOKE_ADMIN_CHANGE_TICKET"] = last_admin_ticket
+    blocked = private_owner_script("revoke-admin.sql", last_admin,
+                                   expect_failure=True)
+    if "Last verified active Admin cannot be revoked" not in blocked:
+        raise AssertionError("Last surviving OIDC Admin was not protected")
+    client_output += blocked
+
+    client_output += private_owner_script("set-organization-suspension.sql", suspension)
+    # Replayed suspension must have no new audit entry.
+    client_output += private_owner_script("set-organization-suspension.sql", suspension)
+
     # This query contains *only static SQL*, never organization ID, subject,
     # issuer, ticket, or reviewer. The isolated DB starts with zero tenants.
     verified = sql("""
         SELECT
            (SELECT count(*) FROM platform.organizations
-            WHERE is_activated=TRUE AND is_suspended=FALSE) = 1
+            WHERE is_activated=TRUE AND is_suspended=TRUE) = 1
         AND (SELECT count(*) FROM platform.organization_modules
              WHERE module_key='protocol' AND enabled=FALSE) = 1
         AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin') = 2
+        AND (SELECT count(*) FROM platform.organization_memberships
              WHERE role='Admin' AND is_active=TRUE
-               AND identity_issuer IS NOT NULL) = 2
+               AND identity_issuer IS NOT NULL) = 1
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin' AND is_active=FALSE
+               AND identity_issuer IS NOT NULL) = 1
         AND (SELECT count(*) FROM platform.audit_events
              WHERE action IN ('platform.organization.registered',
                               'platform.membership.admin.initialized',
                               'platform.organization.activated',
-                              'platform.membership.admin.added')) = 4
+                              'platform.membership.admin.added',
+                              'platform.membership.admin.revoked',
+                              'platform.organization.suspended')) = 6
         """, "synthetic owner full onboarding invariant")
     if verified != "t":
         raise AssertionError("Owner identity operations violated expected invariants")
@@ -397,6 +464,9 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
         bootstrap_reviewer, invalid_subject,
         activation_ticket, activation_reviewer, additional_subject,
         additional_ticket, additional_reviewer, invalid_secondary_subject,
+        revocation_ticket, revocation_reviewer, revocation_reason,
+        last_admin_ticket, suspension_ticket, suspension_reviewer,
+        suspension_reason,
     )
     assert_identity_privacy(after[len(prefix):], client_output, canaries)
 

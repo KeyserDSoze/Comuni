@@ -45,6 +45,18 @@
 
 BEGIN;
 
+-- PL/pgSQL values in owner-only WRITE statements can be exposed by pgAudit
+-- parameter logging despite a private client-side COPY transport. Reject the
+-- unsafe audit profile before receiving any private COPY payload; preserve
+-- all audit classes and native SQL statement logging in the tested session.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only identity operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 -- The fixed local COPY source sends exactly six inputs through the protocol
 -- (not as literal issuer/sub/ticket values in the SQL statement log).
 -- psql must run at a trusted repository root. Base64 is NOT encryption.

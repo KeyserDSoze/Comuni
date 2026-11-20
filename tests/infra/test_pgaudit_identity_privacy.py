@@ -16,7 +16,7 @@ assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
-# Match all fifteen safe diagnostic categories checked by the pgAudit integration.
+# Match the 22 synthetic diagnostic categories checked by the pgAudit integration.
 CANARIES = (
     "2c4f8d0c-0b1e-4625-97bb-000000000116",
     "Comune-Fittizio-Canary",
@@ -33,6 +33,13 @@ CANARIES = (
     "ENROLL-2026-TEST",
     "synthetic-enrollment-reviewer",
     " invalid-secondary-canary",
+    "REVOKE-2026-TEST",
+    "synthetic-revocation-reviewer",
+    "operator-departure-2026",
+    "LAST-2026-TEST",
+    "SUSP-2026-TEST",
+    "synthetic-suspension-reviewer",
+    "security-incident-2026",
 )
 
 
@@ -42,9 +49,13 @@ def log_with_audit() -> str:
         "LOG: AUDIT: SESSION,12,1,FUNCTION,DO,,,,DO $bootstrap$; ,<not logged>",
         "LOG: AUDIT: SESSION,15,1,FUNCTION,DO,,,,DO $activation$; ,<not logged>",
         "LOG: AUDIT: SESSION,16,1,FUNCTION,DO,,,,DO $enrollment$; ,<not logged>",
+        "LOG: AUDIT: SESSION,18,1,FUNCTION,DO,,,,DO $revocation$; ,<not logged>",
+        "LOG: AUDIT: SESSION,19,1,FUNCTION,DO,,,,DO $lifecycle$; ,<not logged>",
         "LOG: AUDIT: SESSION,13,1,WRITE,INSERT,,,,INSERT INTO platform.organizations SELECT ...,<not logged>",
         "LOG: AUDIT: SESSION,14,1,WRITE,INSERT,,,,INSERT INTO platform.organization_memberships SELECT ...,<not logged>",
         "LOG: AUDIT: SESSION,17,1,WRITE,UPDATE,,,,UPDATE platform.organizations SET is_activated = TRUE,<not logged>",
+        "LOG: statement: COPY pg_temp.comuni_private_input(payload) FROM STDIN",
+        "LOG: statement: COPY pg_temp.comuni_private_input(payload) FROM STDIN",
         "LOG: statement: COPY pg_temp.comuni_private_input(payload) FROM STDIN",
         "LOG: statement: COPY pg_temp.comuni_private_input(payload) FROM STDIN",
         "LOG: statement: COPY pg_temp.comuni_private_input(payload) FROM STDIN",
@@ -96,7 +107,8 @@ class PgAuditOwnerIdentityPrivacyTests(unittest.TestCase):
     def test_missing_copy_or_pg_audit_registration_and_bootstrap_is_rejected(self):
         lines = log_with_audit().splitlines()
         for substring in ("$register$", "$bootstrap$", "$activation$",
-                          "$enrollment$", ",FUNCTION,DO,", ",WRITE,INSERT,",
+                          "$enrollment$", "$revocation$", "$lifecycle$",
+                          ",FUNCTION,DO,", ",WRITE,INSERT,",
                           ",WRITE,UPDATE,", "statement: COPY"):
             with self.subTest(evidence=substring):
                 without = "\n".join(line for line in lines
@@ -107,7 +119,7 @@ class PgAuditOwnerIdentityPrivacyTests(unittest.TestCase):
     def test_losing_a_single_copy_audit_event_is_rejected(self):
         lines = log_with_audit().splitlines()
         copies = [i for i, line in enumerate(lines) if "statement: COPY" in line]
-        self.assertEqual(4, len(copies))
+        self.assertEqual(6, len(copies))
         lines.pop(copies[-1])
         with self.assertRaises(AssertionError):
             gate.assert_identity_privacy("\n".join(lines), "", CANARIES)
