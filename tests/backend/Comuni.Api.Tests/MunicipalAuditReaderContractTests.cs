@@ -24,6 +24,14 @@ public sealed class MunicipalAuditReaderContractTests
         var tracked = typeof(IOrganizationAuditReader).GetMethod(
             "ListRecentAndRecordAsync", BindingFlags.Public | BindingFlags.Instance);
         Assert.NotNull(tracked);
-        Assert.Equal(3, tracked.GetParameters().Length);
+        // The caller must never supply an AuditEvent carrying a forged actor
+        // or correlation: the repository obtains both from the trusted API context.
+        Assert.Equal(
+            new[] { typeof(Guid), typeof(CancellationToken) },
+            tracked!.GetParameters().Select(p => p.ParameterType));
+        Assert.Contains(
+            typeof(ICurrentActorContext),
+            typeof(OrganizationAuditReader).GetConstructors().Single()
+                .GetParameters().Select(p => p.ParameterType));
     }
 }
