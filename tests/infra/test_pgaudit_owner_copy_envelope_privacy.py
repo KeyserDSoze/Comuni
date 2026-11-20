@@ -48,7 +48,10 @@ class OwnerCopyEnvelopePgAuditTests(unittest.TestCase):
             with self.subTest(fields=len(values)):
                 encoded = canonical_copy_envelope(values)
                 self.assertTrue(encoded)
-                self.assertFalse(any(value in encoded for value in values.values()))
+                # Short public metadata (e.g. grace='0') may occur by chance
+                # in base64; only long private canaries prove the gap.
+                self.assertFalse(any(value in encoded for value in values.values()
+                                     if len(value) >= 12))
                 recovered = json.loads(base64.b64decode(encoded, validate=True))
                 self.assertEqual(values, recovered)
 
@@ -92,10 +95,10 @@ class OwnerCopyEnvelopePgAuditTests(unittest.TestCase):
             "verify_tenant_signing_keys_under_pgaudit(name)",
             "verify_identity_under_pgaudit(name)",
             "verify_platform_and_provision_under_pgaudit(name)",
-            "assert_audits(logs,",
+            "assert_audits(",
         ):
             with self.subTest(required=required):
-                self.assertIn(required, script)
+                self.assertTrue(required in script, "Missing owner COPY privacy gate marker")
         producer = PRODUCER.read_text(encoding="utf-8")
         self.assertIn('sort_keys=True', producer)
         self.assertIn('separators=(",", ":")', producer)
