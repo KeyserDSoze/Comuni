@@ -113,6 +113,11 @@ public sealed class ConcurrentModuleAdministrationTests
             Assert.IsType<bool>(await lockRow.ExecuteScalarAsync());
         }
 
+        // pg_stat_activity is a snapshot view: querying it from the
+        // long-running gate transaction could reuse a stale zero-row view.
+        // Monitoring must use a separate autocommit connection and snapshot.
+        await using var observer = new NpgsqlConnection(Owner);
+        await observer.OpenAsync();
         var first = Task.Run(() => Toggle(org, desired, app));
         var second = Task.Run(() => Toggle(org, desired, app));
         try
@@ -129,7 +134,7 @@ public sealed class ConcurrentModuleAdministrationTests
                     SELECT count(*) FROM pg_stat_activity
                     WHERE application_name=@app AND wait_event_type='Lock'
                       AND state='active'
-                    """, controller, gate);
+                    """, observer);
                 waiting.Parameters.AddWithValue("app", app);
                 blocked = (long)(await waiting.ExecuteScalarAsync())!;
                 if (blocked == 2) break;
