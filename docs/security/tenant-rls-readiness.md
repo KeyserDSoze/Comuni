@@ -1,0 +1,7 @@
+# Core — Readiness legata al verifier RLS (#126)
+
+Il socket PostgreSQL raggiungibile **non** implica che l'API possa usare il contesto tenant firmato. `/health/ready` ora verifica con `ConnectionStrings:Default` e il `TenantProofSigner` effettivamente configurato che PostgreSQL accetti un MAC HMAC versione/ID corretto, rifiuti la stessa prova alterata, e mantenga l'asserzione in una transazione rollback usa-e-getta.
+
+Per la verifica è utilizzato un UUID casuale inesistente, non una organization o un account reale. Non vengono letti dati comunali né il DB secret di `platform.tenant_proof_keys`. La funzione SQL `platform.verified_tenant_id()` è già disponibile al login runtime limitato; non concedere ulteriori privilegi, non creare `SECURITY DEFINER` o usare SQL dinamico. Il `set_config` è parametrizzato. Errori di rete, revoca, mismatch o RLS verifier inconsistente danno solo 503, senza esporre key ID, MAC, connection string o eccezioni. `/health/live` rimane indipendente e `Cache-Control: no-store` si applica alla readiness.
+
+**Non è un gate completo di promozione ACA**: verifica il signer di una revisione e un database in un istante, non una reale transazione su due Comuni, Key Vault pinning, altri pool/repliche, CA TLS, MFA/OIDC, SIEM o Azure PG audit. Il rollout richiede smoke con due Comuni sintetici, verify-full TLS, credenziali separate, check staff authorized, rollback e review Security/Privacy: #5/#6/#19/#49 restano aperte. Vedere ADR 0110 e [test](../testing/tenant-rls-readiness.md).

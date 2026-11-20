@@ -50,7 +50,9 @@ public sealed record ApiProtectionSettings(int PermitLimit, int WindowSeconds)
             "form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
             "img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'";
 
-        if (context.Request.Path.StartsWithSegments("/api"))
+        if (context.Request.Path.StartsWithSegments("/api") ||
+            string.Equals(context.Request.Path.Value, "/health/ready",
+                StringComparison.OrdinalIgnoreCase))
         {
             headers["Cache-Control"] = "no-store";
             headers["Pragma"] = "no-cache";

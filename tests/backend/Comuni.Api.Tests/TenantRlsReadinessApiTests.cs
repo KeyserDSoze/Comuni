@@ -56,6 +56,7 @@ public sealed class TenantRlsReadinessApiTests
             Assert.Equal(HttpStatusCode.OK, live.StatusCode);
             using var healthy = await validClient.GetAsync("/health/ready");
             Assert.Equal(HttpStatusCode.OK, healthy.StatusCode);
+            Assert.Equal(true, healthy.Headers.CacheControl?.NoStore);
             Assert.DoesNotContain(secret, await healthy.Content.ReadAsStringAsync());
 
             // Any valid TCP connection with a *wrong* signer must be marked
@@ -64,6 +65,7 @@ public sealed class TenantRlsReadinessApiTests
             using var invalidClient = invalid.CreateClient();
             using var wrong = await invalidClient.GetAsync("/health/ready");
             Assert.Equal(HttpStatusCode.ServiceUnavailable, wrong.StatusCode);
+            Assert.Equal(true, wrong.Headers.CacheControl?.NoStore);
             Assert.DoesNotContain(secret, await wrong.Content.ReadAsStringAsync());
             Assert.Equal(HttpStatusCode.OK,
                 (await invalidClient.GetAsync("/health/live")).StatusCode);
@@ -122,6 +124,7 @@ public sealed class TenantRlsReadinessApiTests
         using var client = failed.CreateClient();
         using var response = await client.GetAsync("/health/ready");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(true, response.Headers.CacheControl?.NoStore);
         Assert.DoesNotContain("Password", await response.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
     }

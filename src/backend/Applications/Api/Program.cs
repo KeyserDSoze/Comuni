@@ -222,8 +222,9 @@ app.MapGet("/api/v1/platform/organizations", async (
 app.MapOpenApi();
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))
     .WithName("Live").AllowAnonymous();
-app.MapGet("/health/ready", async (ComuniDbContext db, CancellationToken ct) =>
-        await db.Database.CanConnectAsync(ct)
+app.MapGet("/health/ready", async (
+    ComuniDbContext db, TenantProofSigner signer, CancellationToken ct) =>
+        await TenantRlsReadinessProbe.CheckAsync(db, signer, ct)
             ? Results.Ok(new { status = "ready" })
             : Results.StatusCode(StatusCodes.Status503ServiceUnavailable))
     .WithName("Ready").AllowAnonymous();
