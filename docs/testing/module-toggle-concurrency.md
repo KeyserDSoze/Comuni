@@ -11,3 +11,9 @@ Il test sintetico:
 Gate: prima un commit RED su `main` che mostri il difetto reale (due `Updated`/due audit o equivalente), poi implementazione GREEN senza aggirare le policy. Conclusione solo con **sette job GitHub Actions success sullo stesso SHA finale HEAD `main`**: PostgreSQL17/pgAudit incluso collector, xUnit backend, Playwright React, Terraform/Python, CodeQL C#/TS, NuGet/npm SCA e Docker image.
 
 Il test controlla una concorrenza organizzata e riproducibile, non prova prestazioni a molti nodi, provider OIDC live, ETag, retention o integrità rispetto a un superuser DB.
+
+## Regressione EF tracking dopo commit concorrente (#131 / ADR 0115)
+
+Il test `ModuleAdministrationIntegrityTests.Tracked_module_state_must_be_refreshed_after_another_transaction_commits` integra la prova #129 con un'interleaving diverso: una transazione A tiene **tracciata** la riga Protocollo, una transazione B sullo stesso Comune committa un toggle usando il vero repository runtime/RLS firmato, quindi A invoca `SetEnabledAsync` chiedendo lo stesso valore di B. Il lock di riga non basta se EF riutilizza un oggetto già tracciato: è necessario il reload PostgreSQL dopo il lock. A deve tornare `Unchanged` senza duplicare l'audit. La verifica viene ripetuta per disable ed enable; un secondo Comune B di controllo rimane intatto, senza audit.
+
+RED verificato sul commit [`eb3aba8`](https://github.com/KeyserDSoze/Comuni/commit/eb3aba8a81a66d5c9847e4518e22406ae7539ec2), [CI 44824915021](https://github.com/KeyserDSoze/Comuni/actions/runs/44824915021): **381 test API passati, 1 fallito** (`Expected: Unchanged; Actual: Updated`). GREEN richiede la suite completa sul commit finale (7/7 job). Nessun dato comunale reale o test Azure di produzione.

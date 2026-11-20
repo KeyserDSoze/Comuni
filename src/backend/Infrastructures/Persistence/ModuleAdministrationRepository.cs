@@ -81,6 +81,14 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db, TenantPro
             m => m.OrganizationId == organizationId && m.ModuleKey == moduleKey, cancellationToken);
 
         if (module is null) return ModuleUpdateStatus.NotFound;
+
+        // FOR UPDATE serializes SQL writers, but an EF tracking query can
+        // return an entity materialized BEFORE another transaction committed.
+        // Refresh its properties from PostgreSQL while still holding the lock
+        // before deciding whether this request represents a new transition.
+        await db.Entry(module).ReloadAsync(cancellationToken);
+        if (db.Entry(module).State == EntityState.Detached)
+            return ModuleUpdateStatus.NotFound;
         if (module.Enabled == enabled) return ModuleUpdateStatus.Unchanged;
 
         module.SetEnabled(enabled);
