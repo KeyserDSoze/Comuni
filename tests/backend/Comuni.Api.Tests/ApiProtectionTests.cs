@@ -155,19 +155,19 @@ public sealed class ApiProtectionConfigurationTests
         const string org = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
         var invalid = new[]
         {
-            Identity(issuer, "subject", org, extra: new Claim("iss", issuer)),
-            Identity(issuer, "subject", org, extra: new Claim("sub", "subject")),
-            Identity(issuer, "subject", org, extra: new Claim("organization_id", org)),
+            Identity(issuer, "subject", org, extra: [new Claim("iss", issuer)]),
+            Identity(issuer, "subject", org, extra: [new Claim("sub", "subject")]),
+            Identity(issuer, "subject", org, extra: [new Claim("organization_id", org)]),
             Identity(issuer, "subject", "not-a-guid"),
             Identity(issuer, "subject", "00000000-0000-0000-0000-000000000000"),
             Identity(issuer, "subject", includeOrganization: false,
-                     extra: new Claim("iss", issuer)),
+                     extra: [new Claim("iss", issuer)]),
             Identity(issuer, "subject", organization: "", includeOrganization: false,
-                     extra: new Claim("organization_id", "")),
+                     extra: [new Claim("organization_id", "")]),
             Identity(null, "subject", includeOrganization: false,
-                     extra: new Claim("role", "Superadmin")),
+                     extra: [new Claim("role", "Superadmin")]),
             Identity(issuer, null, includeOrganization: false,
-                     extra: new Claim("role", "Superadmin")),
+                     extra: [new Claim("role", "Superadmin")]),
         };
         foreach (var candidate in invalid)
         {
