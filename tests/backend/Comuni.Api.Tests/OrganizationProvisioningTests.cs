@@ -226,6 +226,77 @@ public sealed class OrganizationProvisioningTests(ApiFactory factory) : IClassFi
     }
 
     [Fact]
+    public async Task A_different_approved_ticket_cannot_be_claimed_as_a_legacy_provisioning_retry()
+    {
+        var id = Guid.NewGuid();
+        const string originalTicket = "CHANGE-2026-LEGACY-130A";
+        const string unrelatedTicket = "CHANGE-2026-LEGACY-130B";
+        const string name = "Synthetic municipality change provenance";
+        Assert.Equal(0, (await ProvisionAsync(id, name, originalTicket)).ExitCode);
+        Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+
+        // Same ID and municipality name, but NOT the same approved change.
+        // A no-op success would misleadingly attest the unrelated ticket.
+        var rejected = await ProvisionAsync(id, name, unrelatedTicket);
+        Assert.NotEqual(0, rejected.ExitCode);
+        Assert.DoesNotContain(originalTicket, rejected.Output);
+        Assert.DoesNotContain(unrelatedTicket, rejected.Output);
+        Assert.DoesNotContain(name, rejected.Output);
+
+        Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+        await using var db = new NpgsqlConnection(OwnerConnection);
+        await db.OpenAsync();
+        await using var audit = new NpgsqlCommand("""
+            SELECT correlation_id FROM platform.audit_events
+            WHERE organization_id=@org AND action='platform.organization.created'
+            """, db);
+        audit.Parameters.AddWithValue("org", id);
+        Assert.Equal("bootstrap:" + originalTicket, await audit.ExecuteScalarAsync());
+
+        // A genuine retry of the *original* externally approved ticket
+        // remains idempotent and does not add an event.
+        Assert.Equal(0, (await ProvisionAsync(id, name, originalTicket)).ExitCode);
+        Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+    }
+
+    [Fact]
+    public async Task A_manual_created_event_with_a_non_owner_actor_is_not_legacy_provenance()
+    {
+        var id = Guid.NewGuid();
+        const string name = "Synthetic municipality with forged provenance";
+        const string ticket = "CHANGE-2026-LEGACY-130C";
+        await using (var db = new NpgsqlConnection(OwnerConnection))
+        {
+            await db.OpenAsync();
+            await using var seed = new NpgsqlCommand("""
+                INSERT INTO platform.organizations(id,name,is_suspended,is_activated)
+                VALUES (@org,@name,FALSE,FALSE);
+                INSERT INTO platform.organization_modules(organization_id,module_key,enabled)
+                VALUES (@org,'protocol',FALSE);
+                INSERT INTO platform.audit_events
+                    (id,organization_id,actor_subject,action,resource_type,
+                     resource_id,correlation_id,occurred_at)
+                VALUES (gen_random_uuid(),@org,'synthetic-untrusted-actor',
+                    'platform.organization.created','platform.organization',
+                    @org,@correlation,now())
+                """, db);
+            seed.Parameters.AddWithValue("org", id);
+            seed.Parameters.AddWithValue("name", name);
+            seed.Parameters.AddWithValue("correlation", "bootstrap:" + ticket);
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        // A matching action/ticket/resource alone is insufficient proof of
+        // the owner-only script having created this row.
+        var rejected = await ProvisionAsync(id, name, ticket);
+        Assert.NotEqual(0, rejected.ExitCode);
+        Assert.DoesNotContain(name, rejected.Output);
+        Assert.DoesNotContain(ticket, rejected.Output);
+        Assert.Equal((1L, 1L, 0L, 1L), await CountsAsync(id));
+        Assert.Equal((false, false, 0L, 0L), await LifecycleAsync(id));
+    }
+
+    [Fact]
     public async Task Existing_mismatched_or_untracked_organization_is_rejected()
     {
         var id = Guid.NewGuid();
