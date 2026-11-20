@@ -33,7 +33,12 @@ class PgAuditScramTransportPrivacyTests(unittest.TestCase):
         for candidate in encoded_forms(VERIFIER):
             with self.subTest(form_length=len(candidate)):
                 with self.assertRaises(AssertionError):
-                    self.check(fixture() + "\nLOG: COPY payload " + candidate)
+                    # Call the previous two-argument analyzer directly in RED:
+                    # the encoded server-side payload must not be missed.
+                    gate.assert_audits(
+                        fixture() + "\nLOG: COPY payload " + candidate,
+                        [VERIFIER], [PASSWORD],
+                    )
 
     def test_reversible_scram_verifier_in_psql_output_is_rejected(self):
         for candidate in (VERIFIER, *encoded_forms(VERIFIER)):
