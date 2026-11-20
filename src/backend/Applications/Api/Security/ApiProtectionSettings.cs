@@ -57,8 +57,7 @@ public sealed record ApiProtectionSettings(int PermitLimit, int WindowSeconds)
         // SHA-256 avoids placing raw subjects/issuers in limiter keys. It is
         // NOT encryption or an anonymization guarantee if a key were leaked.
         var identity = FormattableString.Invariant(
-            $"{organization.Length}:{organization}{issuer.Length}:{issuer}" +
-            $"{subject.Length}:{subject}");
+            $"{organization.Length}:{organization}{issuer.Length}:{issuer}{subject.Length}:{subject}");
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
         return scope + ":" + Convert.ToHexStringLower(digest);
     }
