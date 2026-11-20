@@ -27,6 +27,15 @@ public sealed class ModuleAdministrationService(
         return store.ListAsync(organizationId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ModuleCatalogItem>> ListCatalogAsync(
+        Guid organizationId, CancellationToken cancellationToken)
+    {
+        // Same tenant policy and persisted state as legacy modules endpoint.
+        // The code-owned catalog is never inferred from arbitrary SQL flags.
+        var configured = await ListAsync(organizationId, cancellationToken);
+        return ModuleCatalog.Describe(configured);
+    }
+
     public Task<ModuleUpdateStatus> SetEnabledAsync(
         Guid organizationId, string moduleKey, bool enabled, CancellationToken cancellationToken)
     {
@@ -34,13 +43,13 @@ public sealed class ModuleAdministrationService(
             throw new ArgumentException("Organization context is required.", nameof(organizationId));
 
         // Whitelist is backend-owned, never driven by moduleKey supplied by the client.
-        if (!string.Equals(moduleKey, "protocol", StringComparison.Ordinal))
+        if (!ModuleCatalog.IsImplemented(moduleKey))
             return Task.FromResult(ModuleUpdateStatus.NotFound);
 
         var audit = AuditEvent.Create(
             organizationId, actor.ActorSubject,
             enabled ? "platform.module.protocol.enabled" : "platform.module.protocol.disabled",
             "platform.module", organizationId, actor.CorrelationId);
-        return store.SetEnabledAsync(organizationId, "protocol", enabled, audit, cancellationToken);
+        return store.SetEnabledAsync(organizationId, ModuleCatalog.ProtocolKey, enabled, audit, cancellationToken);
     }
 }

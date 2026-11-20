@@ -8,6 +8,33 @@ namespace Comuni.UnitTests;
 public sealed class ModuleAdministrationTests
 {
     [Fact]
+    public void Code_owned_catalog_rejects_unprovisioned_or_rogue_future_flags()
+    {
+        var withoutProtocol = ModuleCatalog.Describe(
+            [new ModuleState("archive", true)]);
+        Assert.Equal(12, withoutProtocol.Count);
+        var future = Assert.Single(withoutProtocol.Where(m => m.Key == "archive"));
+        Assert.Equal("planned", future.Status);
+        Assert.False(future.Enabled);
+        Assert.False(future.Configurable);
+        Assert.Empty(future.DependsOn);
+
+        var missing = Assert.Single(withoutProtocol.Where(m => m.Key == "protocol"));
+        Assert.Equal("available", missing.Status);
+        Assert.False(missing.Enabled);
+        Assert.False(missing.Configurable);
+
+        var active = ModuleCatalog.Describe(
+            [new ModuleState("protocol", true), new ModuleState("archive", true)]);
+        var protocol = Assert.Single(active.Where(m => m.Key == "protocol"));
+        Assert.True(protocol.Configurable);
+        Assert.True(protocol.Enabled);
+        Assert.True(ModuleCatalog.IsImplemented("protocol"));
+        Assert.False(ModuleCatalog.IsImplemented("archive"));
+        Assert.False(ModuleCatalog.IsImplemented("Protocol"));
+    }
+
+    [Fact]
     public async Task Unknown_module_is_not_persisted_or_audited()
     {
         var store = new FakeStore();

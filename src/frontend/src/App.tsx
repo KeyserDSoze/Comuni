@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { getContext, getRecords, getAdminModules, setAdminModule, getAdminMemberships, setAdminMembership, getMunicipalAudit, registerRecord, getPlatformSession, getPlatformOrganizations, PlatformInventoryHttpError,
-  type PlatformOrganization, type PlatformOrganizationsPage, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModule, type AdminMembership, type MunicipalAuditEntry } from './api';
+import { getContext, getRecords, getAdminModuleCatalog, setAdminModule, getAdminMemberships, setAdminMembership, getMunicipalAudit, registerRecord, getPlatformSession, getPlatformOrganizations, PlatformInventoryHttpError,
+  type PlatformOrganization, type PlatformOrganizationsPage, type PlatformSession, type OrganizationContext, type ProtocolRecord, type AdminModuleCatalogItem, type AdminMembership, type MunicipalAuditEntry } from './api';
 import { cn } from './lib/utils';
 import {
   beginOidcLogin, captureOidcCallback, clearPendingOidc,
@@ -57,7 +57,7 @@ export function App() {
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const [subject, setSubject] = useState('');
   const [notice, setNotice] = useState('');
-  const [adminModules, setAdminModules] = useState<AdminModule[]>([]);
+  const [adminModules, setAdminModules] = useState<AdminModuleCatalogItem[]>([]);
   const [loadingAdmin, setLoadingAdmin] = useState(false);
   const [savingAdmin, setSavingAdmin] = useState(false);
   const [adminMemberships, setAdminMemberships] = useState<AdminMembership[]>([]);
@@ -292,7 +292,7 @@ export function App() {
     setLoadingAdmin(true);
     try {
       const [modules, memberships] = await Promise.all([
-        getAdminModules(token), getAdminMemberships(token)
+        getAdminModuleCatalog(token), getAdminMemberships(token)
       ]);
       setAdminModules(modules);
       setAdminMemberships(memberships);
@@ -343,7 +343,7 @@ export function App() {
     setError('');
     try {
       await setAdminModule(token, key, enabled);
-      const [modules, nextContext] = await Promise.all([getAdminModules(token), getContext(token)]);
+      const [modules, nextContext] = await Promise.all([getAdminModuleCatalog(token), getContext(token)]);
       setAdminModules(modules);
       setContext(nextContext);
       setNotice(t('moduleUpdated'));
@@ -711,14 +711,21 @@ export function App() {
                     {adminModules.map(module => (
                       <li key={module.key} className="flex flex-wrap items-center justify-between gap-3 py-4">
                         <div>
-                          <p className="font-semibold">{module.key === 'protocol' ? t('protocol') : module.key}</p>
-                          <p className="text-sm text-muted-foreground">{module.enabled ? t('moduleActive') : t('moduleInactive')}</p>
+                          <p className="font-semibold">{module.key === 'protocol'
+                            ? t('protocol')
+                            : t('catalogNames.' + module.key, { defaultValue: module.name })}</p>
+                          <p className="text-sm text-muted-foreground">{module.status === 'planned'
+                            ? t('modulePlanned')
+                            : !module.configurable ? t('moduleUnavailable')
+                            : module.enabled ? t('moduleActive') : t('moduleInactive')}</p>
                         </div>
-                        <Button disabled={savingAdmin} variant={module.enabled ? 'outline' : 'default'}
-                          aria-label={module.enabled ? t('disableProtocol') : t('enableProtocol')}
-                          onClick={() => void toggleAdminModule(module.key, !module.enabled)}>
-                          {module.enabled ? t('disableProtocol') : t('enableProtocol')}
-                        </Button>
+                        {module.status === 'available' && module.configurable && (
+                          <Button disabled={savingAdmin} variant={module.enabled ? 'outline' : 'default'}
+                            aria-label={module.enabled ? t('disableProtocol') : t('enableProtocol')}
+                            onClick={() => void toggleAdminModule(module.key, !module.enabled)}>
+                            {module.enabled ? t('disableProtocol') : t('enableProtocol')}
+                          </Button>
+                        )}
                       </li>
                     ))}
                   </ul>}

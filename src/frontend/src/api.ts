@@ -10,6 +10,16 @@ export interface AdminModule {
   enabled: boolean;
 }
 
+/** Code-owned municipal service catalog; planned modules are never writable. */
+export interface AdminModuleCatalogItem {
+  key: string;
+  name: string;
+  status: 'available' | 'planned';
+  enabled: boolean;
+  configurable: boolean;
+  dependsOn: string[];
+}
+
 export interface ProtocolRecord {
   id: string;
   subject: string;
@@ -38,6 +48,9 @@ export const registerRecord = (token: string, subject: string) =>
 
 export const getAdminModules = (token: string) =>
   request<AdminModule[]>('/api/v1/admin/modules', token);
+
+export const getAdminModuleCatalog = (token: string) =>
+  request<AdminModuleCatalogItem[]>('/api/v1/admin/modules/catalog', token);
 
 export const setAdminModule = (token: string, key: string, enabled: boolean) =>
   request<AdminModule>(`/api/v1/admin/modules/${encodeURIComponent(key)}`, token, {

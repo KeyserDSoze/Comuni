@@ -10,7 +10,7 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db, TenantPro
     {
         RequireCurrentOrganization(organizationId);
         return await db.OrganizationModules.AsNoTracking()
-            .Where(m => m.OrganizationId == organizationId && m.ModuleKey == "protocol")
+            .Where(m => m.OrganizationId == organizationId && m.ModuleKey == ModuleCatalog.ProtocolKey)
             .OrderBy(m => m.ModuleKey)
             .Select(m => new ModuleState(m.ModuleKey, m.Enabled))
             .ToListAsync(cancellationToken);
@@ -35,7 +35,7 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db, TenantPro
         var expectedAction = enabled
             ? "platform.module.protocol.enabled"
             : "platform.module.protocol.disabled";
-        if (moduleKey != "protocol" ||
+        if (!ModuleCatalog.IsImplemented(moduleKey) ||
             audit.OrganizationId != organizationId ||
             audit.ResourceId != organizationId ||
             audit.ResourceType != "platform.module" ||

@@ -18,6 +18,11 @@ async function openAdministration(page: Page, admin: boolean) {
     body: JSON.stringify({ organizationId: org, organizationName: 'Comune Aurora',
       roles: admin ? ['Admin'] : ['Reader'], modules: ['protocol'] })
   }));
+  await page.route('**/api/v1/admin/modules/catalog', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify([{ key: 'protocol', name: 'Protocollo',
+      status: 'available', enabled: true, configurable: true, dependsOn: [] }])
+  }));
   await page.route('**/api/v1/admin/modules', route => route.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify([{ key: 'protocol', enabled: true }])

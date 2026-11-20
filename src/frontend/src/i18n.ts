@@ -9,6 +9,16 @@ void i18n.use(initReactI18next).init({
       administration: 'Amministrazione', adminModulesTitle: 'Gestione moduli del Comune',
       adminModulesDesc: 'Gestisci i servizi disponibili per il tuo Comune. Le autorizzazioni sono verificate sul server.',
       moduleActive: 'Attivo', moduleInactive: 'Non attivo',
+      modulePlanned: 'Pianificato — non disponibile',
+      moduleUnavailable: 'Non configurato per questo Comune',
+      catalogNames: {
+        administrative: 'Amministrativo', archive: 'Archivio documentale',
+        cemetery: 'Cimiteriale', demographics: 'Demografico',
+        finance: 'Finanziario', 'local-police': 'Polizia locale',
+        personnel: 'Personale', protocol: 'Protocollo',
+        'public-works': 'Lavori pubblici', taxes: 'Tributi',
+        'urban-planning': 'Urbanistica ed edilizia', utilities: 'Utenze'
+      },
       enableProtocol: 'Abilita Protocollo', disableProtocol: 'Disabilita Protocollo',
       moduleUpdated: 'Configurazione del modulo aggiornata.',
       municipalMembers: 'Membri del Comune',
@@ -68,6 +78,16 @@ void i18n.use(initReactI18next).init({
       administration: 'Administration', adminModulesTitle: 'Municipality modules',
       adminModulesDesc: 'Manage enabled services for your municipality. Authorization is checked on the server.',
       moduleActive: 'Enabled', moduleInactive: 'Disabled',
+      modulePlanned: 'Planned — not available',
+      moduleUnavailable: 'Not configured for this municipality',
+      catalogNames: {
+        administrative: 'Administration', archive: 'Document archive',
+        cemetery: 'Cemetery services', demographics: 'Civil registry',
+        finance: 'Finance', 'local-police': 'Local police',
+        personnel: 'Personnel', protocol: 'Protocol',
+        'public-works': 'Public works', taxes: 'Taxes',
+        'urban-planning': 'Urban planning and construction', utilities: 'Utilities'
+      },
       enableProtocol: 'Enable Protocol', disableProtocol: 'Disable Protocol',
       moduleUpdated: 'Module configuration updated.',
       municipalMembers: 'Municipality members',

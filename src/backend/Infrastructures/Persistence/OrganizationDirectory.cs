@@ -16,13 +16,17 @@ public sealed class OrganizationDirectory(ComuniDbContext db) : IOrganizationDir
     public async Task<IReadOnlyList<string>> EnabledModulesAsync(Guid organizationId, CancellationToken cancellationToken)
     {
         return await db.OrganizationModules.AsNoTracking()
-            .Where(m => m.OrganizationId == organizationId && m.Enabled)
+            .Where(m => m.OrganizationId == organizationId &&
+                        m.ModuleKey == ModuleCatalog.ProtocolKey && m.Enabled)
             .Select(m => m.ModuleKey)
             .OrderBy(x => x)
             .ToListAsync(cancellationToken);
     }
 
     public Task<bool> IsEnabledAsync(Guid organizationId, string moduleKey, CancellationToken cancellationToken) =>
-        db.OrganizationModules.AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == organizationId && m.ModuleKey == moduleKey && m.Enabled, cancellationToken);
+        ModuleCatalog.IsImplemented(moduleKey)
+            ? db.OrganizationModules.AsNoTracking()
+                .AnyAsync(m => m.OrganizationId == organizationId &&
+                               m.ModuleKey == moduleKey && m.Enabled, cancellationToken)
+            : Task.FromResult(false);
 }

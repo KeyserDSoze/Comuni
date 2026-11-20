@@ -291,6 +291,13 @@ app.MapGet("/api/v1/admin/modules", async (
     Results.Ok(await service.ListAsync(current.OrganizationId, ct)))
     .WithName("ListOrganizationModules").RequireAuthorization("Admin");
 
+// Catalog is code-owned: planned services are metadata-only and cannot
+// be enabled by a forged DB flag, request route, or JWT role claim.
+app.MapGet("/api/v1/admin/modules/catalog", async (
+    ICurrentOrganization current, ModuleAdministrationService service, CancellationToken ct) =>
+    Results.Ok(await service.ListCatalogAsync(current.OrganizationId, ct)))
+    .WithName("ListOrganizationModuleCatalog").RequireAuthorization("Admin");
+
 app.MapPut("/api/v1/admin/modules/{moduleKey}", async (
     string moduleKey, SetModuleEnabledRequest request, ICurrentOrganization current,
     ModuleAdministrationService service, CancellationToken ct) =>
