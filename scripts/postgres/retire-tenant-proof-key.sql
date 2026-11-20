@@ -27,6 +27,17 @@
 
 BEGIN;
 
+-- Retirement key IDs and grace metadata describe a privileged rotation.
+-- pgAudit parameter=on can expose nested SQL bind values even with client
+-- COPY transport. Fail before COPY while preserving FUNCTION/WRITE metadata.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only retirement operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 -- COPY runs on the psql CLIENT, not the PostgreSQL server. Only the three
 -- allowlisted fields are streamed as one base64(JSON) row (not encryption).
 -- A failed input/validation exits ON_ERROR_STOP and rolls the whole tx back.

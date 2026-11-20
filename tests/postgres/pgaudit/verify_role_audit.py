@@ -65,6 +65,11 @@ def psql_env(**additional: str) -> dict[str, str]:
     # explicit synthetic test input for a reviewed script may set these.
     values.pop("TENANT_PROOF_KEY", None)
     values.pop("TENANT_PROOF_KEY_ID", None)
+    for retire_field in (
+        "TENANT_PROOF_RETIRE_KEY_ID", "TENANT_PROOF_REPLACEMENT_KEY_ID",
+        "TENANT_PROOF_GRACE_SECONDS",
+    ):
+        values.pop(retire_field, None)
     # Never inherit actual incident identity fields from a CI runner. Only
     # explicitly supplied, disposable synthetic inputs are permitted.
     for field in (
@@ -271,6 +276,7 @@ def private_owner_script(file: str, values: dict[str, str],
         "manage-platform-operator.sql", "provision-organization.sql",
         "provision-tenant-proof.sql", "stage-tenant-proof-key.sql",
         "stage-emergency-admin-replacement.sql",
+        "retire-tenant-proof-key.sql",
     ):
         raise AssertionError("Unreviewed owner identity script")
     env = psql_env(**values)
@@ -689,7 +695,7 @@ def assert_tenant_signing_key_privacy(server_log: str, client_output: str,
         raise AssertionError("Owner signing-key native COPY statements missing")
 
 
-def verify_tenant_signing_keys_under_pgaudit(container_name: str) -> None:
+def verify_tenant_signing_keys_under_pgaudit(container_name: str) -> str:
     """Execute true owner-only legacy and versioned RLS signing key scripts.
 
     This disposable cluster must have no signing keys yet. PostgreSQL pgAudit
@@ -822,6 +828,7 @@ def verify_tenant_signing_keys_under_pgaudit(container_name: str) -> None:
         raise AssertionError("Cannot isolate signing-key pgAudit log window")
     canaries = (legacy_key, staged_key, staged_id, wrong_legacy, wrong_staged)
     assert_tenant_signing_key_privacy(after[len(prefix):], client_output, canaries)
+    return staged_id
 
 
 def assert_emergency_privacy(server_log: str, client_output: str,
@@ -1007,6 +1014,164 @@ def verify_emergency_under_pgaudit(
 
 
 
+
+def assert_retirement_privacy(server_log: str, client_output: str,
+                              canaries: tuple[str, ...]) -> None:
+    """Preserve audit evidence without exposing synthetic rotation key IDs.
+
+    This observes only the isolated server log suffix from the real SQL
+    retirement; it is not validation of Azure, SIEM or base64 JSON envelopes.
+    """
+    categories = ("staged-replacement-key-id", "invalid-replacement-key-id")
+    if len(canaries) != len(categories) or any(not item for item in canaries):
+        raise AssertionError("Invalid synthetic retirement canary inventory")
+    for category, item in zip(categories, canaries, strict=True):
+        for sensitive in (item, base64.b64encode(item.encode("utf-8")).decode("ascii")):
+            if sensitive in server_log:
+                raise AssertionError("Retirement key identifier in PostgreSQL log: " + category)
+            if sensitive in client_output:
+                raise AssertionError("Retirement key identifier in client output: " + category)
+
+    if "DO $owner_audit_parameter_guard$" not in server_log:
+        raise AssertionError("Retirement parameter-policy DO statement missing")
+    audit_lines = [line for line in server_log.splitlines()
+                   if "AUDIT: SESSION" in line]
+    if not any(",FUNCTION,DO," in line for line in audit_lines):
+        raise AssertionError("Retirement pgAudit FUNCTION metadata missing")
+    if not any(",WRITE,UPDATE," in line for line in audit_lines):
+        raise AssertionError("Retirement pgAudit WRITE UPDATE metadata missing")
+    if "statement: COPY" not in server_log:
+        raise AssertionError("Retirement native COPY statement missing")
+
+
+def verify_tenant_retirement_under_pgaudit(
+    container_name: str, staged_id: str
+) -> None:
+    """Execute actual owner-only retirement under a live PostgreSQL17 pgAudit.
+
+    The previous test provisioned a synthetic legacy and an active versioned
+    successor. This test does NOT perform a real multi-replica key rollout.
+    """
+    prefix = run(["docker", "logs", container_name],
+                 "baseline retirement pgAudit window", include_stderr=True)
+    marker = uuid.uuid4().hex[:12]
+    bad_replacement = "synthetic_invalid_" + marker
+    retirement = {
+        "TENANT_PROOF_RETIRE_KEY_ID": "legacy",
+        "TENANT_PROOF_REPLACEMENT_KEY_ID": staged_id,
+        "TENANT_PROOF_GRACE_SECONDS": "0",
+    }
+
+    # All SQL below is static, with no key IDs from the producer, secret
+    # values or canaries interpolated into SQL text or command arguments.
+    initial = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.tenant_proof_keys) = 2
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id='legacy' AND revoked_at IS NULL
+               AND valid_until > clock_timestamp()) = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id<>'legacy' AND revoked_at IS NULL
+               AND valid_until > clock_timestamp()) = 1
+        """, "retirement predecessor and successor preflight")
+    if initial != "t":
+        raise AssertionError("Synthetic retirement prerequisite keys missing")
+
+    # Check existing synthetic signing material without printing it.
+    stage_fingerprint_before = sql(
+        "SELECT encode(public.digest(signing_key,'sha256'),'hex') "
+        "FROM platform.tenant_proof_keys WHERE key_id<>'legacy'",
+        "synthetic successor digest before retirement")
+
+    denied = private_owner_script(
+        "retire-tenant-proof-key.sql", retirement,
+        expect_failure=True, metadata_only=False)
+    if ("Owner-only retirement operation requires parameter-free audit metadata"
+            not in denied):
+        raise AssertionError("Unsafe retirement pgAudit parameter profile not rejected")
+
+    guarded_logs = run(["docker", "logs", container_name],
+                       "inspect denied retirement COPY boundary",
+                       include_stderr=True)
+    if not guarded_logs.startswith(prefix):
+        raise AssertionError("Cannot isolate refused retirement pgAudit window")
+    if "statement: COPY" in guarded_logs[len(prefix):]:
+        raise AssertionError("Retirement with parameter logging reached COPY")
+
+    still_active = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE revoked_at IS NOT NULL) = 0
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE valid_until > clock_timestamp()) = 2
+        """, "unsafe retirement must not mutate active keys")
+    if still_active != "t":
+        raise AssertionError("Unsafe retirement changed active signing-key state")
+
+    client_output = denied
+    client_output += private_owner_script("retire-tenant-proof-key.sql", retirement)
+    # An exact replay must never clear revoked_at or lengthen a valid_until
+    # window. The existing script deliberately uses LEAST and COALESCE.
+    client_output += private_owner_script("retire-tenant-proof-key.sql", retirement)
+
+    # The last usable successor cannot be retired by claiming that the
+    # already-revoked legacy key is a replacement.
+    unsafe_last = {
+        "TENANT_PROOF_RETIRE_KEY_ID": staged_id,
+        "TENANT_PROOF_REPLACEMENT_KEY_ID": "legacy",
+        "TENANT_PROOF_GRACE_SECONDS": "0",
+    }
+    blocked = private_owner_script(
+        "retire-tenant-proof-key.sql", unsafe_last, expect_failure=True)
+    if "Retirement refused by safety guard" not in blocked:
+        raise AssertionError("Unsafe last active key retirement not blocked")
+    client_output += blocked
+
+    # Unknown successor is also denied, without a new key or replacement.
+    invalid_successor = dict(retirement)
+    invalid_successor["TENANT_PROOF_REPLACEMENT_KEY_ID"] = bad_replacement
+    blocked_missing = private_owner_script(
+        "retire-tenant-proof-key.sql", invalid_successor,
+        expect_failure=True)
+    if "Retirement refused by safety guard" not in blocked_missing:
+        raise AssertionError("Unprovisioned key replacement not blocked")
+    client_output += blocked_missing
+
+    verified = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.tenant_proof_keys) = 2
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id='legacy' AND revoked_at IS NOT NULL
+               AND valid_until <= clock_timestamp()) = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE key_id<>'legacy' AND revoked_at IS NULL
+               AND not_before <= clock_timestamp()
+               AND valid_until > clock_timestamp() + interval '300 seconds') = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys
+             WHERE revoked_at IS NULL AND valid_until > clock_timestamp()) = 1
+        AND NOT has_table_privilege('comuni_app_runtime',
+                                    'platform.tenant_proof_keys', 'UPDATE')
+        """, "retirement monotonicity and usable successor invariant")
+    if verified != "t":
+        raise AssertionError("Retirement altered successor or revived a key")
+
+    stage_fingerprint_after = sql(
+        "SELECT encode(public.digest(signing_key,'sha256'),'hex') "
+        "FROM platform.tenant_proof_keys WHERE key_id<>'legacy'",
+        "synthetic successor digest after retirement")
+    if stage_fingerprint_before != stage_fingerprint_after:
+        raise AssertionError("Retirement changed synthetic successor material")
+
+    after = run(["docker", "logs", container_name],
+                "collect isolated retirement pgAudit logs",
+                include_stderr=True)
+    if not after.startswith(prefix):
+        raise AssertionError("Cannot isolate retirement pgAudit log suffix")
+    assert_retirement_privacy(
+        after[len(prefix):], client_output, (staged_id, bad_replacement))
+
+
+
 def main() -> None:
     name = "comuni-pgaudit-ci-" + uuid.uuid4().hex[:8]
     container_started = False
@@ -1110,11 +1275,12 @@ def main() -> None:
         assert_audits(logs, observed_verifiers, test_passwords)
         identity_context = verify_identity_under_pgaudit(name)
         verify_platform_and_provision_under_pgaudit(name)
-        verify_tenant_signing_keys_under_pgaudit(name)
+        staged_id = verify_tenant_signing_keys_under_pgaudit(name)
         verify_emergency_under_pgaudit(name, identity_context)
-        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and eleven owner-only COPY "
-              "operations verified; synthetic SCRAM/OIDC/signing-key/emergency "
-              "canaries absent from captured logs.")
+        verify_tenant_retirement_under_pgaudit(name, staged_id)
+        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and twelve owner-only COPY "
+              "operations verified; synthetic SCRAM/OIDC/signing-key/emergency/"
+              "retirement canaries absent from captured logs.")
     finally:
         if container_started:
             # Always delete the synthetic roles and entire ephemeral cluster.
