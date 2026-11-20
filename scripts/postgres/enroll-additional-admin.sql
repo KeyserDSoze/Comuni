@@ -40,6 +40,17 @@
 
 BEGIN;
 
+-- pgAudit FUNCTION/WRITE may include sensitive PL/pgSQL bound values when
+-- pgaudit.log_parameter=on, despite private client-side COPY transport.
+-- Fail before COPY/DML rather than suppressing ROLE/DDL/WRITE/FUNCTION audit.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only identity operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 -- Values are read through a fixed, local, client-side COPY STDIN program:
 -- no issuer, subject or ticket is interpolated into server SQL statements.
 -- Requires a trusted checkout with psql cwd at repository root.

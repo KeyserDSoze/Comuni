@@ -187,7 +187,7 @@ def assert_identity_privacy(server_log: str, client_output: str,
     """Require audited owner-only COPY and reject recognizable private values.
 
     The input here is only an isolated pgAudit log *slice* recorded while
-    executing actual register/bootstrap scripts, not earlier role provisioning.
+    executing actual registration/bootstrap/activation/enrollment scripts, not role provisioning.
     Never echo the log, private inputs or a substring in diagnostic messages.
     """
     if not canaries or any(not canary for canary in canaries):
@@ -199,6 +199,8 @@ def assert_identity_privacy(server_log: str, client_output: str,
         "organization-id", "organization-name", "oidc-issuer",
         "oidc-subject", "registration-ticket", "bootstrap-ticket",
         "registration-reviewer", "bootstrap-reviewer", "invalid-subject",
+        "activation-ticket", "activation-reviewer", "second-admin-subject",
+        "second-admin-ticket", "second-admin-reviewer", "invalid-second-subject",
     )
     if len(canaries) != len(categories):
         raise AssertionError("Identity canary inventory mismatch")
@@ -215,20 +217,23 @@ def assert_identity_privacy(server_log: str, client_output: str,
                 "Synthetic identity canary in server " + source +
                 " logs: " + category)
 
-    # Native statement logging identifies both owner-only DO blocks, while
-    # pgAudit FUNCTION/WRITE proves that extension auditing stayed enabled.
-    for marker in ("DO $register$", "DO $bootstrap$"):
+    # Each real owner-only DO statement remains traceable in native logs.
+    # pgAudit FUNCTION and WRITE prove full metadata auditing stays enabled.
+    for marker in ("DO $register$", "DO $bootstrap$",
+                   "DO $activation$", "DO $enrollment$"):
         if marker not in server_log:
             raise AssertionError("Owner-only operation missing from PostgreSQL logs")
     audit_lines = [
         line for line in server_log.splitlines()
         if "AUDIT: SESSION" in line
     ]
-    if sum(",FUNCTION,DO," in line for line in audit_lines) < 2:
+    if sum(",FUNCTION,DO," in line for line in audit_lines) < 4:
         raise AssertionError("Owner-only operations missing pgAudit FUNCTION events")
     if not any(",WRITE,INSERT," in line for line in audit_lines):
         raise AssertionError("Owner-only operations missing pgAudit WRITE events")
-    if server_log.count("statement: COPY") < 2:
+    if not any(",WRITE,UPDATE," in line for line in audit_lines):
+        raise AssertionError("Municipal activation missing pgAudit UPDATE event")
+    if server_log.count("statement: COPY") < 4:
         raise AssertionError("Private client COPY statements not logged")
 
 
@@ -236,13 +241,16 @@ def private_owner_script(file: str, values: dict[str, str],
                          expect_failure: bool = False,
                          metadata_only: bool = True) -> str:
     """Use only static, reviewed script paths and private environment values."""
-    if file not in ("register-organization.sql", "bootstrap-initial-admin.sql"):
+    if file not in (
+        "register-organization.sql", "bootstrap-initial-admin.sql",
+        "activate-organization.sql", "enroll-additional-admin.sql",
+    ):
         raise AssertionError("Unreviewed owner identity script")
     env = psql_env(**values)
     if metadata_only:
         # pgAudit FUNCTION/WRITE records remain enabled. The parameter field
-        # alone must be suppressed for private owner input. Both scripts
-        # independently REFUSE parameter=on before the COPY transport begins.
+        # alone must be suppressed for private owner input. All four scripts
+        # independently REFUSE parameter=on before COPY transport begins.
         env["PGOPTIONS"] = env["PGOPTIONS"].replace(
             "-c pgaudit.log_parameter=on", "-c pgaudit.log_parameter=off")
     return run(
@@ -257,7 +265,7 @@ def private_owner_script(file: str, values: dict[str, str],
 
 
 def verify_identity_under_pgaudit(container_name: str) -> None:
-    """Test real registration + first Admin bootstrap under full pgAudit.
+    """Test real full municipal/Admin onboarding under full pgAudit.
 
     This disposable cluster is populated with synthetic records only. No
     canary is included in SQL literals, command arguments or diagnostic text.
@@ -275,6 +283,12 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
     register_reviewer = "register-reviewer-" + marker
     bootstrap_reviewer = "bootstrap-reviewer-" + marker
     invalid_subject = " invalid-sub-" + marker
+    activation_ticket = "ACT-2026-" + marker
+    activation_reviewer = "activation-reviewer-" + marker
+    additional_subject = "synthetic-second-admin-" + marker
+    additional_ticket = "ADD-2026-" + marker
+    additional_reviewer = "enrollment-reviewer-" + marker
+    invalid_secondary_subject = " invalid-second-admin-" + marker
 
     registration = {
         "COMUNI_REGISTER_ORGANIZATION_ID": organization_id,
@@ -288,6 +302,18 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
         "COMUNI_BOOTSTRAP_SUBJECT": subject,
         "COMUNI_BOOTSTRAP_CHANGE_TICKET": bootstrap_ticket,
         "COMUNI_BOOTSTRAP_APPROVER": bootstrap_reviewer,
+    }
+    activation = {
+        "COMUNI_ACTIVATE_ORGANIZATION_ID": organization_id,
+        "COMUNI_ACTIVATE_CHANGE_TICKET": activation_ticket,
+        "COMUNI_ACTIVATE_APPROVER": activation_reviewer,
+    }
+    additional_admin = {
+        "COMUNI_ADD_ADMIN_ORGANIZATION_ID": organization_id,
+        "COMUNI_ADD_ADMIN_IDENTITY_ISSUER": issuer,
+        "COMUNI_ADD_ADMIN_SUBJECT": additional_subject,
+        "COMUNI_ADD_ADMIN_CHANGE_TICKET": additional_ticket,
+        "COMUNI_ADD_ADMIN_APPROVER": additional_reviewer,
     }
     client_output = ""
     client_output += private_owner_script("register-organization.sql", registration)
@@ -314,21 +340,49 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
     client_output += private_owner_script("register-organization.sql", registration)
     client_output += private_owner_script("bootstrap-initial-admin.sql", bootstrap)
 
+    client_output += private_owner_script("activate-organization.sql", activation)
+
+    # A denied parameter-logging session cannot activate the organization
+    # or grant another Admin; verify both negative paths before their success.
+    for script_name, private_values in (
+        ("activate-organization.sql", activation),
+        ("enroll-additional-admin.sql", additional_admin),
+    ):
+        unsafe = private_owner_script(
+            script_name, private_values,
+            expect_failure=True, metadata_only=False)
+        if "Owner-only identity operation requires parameter-free audit metadata" not in unsafe:
+            raise AssertionError("Unsafe pgAudit parameter profile was not denied")
+        client_output += unsafe
+
+    client_output += private_owner_script("enroll-additional-admin.sql", additional_admin)
+
+    invalid_extra_admin = dict(additional_admin)
+    invalid_extra_admin["COMUNI_ADD_ADMIN_SUBJECT"] = invalid_secondary_subject
+    client_output += private_owner_script(
+        "enroll-additional-admin.sql", invalid_extra_admin, expect_failure=True)
+
+    # Exact replays remain no-op, with no extra Admin or audit entry.
+    client_output += private_owner_script("activate-organization.sql", activation)
+    client_output += private_owner_script("enroll-additional-admin.sql", additional_admin)
+
     # This query contains *only static SQL*, never organization ID, subject,
     # issuer, ticket, or reviewer. The isolated DB starts with zero tenants.
     verified = sql("""
         SELECT
            (SELECT count(*) FROM platform.organizations
-            WHERE is_activated=FALSE AND is_suspended=FALSE) = 1
+            WHERE is_activated=TRUE AND is_suspended=FALSE) = 1
         AND (SELECT count(*) FROM platform.organization_modules
              WHERE module_key='protocol' AND enabled=FALSE) = 1
         AND (SELECT count(*) FROM platform.organization_memberships
              WHERE role='Admin' AND is_active=TRUE
-               AND identity_issuer IS NOT NULL) = 1
+               AND identity_issuer IS NOT NULL) = 2
         AND (SELECT count(*) FROM platform.audit_events
              WHERE action IN ('platform.organization.registered',
-                              'platform.membership.admin.initialized')) = 2
-        """, "synthetic owner registration/bootstrap invariant")
+                              'platform.membership.admin.initialized',
+                              'platform.organization.activated',
+                              'platform.membership.admin.added')) = 4
+        """, "synthetic owner full onboarding invariant")
     if verified != "t":
         raise AssertionError("Owner identity operations violated expected invariants")
 
@@ -341,6 +395,8 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
         organization_id, organization_name, issuer, subject,
         register_ticket, bootstrap_ticket, register_reviewer,
         bootstrap_reviewer, invalid_subject,
+        activation_ticket, activation_reviewer, additional_subject,
+        additional_ticket, additional_reviewer, invalid_secondary_subject,
     )
     assert_identity_privacy(after[len(prefix):], client_output, canaries)
 
