@@ -1,5 +1,6 @@
 using System.Globalization;
-using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 
@@ -31,11 +32,34 @@ public sealed record ApiProtectionSettings(int PermitLimit, int WindowSeconds)
     public static string PartitionKey(HttpContext context)
     {
         if (VerifiedPrincipalIdentity.TryMunicipal(
-                context.User, out var organizationId, out var subject, out _))
-            return $"tenant:{organizationId:N}:{subject}";
+                context.User, out var organizationId, out var subject, out var issuer))
+            return Fingerprint("tenant", organizationId.ToString("N"), issuer, subject);
 
-        // Never trust X-Forwarded-For without a configured, trusted proxy boundary.
+        // Platform operators carry an issuer+subject but *no* organization.
+        // This rate-limit bucket is NOT platform authorization; the
+        // PlatformOperatorHandler still checks the DB-backed operator roster.
+        if (VerifiedPrincipalIdentity.TryPlatform(
+                context.User, out var platformIssuer, out var platformSubject))
+            return Fingerprint("platform", string.Empty, platformIssuer, platformSubject);
+
+        // Invalid, ambiguous and anonymous principals share a bucket based
+        // solely on the real connection peer, not X-Forwarded-For.
         return $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+    }
+
+    private static string Fingerprint(string scope, string organization,
+        string issuer, string subject)
+    {
+        // Exact, case-sensitive issuer/subject identity. Length prefixes
+        // prevent concatenation collisions even when OIDC subjects contain
+        // the same delimiters as an issuer or organization. The scope prefix
+        // separates municipal from tenantless platform quota namespaces.
+        // SHA-256 avoids placing raw subjects/issuers in limiter keys. It is
+        // NOT encryption or an anonymization guarantee if a key were leaked.
+        var identity = $"{organization.Length}:{organization}" +
+                       $"{issuer.Length}:{issuer}{subject.Length}:{subject}";
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
+        return scope + ":" + Convert.ToHexStringLower(digest);
     }
 
     public static void ApplyResponseHeaders(HttpContext context)
