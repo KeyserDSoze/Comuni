@@ -29,6 +29,13 @@ OWNER_SECRET = "disposable-pgaudit-owner-ci-only"
 PORT = "55432"
 DOCKER_IMAGE = "comuni-pgaudit-roles:ci"
 
+# Only test-generated values: never persist/print these payloads or raw output.
+# Collect every reviewed non-SCRAM owner script, including denied/replay calls,
+# then scan the full captured server/client logs for the actual COPY envelope.
+PRIVATE_OWNER_INPUTS: list[dict[str, str]] = []
+PRIVATE_OWNER_CLIENT_OUTPUTS: list[str] = []
+PRIVATE_OWNER_SCRIPT_NAMES: set[str] = set()
+
 # No password, verifier or connection URI may appear in a command argument
 # or in the printed diagnostics from this script.
 def run(args: list[str], label: str, env: dict[str, str] | None = None,
@@ -222,6 +229,36 @@ def assert_audits(log: str, verifiers: list[str],
         raise AssertionError("No native COPY statement logged while pgAudit active")
 
 
+def assert_private_copy_envelopes_absent(
+    server_log: str, client_output: str,
+    input_envelopes: list[dict[str, str]],
+) -> None:
+    """Reject a complete reversible base64(JSON) COPY payload on either channel.
+
+    Single-value canary checks cannot detect a full encoded envelope. Match
+    stream-private-input.py's exact canonical JSON/CSV transport representation.
+    Only known synthetic private inputs are processed. Never print the payload,
+    encoded value, logs, stderr or any matching substring.
+    """
+    if not isinstance(input_envelopes, list) or not input_envelopes:
+        raise AssertionError("Invalid private COPY envelope inventory")
+    for values in input_envelopes:
+        if (not isinstance(values, dict) or not values
+                or any(not isinstance(key, str) or not key
+                       or not isinstance(value, str) or not value
+                       for key, value in values.items())):
+            raise AssertionError("Invalid private COPY envelope inventory")
+        # Match producer: ensure_ascii=True, compact separators, sorted keys.
+        envelope = json.dumps(
+            values, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        ).encode("ascii")
+        if len(envelope) > 8192:
+            raise AssertionError("Invalid private COPY envelope inventory")
+        encoded = base64.b64encode(envelope).decode("ascii")
+        if encoded in server_log or encoded in client_output:
+            raise AssertionError("Private COPY envelope leaked in audited logs")
+
+
 def assert_identity_privacy(server_log: str, client_output: str,
                             canaries: tuple[str, ...]) -> None:
     """Require audited owner-only COPY and reject recognizable private values.
@@ -295,6 +332,11 @@ def private_owner_script(file: str, values: dict[str, str],
         "retire-tenant-proof-key.sql",
     ):
         raise AssertionError("Unreviewed owner identity script")
+    # This runner only handles disposable synthetic values. Keep the original
+    # input dictionary in process memory for an end-to-end, exact-envelope
+    # privacy test, including negative calls that fail before COPY.
+    PRIVATE_OWNER_INPUTS.append(dict(values))
+    PRIVATE_OWNER_SCRIPT_NAMES.add(file)
     env = psql_env(**values)
     if metadata_only:
         # pgAudit FUNCTION/WRITE records remain enabled. The parameter field
@@ -302,7 +344,7 @@ def private_owner_script(file: str, values: dict[str, str],
         # this allowlist REFUSES parameter=on before COPY transport begins.
         env["PGOPTIONS"] = env["PGOPTIONS"].replace(
             "-c pgaudit.log_parameter=on", "-c pgaudit.log_parameter=off")
-    return run(
+    output = run(
         ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
          "-p", PORT, "-U", OWNER, "-d", DB, "-f",
          str(ROOT / "scripts" / "postgres" / file)],
@@ -311,6 +353,8 @@ def private_owner_script(file: str, values: dict[str, str],
         expected=1 if expect_failure else 0,
         include_stderr=True,
     )
+    PRIVATE_OWNER_CLIENT_OUTPUTS.append(output)
+    return output
 
 
 def verify_identity_under_pgaudit(container_name: str) -> tuple[str, str, str]:
@@ -1302,8 +1346,22 @@ def main() -> None:
         staged_id = verify_tenant_signing_keys_under_pgaudit(name)
         verify_emergency_under_pgaudit(name, identity_context)
         verify_tenant_retirement_under_pgaudit(name, staged_id)
+        # All 12 allowlisted owner-only non-SCRAM scripts must be covered.
+        # This final scan looks for full reversible COPY records that the
+        # existing individual canary checks cannot recognize on their own.
+        if len(PRIVATE_OWNER_SCRIPT_NAMES) != 12:
+            raise AssertionError("Incomplete owner-only private COPY audit inventory")
+        owner_logs = run(
+            ["docker", "logs", name],
+            "collect final private owner COPY pgAudit logs",
+            include_stderr=True,
+        )
+        assert_private_copy_envelopes_absent(
+            owner_logs, "".join(PRIVATE_OWNER_CLIENT_OUTPUTS),
+            PRIVATE_OWNER_INPUTS,
+        )
         print("PASS: PostgreSQL17 pgAudit ROLE/DDL, SCRAM transport/client output " 
-              "and twelve owner-only COPY "
+              "and twelve owner-only COPY envelopes "
               "operations verified; synthetic SCRAM/OIDC/signing-key/emergency/"
               "retirement canaries absent from captured logs.")
     finally:
