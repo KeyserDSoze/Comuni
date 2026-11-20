@@ -25,6 +25,15 @@ async function openDashboard(page: import('@playwright/test').Page, roles: strin
     status: 200, contentType: 'application/json',
     body: JSON.stringify([{ key: 'protocol', enabled }]),
   }));
+  await page.route('**/api/v1/admin/modules/catalog', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify([
+      { key: 'archive', name: 'Archivio documentale', status: 'planned',
+        enabled: false, configurable: false, dependsOn: [] },
+      { key: 'protocol', name: 'Protocollo', status: 'available',
+        enabled, configurable: true, dependsOn: [] }
+    ])
+  }));
   await page.route('**/api/v1/admin/modules/protocol', route => {
     if (failUpdate) return route.fulfill({ status: 500, body: 'Error' });
     enabled = (route.request().postDataJSON() as { enabled: boolean }).enabled;
@@ -59,4 +68,14 @@ test('fallimento aggiornamento mostra errore e non cambia menu', async ({ page }
   await page.getByRole('button', { name: 'Disabilita Protocollo' }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('navigation').getByText('Protocollo')).toBeVisible();
+});
+
+test('catalogo mostra domini pianificati senza abilitarli', async ({ page }) => {
+  await openDashboard(page, ['Admin']);
+  await page.getByRole('navigation').getByText('Amministrazione').click();
+  const archive = page.getByRole('listitem').filter({ hasText: 'Archivio documentale' });
+  await expect(archive).toContainText('Pianificato');
+  await expect(archive.getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Disabilita Protocollo' })).toBeVisible();
+  await expect(page.getByRole('navigation').getByText('Archivio documentale')).toHaveCount(0);
 });
