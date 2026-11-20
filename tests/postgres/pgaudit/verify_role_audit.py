@@ -65,6 +65,20 @@ def psql_env(**additional: str) -> dict[str, str]:
     # explicit synthetic test input for a reviewed script may set these.
     values.pop("TENANT_PROOF_KEY", None)
     values.pop("TENANT_PROOF_KEY_ID", None)
+    # Never inherit actual incident identity fields from a CI runner. Only
+    # explicitly supplied, disposable synthetic inputs are permitted.
+    for field in (
+        "COMUNI_EMERGENCY_ORGANIZATION_ID",
+        "COMUNI_EMERGENCY_OLD_IDENTITY_ISSUER",
+        "COMUNI_EMERGENCY_OLD_SUBJECT",
+        "COMUNI_EMERGENCY_NEW_IDENTITY_ISSUER",
+        "COMUNI_EMERGENCY_NEW_SUBJECT",
+        "COMUNI_EMERGENCY_INCIDENT_TICKET",
+        "COMUNI_EMERGENCY_SECURITY_REVIEWER",
+        "COMUNI_EMERGENCY_MUNICIPAL_REVIEWER",
+        "COMUNI_EMERGENCY_REASON_CODE",
+    ):
+        values.pop(field, None)
     values.update(additional)
     return values
 
@@ -256,6 +270,7 @@ def private_owner_script(file: str, values: dict[str, str],
         "revoke-admin.sql", "set-organization-suspension.sql",
         "manage-platform-operator.sql", "provision-organization.sql",
         "provision-tenant-proof.sql", "stage-tenant-proof-key.sql",
+        "stage-emergency-admin-replacement.sql",
     ):
         raise AssertionError("Unreviewed owner identity script")
     env = psql_env(**values)
@@ -276,7 +291,7 @@ def private_owner_script(file: str, values: dict[str, str],
     )
 
 
-def verify_identity_under_pgaudit(container_name: str) -> None:
+def verify_identity_under_pgaudit(container_name: str) -> tuple[str, str, str]:
     """Test owner-only onboarding, Admin revocation and tenant suspension.
 
     This disposable cluster is populated with synthetic records only. No
@@ -476,6 +491,9 @@ def verify_identity_under_pgaudit(container_name: str) -> None:
         suspension_reason,
     )
     assert_identity_privacy(after[len(prefix):], client_output, canaries)
+    # Pass a synthetic identity reference privately to the final emergency
+    # stage. Never emit it in CI diagnostics or argv/SQL query literals.
+    return organization_id, issuer, subject
 
 
 def assert_operator_provision_privacy(server_log: str, client_output: str,
@@ -805,6 +823,190 @@ def verify_tenant_signing_keys_under_pgaudit(container_name: str) -> None:
     canaries = (legacy_key, staged_key, staged_id, wrong_legacy, wrong_staged)
     assert_tenant_signing_key_privacy(after[len(prefix):], client_output, canaries)
 
+
+def assert_emergency_privacy(server_log: str, client_output: str,
+                             canaries: tuple[str, ...]) -> None:
+    """Require real pgAudit metadata but forbid emergency identity canaries.
+
+    The isolated server log window covers only the true emergency script.
+    Never print values, base64 payloads, raw log lines or derived fingerprints.
+    """
+    categories = (
+        "organization-id", "old-issuer", "old-subject", "new-issuer",
+        "new-subject", "incident-ticket", "security-reviewer",
+        "municipal-reviewer", "reason-code", "alternate-incident-ticket",
+    )
+    if len(canaries) != len(categories) or any(not val for val in canaries):
+        raise AssertionError("Invalid emergency pgAudit synthetic canary inventory")
+    for category, canary in zip(categories, canaries, strict=True):
+        for sensitive in (canary, base64.b64encode(canary.encode("utf-8")).decode("ascii")):
+            if sensitive in client_output:
+                raise AssertionError("Emergency canary in client output: " + category)
+            if sensitive in server_log:
+                raise AssertionError("Emergency canary in PostgreSQL log: " + category)
+
+    if "DO $emergency$" not in server_log:
+        raise AssertionError("Emergency owner-only DO statement missing")
+    audit_lines = [
+        line for line in server_log.splitlines() if "AUDIT: SESSION" in line
+    ]
+    if not any(",FUNCTION,DO," in line for line in audit_lines):
+        raise AssertionError("Emergency pgAudit FUNCTION DO metadata missing")
+    if not any(",WRITE,UPDATE," in line for line in audit_lines):
+        raise AssertionError("Emergency pgAudit WRITE UPDATE metadata missing")
+    if not any(",WRITE,INSERT," in line for line in audit_lines):
+        raise AssertionError("Emergency pgAudit WRITE INSERT metadata missing")
+    if "statement: COPY" not in server_log:
+        raise AssertionError("Emergency COPY statement metadata missing")
+
+
+def verify_emergency_under_pgaudit(
+    container_name: str, identity_context: tuple[str, str, str]
+) -> None:
+    """Execute true break-glass staging only in disposable PostgreSQL17.
+
+    An independently owner-audited suspension, one active verified Admin
+    and one older revoked Admin already exist from the preceding CI fixture.
+    This is NOT identity proof, MFA, two real approvals or live recovery.
+    """
+    prefix = run(["docker", "logs", container_name],
+                 "baseline synthetic emergency pgAudit logs",
+                 include_stderr=True)
+    org_id, old_issuer, old_subject = identity_context
+    marker = uuid.uuid4().hex[:12]
+    new_issuer = "https://recovery-ci.example.test/tenant-" + marker
+    new_subject = "verified-synthetic-replacement-" + marker
+    incident = "INC-2026-" + marker
+    security_review = "security-reviewer-" + marker
+    municipality_review = "municipal-reviewer-" + marker
+    reason = "verified-incident-" + marker
+    other_incident = "INC-2026-OTHER-" + marker
+    emergency = {
+        "COMUNI_EMERGENCY_ORGANIZATION_ID": org_id,
+        "COMUNI_EMERGENCY_OLD_IDENTITY_ISSUER": old_issuer,
+        "COMUNI_EMERGENCY_OLD_SUBJECT": old_subject,
+        "COMUNI_EMERGENCY_NEW_IDENTITY_ISSUER": new_issuer,
+        "COMUNI_EMERGENCY_NEW_SUBJECT": new_subject,
+        "COMUNI_EMERGENCY_INCIDENT_TICKET": incident,
+        "COMUNI_EMERGENCY_SECURITY_REVIEWER": security_review,
+        "COMUNI_EMERGENCY_MUNICIPAL_REVIEWER": municipality_review,
+        "COMUNI_EMERGENCY_REASON_CODE": reason,
+    }
+
+    before = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.organizations
+             WHERE is_activated=TRUE AND is_suspended=TRUE) = 1
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin' AND is_active=TRUE) = 1
+        AND (SELECT count(*) FROM platform.audit_events
+             WHERE action='platform.membership.admin.emergency.revoked') = 0
+        AND (SELECT count(*) FROM platform.audit_events
+             WHERE action='platform.membership.admin.emergency.staged') = 0
+        AND (SELECT count(*) FROM platform.audit_events) = 7
+        """, "preflight audited suspended sole Admin state")
+    if before != "t":
+        raise AssertionError("Synthetic emergency prerequisites not satisfied")
+
+    # Attempt the identical operation with pgAudit parameter values ON. It
+    # must refuse before even opening the private COPY producer.
+    unsafe = private_owner_script(
+        "stage-emergency-admin-replacement.sql", emergency,
+        expect_failure=True, metadata_only=False)
+    if ("Owner-only emergency operation requires parameter-free audit metadata"
+            not in unsafe):
+        raise AssertionError("Unsafe emergency pgAudit profile was not rejected")
+    denied_logs = run(["docker", "logs", container_name],
+                      "inspect denied emergency COPY boundary",
+                      include_stderr=True)
+    if not denied_logs.startswith(prefix):
+        raise AssertionError("Cannot isolate refused emergency pgAudit log window")
+    if "statement: COPY" in denied_logs[len(prefix):]:
+        raise AssertionError("Rejected emergency operation reached private COPY")
+
+    unaffected = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.audit_events) = 7
+        AND (SELECT count(*) FROM platform.organization_memberships) = 2
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin' AND is_active=TRUE) = 1
+        """, "denied emergency transition has no side effects")
+    if unaffected != "t":
+        raise AssertionError("Unsafe emergency audit profile modified state")
+
+    client_output = unsafe
+    client_output += private_owner_script(
+        "stage-emergency-admin-replacement.sql", emergency)
+    # Exact replay is allowed, but must not duplicate either of the two
+    # owner-audit events or reactivate the suspended municipality.
+    client_output += private_owner_script(
+        "stage-emergency-admin-replacement.sql", emergency)
+
+    duplicate_review = dict(emergency)
+    duplicate_review["COMUNI_EMERGENCY_MUNICIPAL_REVIEWER"] = security_review
+    rejected_review = private_owner_script(
+        "stage-emergency-admin-replacement.sql", duplicate_review,
+        expect_failure=True)
+    if "Invalid incident or independent review references" not in rejected_review:
+        raise AssertionError("Duplicate synthetic emergency reviewers accepted")
+    client_output += rejected_review
+
+    alternate = dict(emergency)
+    alternate["COMUNI_EMERGENCY_INCIDENT_TICKET"] = other_incident
+    rejected_ticket = private_owner_script(
+        "stage-emergency-admin-replacement.sql", alternate,
+        expect_failure=True)
+    if "Inactive or ambiguously staged Admin cannot be recovered" not in rejected_ticket:
+        raise AssertionError("Different incident unexpectedly replayed staging")
+    client_output += rejected_ticket
+
+    # No identity/incident values in SQL strings or command arguments. Check
+    # the pending second municipality and inactive global operator as well.
+    verified = sql("""
+        SELECT
+            (SELECT count(*) FROM platform.organizations) = 2
+        AND (SELECT count(*) FROM platform.organizations
+             WHERE is_activated=TRUE AND is_suspended=TRUE) = 1
+        AND (SELECT count(*) FROM platform.organizations
+             WHERE is_activated=FALSE AND is_suspended=FALSE) = 1
+        AND (SELECT count(*) FROM platform.organization_modules
+             WHERE module_key='protocol' AND enabled=FALSE) = 2
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin') = 3
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin' AND is_active=TRUE
+               AND identity_issuer IS NOT NULL) = 1
+        AND (SELECT count(*) FROM platform.organization_memberships
+             WHERE role='Admin' AND is_active=FALSE
+               AND identity_issuer IS NOT NULL) = 2
+        AND (SELECT count(*) FROM platform.organization_memberships m
+             JOIN platform.organizations o ON m.organization_id=o.id
+             WHERE o.is_activated=FALSE) = 0
+        AND (SELECT count(*) FROM platform.audit_events
+             WHERE action='platform.membership.admin.emergency.revoked') = 1
+        AND (SELECT count(*) FROM platform.audit_events
+             WHERE action='platform.membership.admin.emergency.staged') = 1
+        AND (SELECT count(*) FROM platform.audit_events) = 9
+        AND (SELECT count(*) FROM platform.platform_operators
+             WHERE is_active=FALSE) = 1
+        AND (SELECT count(*) FROM platform.tenant_proof_keys) = 2
+        """, "synthetic suspended emergency staging invariants")
+    if verified != "t":
+        raise AssertionError("Emergency staging violated tenant or audit invariants")
+
+    after = run(["docker", "logs", container_name],
+                "collect private emergency pgAudit log suffix",
+                include_stderr=True)
+    if not after.startswith(prefix):
+        raise AssertionError("Cannot isolate emergency pgAudit log window")
+    canaries = (
+        org_id, old_issuer, old_subject, new_issuer, new_subject,
+        incident, security_review, municipality_review, reason, other_incident,
+    )
+    assert_emergency_privacy(after[len(prefix):], client_output, canaries)
+
+
+
 def main() -> None:
     name = "comuni-pgaudit-ci-" + uuid.uuid4().hex[:8]
     container_started = False
@@ -906,12 +1108,13 @@ def main() -> None:
         logs = run(["docker", "logs", name], "collect private pgAudit logs",
                    include_stderr=True)
         assert_audits(logs, observed_verifiers, test_passwords)
-        verify_identity_under_pgaudit(name)
+        identity_context = verify_identity_under_pgaudit(name)
         verify_platform_and_provision_under_pgaudit(name)
         verify_tenant_signing_keys_under_pgaudit(name)
-        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and ten owner-only COPY "
-              "operations verified; synthetic SCRAM/OIDC/signing-key canaries "
-              "absent from captured logs.")
+        verify_emergency_under_pgaudit(name, identity_context)
+        print("PASS: PostgreSQL17 pgAudit ROLE/DDL and eleven owner-only COPY "
+              "operations verified; synthetic SCRAM/OIDC/signing-key/emergency "
+              "canaries absent from captured logs.")
     finally:
         if container_started:
             # Always delete the synthetic roles and entire ephemeral cluster.

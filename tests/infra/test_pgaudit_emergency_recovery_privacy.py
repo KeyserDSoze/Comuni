@@ -62,7 +62,6 @@ class EmergencyAdminPgAuditTests(unittest.TestCase):
         source = GATE.read_text(encoding="utf-8")
         for marker in (
             "verify_emergency_under_pgaudit(name, identity_context)",
-            'private_owner_script("stage-emergency-admin-replacement.sql", emergency)',
             '"DO $emergency$"',
             "assert_emergency_privacy(",
             "'platform.membership.admin.emergency.revoked'",
@@ -70,6 +69,10 @@ class EmergencyAdminPgAuditTests(unittest.TestCase):
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
+        self.assertRegex(
+            source,
+            r'private_owner_script\(\s*"stage-emergency-admin-replacement\.sql", emergency\)',
+        )
 
     def test_clean_function_write_and_copy_are_accepted(self):
         gate.assert_emergency_privacy(safe_audit_log(), "", CANARIES)

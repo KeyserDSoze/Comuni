@@ -55,6 +55,17 @@
 
 BEGIN;
 
+-- Do not consume any emergency identity/incident COPY input while pgAudit
+-- would log nested PL/pgSQL parameter values. This leaves the audit classes
+-- ROLE/DDL/WRITE/FUNCTION and native statement logging enabled.
+DO $owner_audit_parameter_guard$
+BEGIN
+    IF lower(coalesce(current_setting('pgaudit.log_parameter', true), 'off')) = 'on' THEN
+        RAISE EXCEPTION 'Owner-only emergency operation requires parameter-free audit metadata';
+    END IF;
+END
+$owner_audit_parameter_guard$;
+
 -- The *client-side* psql \copy command runs a fixed, reviewed local program.
 -- The helper reads only the allowlisted environment variables, then streams
 -- one base64(JSON) record to COPY STDIN. Base64 is NOT encryption: the pipe
