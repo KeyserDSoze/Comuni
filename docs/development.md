@@ -168,3 +168,7 @@ I test PostgreSQL con login runtime limitato ora iniettano l'actor sintetico nel
 ## #114 — Metadati audit: nessun Trim implicito
 
 Per costruire `AuditEvent`, passare actor e correlation già verificati/canonici, senza spazi esterni né caratteri di controllo. `AuditEvent.Create` rifiuta tali input anziché normalizzarli; la factory mantiene il valore esatto in PostgreSQL. I metadati di azione e tipo devono essere nomi canonici, non messaggi o contenuto utente; i valori validi di lunghezza entro 160/120/100/128 rispettivamente sono conservati. I controlli JWT, la membership Admin, RLS firmata e l'audit append-only restano obbligatori e separati. I test xUnit e PostgreSQL 17 con dati sintetici coprono queste regole.
+
+## #115 — Gate privacy log pgAudit ROLE/DDL
+
+Per modifiche a `scripts/postgres/provision-{runtime,platform-read}-role.sql` il gate sintetico analizza i log reali PostgreSQL17/pgAudit e fallisce se una singola operazione `CREATE/ALTER ROLE` non reca `<REDACTED>` o contiene parti sensibili del verificatore SCRAM. Eseguire prima `python3 -m unittest tests/infra/test_pgaudit_log_analyzer.py` (via discover di `tests/infra`) e poi la CI completa, che avvia una fixture Docker isolata. L'analizzatore non stampa mai log né canary; non usare valori veri o disabilitare `pgaudit.log`. Per Azure/pgAudit/SIEM live la #92 rimane bloccante.

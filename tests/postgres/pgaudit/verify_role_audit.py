@@ -11,6 +11,8 @@ log_statement=all / log_parameter_max_length=-1. See ADR 0076 / #92.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 from pathlib import Path
 import subprocess
@@ -113,40 +115,71 @@ def assert_auth(role: str, password: str) -> None:
         raise AssertionError("Password did not authenticate the expected role")
 
 
+def scram_components(verifier: str) -> tuple[str, str, str]:
+    """Extract canonical SCRAM material without exposing its values in errors.
+
+    pg_authid supplies a structured verifier: iteration count, salt, stored
+    key and server key. Each base64 field is sensitive independently.
+    See PostgreSQL 17 pg_authid and ADR 0098. Never print the raw verifier.
+    """
+    try:
+        label, iteration_salt, keys = verifier.split("$")
+        iteration, salt = iteration_salt.split(":")
+        stored_key, server_key = keys.split(":")
+        if label != "SCRAM-SHA-256" or int(iteration) < 1:
+            raise ValueError()
+        decoded = [base64.b64decode(value, validate=True)
+                   for value in (salt, stored_key, server_key)]
+        if (len(decoded[0]) < 16 or len(decoded[1]) != 32
+                or len(decoded[2]) != 32):
+            raise ValueError()
+        if any(base64.b64encode(raw).decode("ascii") != value
+               for raw, value in zip(decoded, (salt, stored_key, server_key))):
+            raise ValueError()
+        return salt, stored_key, server_key
+    except (ValueError, binascii.Error):
+        raise AssertionError("Invalid SCRAM verifier structure for audit check") from None
+
+
 def assert_audits(log: str, verifiers: list[str],
                   passwords: list[str]) -> None:
-    # Expect real pgAudit session entries, including nested CREATE/ALTER ROLE
-    # (not just DO or COPY from PostgreSQL's native statement logging).
+    # The complete verifier is not the only secret-equivalent representation:
+    # fail if any salt, StoredKey or ServerKey is present anywhere in native,
+    # extension or error-context logs, even without the full verifier.
+    sensitive = [item for item in passwords + verifiers if item]
+    for item in verifiers:
+        sensitive.extend(scram_components(item))
+    if any(value in log for value in sensitive):
+        # Never print the candidate or raw server log.
+        raise AssertionError(
+            "Sensitive SCRAM material leaked into PostgreSQL/pgAudit server logs")
+
     audit_lines = [
         line for line in log.splitlines()
         if "AUDIT: SESSION" in line and ",ROLE," in line
     ]
     if not audit_lines:
         raise AssertionError("No real pgAudit ROLE events; check shared preload")
+
+    # Every CREATE/ALTER for the known login must carry its own redaction.
+    # A single redacted audit line elsewhere cannot hide a missing redaction.
     for role in ("comuni_app_runtime", "comuni_platform_reader"):
         for command in ("CREATE ROLE", "ALTER ROLE"):
-            if not any(
-                "," + command + "," in line and role in line
-                for line in audit_lines
-            ):
+            expected = [
+                line for line in audit_lines
+                if "," + command + "," in line and role in line
+            ]
+            if not expected:
                 raise AssertionError("Expected pgAudit operation metadata missing: "
                                      + command + " " + role)
-    if not any("<REDACTED>" in line for line in audit_lines):
-        raise AssertionError("pgAudit password redaction was not observed")
+            if any("<REDACTED>" not in line for line in expected):
+                raise AssertionError("Per-operation pgAudit ROLE redaction missing")
 
-    for candidate in passwords + verifiers:
-        if candidate and candidate in log:
-            # Do not echo the matching secret or the server log.
-            raise AssertionError(
-                "Sensitive role material leaked into PostgreSQL/pgAudit server logs")
-    if "statement: COPY" not in log:
-        raise AssertionError("No native COPY statement logged while pgAudit active")
-
-    # Audited operations remain traceable, including GRANT/REVOKE and roles.
+    # Audited privilege operations and PostgreSQL statement logging remain on.
     if not any(",ROLE,GRANT," in line for line in audit_lines):
         raise AssertionError("Privilege-change audit events were suppressed")
-    # Preserve pgAudit ROLE/DDL and native PostgreSQL statement logging.
-
+    if "statement: COPY" not in log:
+        raise AssertionError("No native COPY statement logged while pgAudit active")
 
 def main() -> None:
     name = "comuni-pgaudit-ci-" + uuid.uuid4().hex[:8]

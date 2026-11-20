@@ -3,6 +3,7 @@
 Never use production secrets or print SQL logs. The independently executed
 Docker pgAudit integration remains mandatory. ADR 0098 / issue #115.
 """
+import base64
 import importlib.util
 from pathlib import Path
 import unittest
@@ -17,9 +18,10 @@ spec.loader.exec_module(gate)
 
 ROLES = ("comuni_app_runtime", "comuni_platform_reader")
 ACTIONS = ("CREATE ROLE", "ALTER ROLE")
-SALT = "a" * 22 + "=="
-STORED_KEY = "b" * 43 + "="
-SERVER_KEY = "c" * 43 + "="
+# Canonical base64 matching the PostgreSQL17 pg_authid format.
+SALT = base64.b64encode(bytes(range(16))).decode("ascii")
+STORED_KEY = base64.b64encode(bytes(range(32))).decode("ascii")
+SERVER_KEY = base64.b64encode(bytes(reversed(range(32)))).decode("ascii")
 VERIFIER = f"SCRAM-SHA-256$4096:{SALT}${STORED_KEY}:{SERVER_KEY}"
 PASSWORD = "synthetic-password-canary-not-used-outside-tests"
 
