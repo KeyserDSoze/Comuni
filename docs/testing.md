@@ -578,3 +578,9 @@ Il test xUnit `MunicipalAuditReaderContractTests.No_public_unlogged_audit_read_c
 ## #113 — TDD actor contestuale nella lettura audit (ADR 0096)
 
 Il test Reflection `MunicipalAuditReaderContractTests` obbliga il port `IOrganizationAuditReader.ListRecentAndRecordAsync` ad accettare soltanto `Guid` e `CancellationToken` e il costruttore del lettore a richiedere `ICurrentActorContext`. RED reale nel commit `5f77af9`: GitHub Actions `44712891064`, 368 test API verdi e un fallimento atteso `Assert.Equal() Failure: Collections differ`. I test runtime PostgreSQL esistenti ora passano un `ICurrentActorContext` sintetico; controllano actor e correlation persistiti, fail closed per actor/correlation vuoti, richiesta senza transazione, rollback, commit e tenant estraneo. Le prove HTTP confermano ancora issuer/subject e correlation autenticati lato server. Chiudere solo dopo 7/7 job sullo SHA finale contenente codice e ADR.
+
+## #114 — RED→GREEN sulla canonicalità degli eventi audit (ADR 0097)
+
+Nel commit RED `296619b` il test xUnit `AuditEventTests.Rejects_noncanonical_or_controlled_audit_values` ha riprodotto il difetto nella run GitHub Actions `44715802992`: **14 test unitari falliti come previsto, 33 superati**, con `Assert.Throws() Failure: No exception was thrown` per spazi ai margini e controlli CR/LF/TAB/NUL in actor, action, resourceType e correlation. Le altre regressioni unit verificano valori validi Unicode e case-sensitive; il GREEN aggiunge anche controlli 1..max, null/blank per ogni campo.
+
+Il test PostgreSQL runtime `MunicipalAuditConsultationTests` estende la sonda signed-RLS con actor e correlation invalidi e pretende che nessun evento venga nemmeno aggiunto al ChangeTracker prima del rifiuto. Restano i test HTTP 401/403/400/200, tenant A/B, audit di consultazione commit/rollback, Playwright e le restanti suite. La issue #114 è chiudibile solo dopo **7 job CI verdi sul medesimo SHA finale di main**, inclusi ADR e documentazione.

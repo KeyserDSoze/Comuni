@@ -164,3 +164,7 @@ Anche `provision-organization.sql` (procedura legacy owner-only) ora crea **crea
 ## #113 — Verifica delle consultazioni e dell'actor
 
 I test PostgreSQL con login runtime limitato ora iniettano l'actor sintetico nel `OrganizationAuditReader`, senza passare eventi preassemblati. Verificano che actor/correlation vuoti falliscano prima della SELECT e che il commit contenga solo metadati server-owned; la route reale continua a rifiutare header falsificati. Eseguire la suite xUnit con PostgreSQL 17 e poi l'intera CI su `main`.
+
+## #114 — Metadati audit: nessun Trim implicito
+
+Per costruire `AuditEvent`, passare actor e correlation già verificati/canonici, senza spazi esterni né caratteri di controllo. `AuditEvent.Create` rifiuta tali input anziché normalizzarli; la factory mantiene il valore esatto in PostgreSQL. I metadati di azione e tipo devono essere nomi canonici, non messaggi o contenuto utente; i valori validi di lunghezza entro 160/120/100/128 rispettivamente sono conservati. I controlli JWT, la membership Admin, RLS firmata e l'audit append-only restano obbligatori e separati. I test xUnit e PostgreSQL 17 con dati sintetici coprono queste regole.

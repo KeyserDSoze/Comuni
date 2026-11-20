@@ -41,16 +41,45 @@ public sealed class AuditEventTests
     public void Rejects_noncanonical_or_controlled_audit_values(
         string field, string input)
     {
-        var actor = field == "actorSubject" ? input : "oidc-subject";
-        var action = field == "action" ? input : "protocol.record.created";
-        var type = field == "resourceType" ? input : "protocol.record";
-        var correlation = field == "correlationId" ? input : "server-correlation";
-
         var failure = Assert.Throws<ArgumentException>(() =>
-            AuditEvent.Create(Guid.NewGuid(), actor, action, type,
-                Guid.NewGuid(), correlation));
+            CreateWithField(field, input));
         Assert.Equal(field, failure.ParamName);
     }
+
+    [Theory]
+    [InlineData("actorSubject", 161)]
+    [InlineData("action", 121)]
+    [InlineData("resourceType", 101)]
+    [InlineData("correlationId", 129)]
+    public void Rejects_overlong_metadata(string field, int size)
+    {
+        var failure = Assert.Throws<ArgumentException>(() =>
+            CreateWithField(field, new string('x', size)));
+        Assert.Equal(field, failure.ParamName);
+    }
+
+    [Theory]
+    [InlineData("actorSubject")]
+    [InlineData("action")]
+    [InlineData("resourceType")]
+    [InlineData("correlationId")]
+    public void Rejects_missing_or_whitespace_only_metadata(string field)
+    {
+        foreach (var input in new string?[] { null, "", "   " })
+        {
+            var failure = Assert.Throws<ArgumentException>(() =>
+                CreateWithField(field, input));
+            Assert.Equal(field, failure.ParamName);
+        }
+    }
+
+    private static AuditEvent CreateWithField(string field, string? input) =>
+        AuditEvent.Create(Guid.NewGuid(),
+            field == "actorSubject" ? input! : "oidc-subject",
+            field == "action" ? input! : "protocol.record.created",
+            field == "resourceType" ? input! : "protocol.record",
+            Guid.NewGuid(),
+            field == "correlationId" ? input! : "server-correlation");
 
     [Fact]
     public void Valid_unicode_and_case_sensitive_metadata_is_preserved_exactly()

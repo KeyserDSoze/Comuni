@@ -157,6 +157,14 @@ public sealed class MunicipalAuditConsultationTests(ApiFactory factory) : IClass
             await Assert.ThrowsAsync<ArgumentException>(() =>
                 new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", " "))
                     .ListRecentAndRecordAsync(id, CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                new OrganizationAuditReader(db, new TestActor(" signed-runtime-admin", "server-correlation"))
+                    .ListRecentAndRecordAsync(id, CancellationToken.None));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", "server\nspoofed"))
+                    .ListRecentAndRecordAsync(id, CancellationToken.None));
+            // Rejected actor metadata must not attach an event for SaveChanges.
+            Assert.Empty(db.AuditEvents.Local);
             var result = await new OrganizationAuditReader(db, new TestActor("signed-runtime-admin", "server-correlation"))
                 .ListRecentAndRecordAsync(id, CancellationToken.None);
             Assert.Single(result);

@@ -198,3 +198,7 @@ Il port Business `IOrganizationAuditReader` dispone ora del **solo** metodo `Lis
 ## #113 — Actor verificato anche nel repository delle consultazioni (ADR 0096)
 
 Il port `ListRecentAndRecordAsync(Guid, CancellationToken)` non accetta più eventi `AuditEvent` dal chiamante. Il repository `OrganizationAuditReader` risolve `ICurrentActorContext` tramite DI scoped dell'unica API. Dopo la verifica del tenant e della transazione già aperta, l'evento viene costruito da actor/correlation server-owned prima della query privata bounded e salvato insieme alla consultazione. Nessun cambiamento a schema, GRANT, endpoint HTTP, ruolo Admin o tenant proof HMAC. Questo non protegge da SQL diretto o owner PostgreSQL.
+
+## #114 — Eventi audit canonici senza normalizzazione implicita (ADR 0097)
+
+`AuditEvent.Create` rimane la factory condivisa del dominio Audit, ma rifiuta ora per `actorSubject`, `action`, `resourceType` e `correlationId` i caratteri di controllo e gli spazi esterni. I metadati validi vengono mantenuti **byte-per-byte** (senza `Trim` sul valore salvato), in continuità con `VerifiedPrincipalIdentity.ValidSubject` e la corrispondenza esatta del `sub` OIDC. Le consultazioni nel repository e gli altri use case che costruiscono audit usano la medesima factory; nessuna migrazione o cambiamento a EF/RLS, grant PostgreSQL, API/React. La policy di autenticazione e il trust nel processo restano separati dal modello eventi.

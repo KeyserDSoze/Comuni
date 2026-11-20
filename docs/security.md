@@ -595,3 +595,9 @@ Questa misura **non** impedisce un SELECT SQL arbitrario al login runtime con pr
 ## #113 — Nessun evento audit fornito dal chiamante (ADR 0096)
 
 Un chiamante Business non può passare un `AuditEvent` a `IOrganizationAuditReader` né scegliere actor/correlation: il lettore in Infrastructure li ottiene dal contesto server verificato dopo controllo tenant e transazione SQL. Actor o correlazione mancanti falliscono prima della SELECT. L'autenticazione resta responsabilità dell'API (JWT verificato, membership Admin) e la prova RLS firmata è ancora obbligatoria nel PostgreSQL con privilegi limitati. Non è protezione dal processo compromesso, dall'owner PostgreSQL o un'alternativa a pgAudit/SIEM e retention.
+
+## #114 — Input audit esatti e non ambigui (ADR 0097)
+
+Il modello `AuditEvent.Create` non modifica più silenziosamente valori di `actor_subject`, `action`, `resource_type` o `correlation_id`. Rifiuta valori vuoti/null, oltre le lunghezze esistenti, con whitespace ai margini o `char.IsControl` (CR/LF/TAB/NUL inclusi). I valori leciti mantengono maiuscole/minuscole e caratteri Unicode ordinari. In particolare un `sub` OIDC firmato non viene convertito in un identificatore differente dal livello audit; il validatore JWT/Principal continua a imporre lo stesso requisito di canonicalità.
+
+La misura riduce attribuzioni ambigue e possibili record audit con separatori di riga/controllo. **Non** sana vecchi dati, non costituisce protezione universale da Unicode confusables/bidi, non rende attendibile una connessione SQL diretta né difende da owner PostgreSQL, pgAudit/SIEM, retention o manomissioni privilegiate. Nessun token, contenuto documentale o input PII aggiuntivo viene loggato.

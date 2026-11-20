@@ -47,8 +47,15 @@ public sealed class AuditEvent
 
     private static string Required(string value, int maxLength, string argumentName)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > maxLength)
-            throw new ArgumentException($"Value must have 1-{maxLength} characters.", argumentName);
-        return value.Trim();
+        // Audit identities and event metadata must not be silently rewritten.
+        // Newlines, tabs and NULs also make exported audit records ambiguous.
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Length > maxLength ||
+            !string.Equals(value, value.Trim(), StringComparison.Ordinal) ||
+            value.Any(char.IsControl))
+            throw new ArgumentException(
+                $"Value must have 1-{maxLength} non-control characters without outer whitespace.",
+                argumentName);
+        return value;
     }
 }
