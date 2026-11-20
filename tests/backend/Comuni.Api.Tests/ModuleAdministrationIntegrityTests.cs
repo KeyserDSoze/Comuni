@@ -159,4 +159,54 @@ public sealed class ModuleAdministrationIntegrityTests
         Assert.Equal((true, 2L), await ReadAsync(own));
         Assert.Equal((true, 0L), await ReadAsync(other));
     }
+
+    [Fact]
+    public async Task Tracked_module_state_must_be_refreshed_after_another_transaction_commits()
+    {
+        // Reproduces a different interleaving from the simultaneous-write
+        // regression: this DbContext tracked the flag before another writer
+        // acquired the row lock and committed its change.
+        var own = await SeedAsync();
+        var other = await SeedAsync();
+        await VerifyStaleTrackedToggleAsync(own, other, desired: false, expectedAudits: 1);
+        await VerifyStaleTrackedToggleAsync(own, other, desired: true, expectedAudits: 2);
+    }
+
+    private static async Task VerifyStaleTrackedToggleAsync(
+        Guid own, Guid other, bool desired, long expectedAudits)
+    {
+        var signer = Signer();
+        await using var staleDb = RuntimeDb(own);
+        await using var staleTx = await TenantDatabaseTransaction.BeginAsync(
+            staleDb, signer, CancellationToken.None);
+
+        // Keep the first EF entity instance tracked while another SQL session
+        // performs the real transition, with signed tenant RLS in both sessions.
+        var tracked = await staleDb.OrganizationModules.SingleAsync(
+            m => m.OrganizationId == own && m.ModuleKey == "protocol");
+        Assert.Equal(!desired, tracked.Enabled);
+
+        await using (var freshDb = RuntimeDb(own))
+        {
+            await using var freshTx = await TenantDatabaseTransaction.BeginAsync(
+                freshDb, signer, CancellationToken.None);
+            var writer = new ModuleAdministrationRepository(freshDb, signer);
+            Assert.Equal(ModuleUpdateStatus.Updated,
+                await writer.SetEnabledAsync(
+                    own, "protocol", desired, Event(own, desired), CancellationToken.None));
+            await freshTx.CommitAsync();
+        }
+
+        // The stale context must re-read the database state after FOR UPDATE:
+        // an EF tracking query by itself returns the previously tracked value.
+        Assert.Equal(!desired, tracked.Enabled);
+        var staleWriter = new ModuleAdministrationRepository(staleDb, signer);
+        Assert.Equal(ModuleUpdateStatus.Unchanged,
+            await staleWriter.SetEnabledAsync(
+                own, "protocol", desired, Event(own, desired), CancellationToken.None));
+        await staleTx.CommitAsync();
+
+        Assert.Equal((desired, expectedAudits), await ReadAsync(own));
+        Assert.Equal((true, 0L), await ReadAsync(other));
+    }
 }
