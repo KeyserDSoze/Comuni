@@ -1,0 +1,22 @@
+# ADR 0113 — Modifiche concorrenti dei moduli: lock per riga, un audit per transizione
+
+- Data: 2026-11-20
+- Stato: Accepted per il codice Core e per PostgreSQL 17 con prove sintetiche; Azure production non verificato
+- Issue: #129; epiche #3 (Core moduli), #4 (integrità audit), #5 (tenant isolation).
+- Precedenti: ADR 0009 (amministrazione moduli), ADR 0013 (firma RLS), ADR 0092 (integrità semantica audit), ADR 0112 (catalogo code-owned).
+
+## Contesto e difetto
+
+Il precedente `ModuleAdministrationRepository.SetEnabledAsync` leggeva la riga `platform.organization_modules(protocol)` con EF `SingleOrDefaultAsync` senza lock, confrontava `enabled`, e poi inseriva l'evento audit e aggiornava il flag in una transazione. Due richieste Admin concorrenti `PUT enabled=false` sullo stesso Comune potevano leggere entrambe `true` e inserire due audit `platform.module.protocol.disabled`: ogni operazione era atomica, ma i due audit non rappresentavano due transizioni. Il problema è distinto dal no-op sequenziale già coperto dall'ADR 0009.
+
+## Decisione
+
+1. Ogni `SetEnabledAsync` sul modulo **implementato** e sul **Comune corrente verificato** esegue prima, sotto la **stessa transazione SQL del middleware API**, un `SELECT 1 FROM platform.organization_modules WHERE organization_id=@org AND module_key=@key FOR UPDATE`, con **binding di entrambi i parametri**. L'accesso passa per il normale login `comuni_app_runtime` sotto `SET LOCAL comuni.tenant_assertion` firmata HMAC e politiche RLS PostgreSQL. Non si usa account owner, non si allargano grant, non si leggono chiavi, non si introduce un lock globale.
+2. Il lock della singola riga dura fino al commit o rollback della transazione; durante l'attesa di un altro writer, `READ COMMITTED` rilegge la riga aggiornata dopo lo sblocco, **prima** del confronto EF dello stato. Se già uguale al valore richiesto, il risultato è `Unchanged` senza mutazione né audit. Solo il primo writer che produce una transizione aggiunge `AuditEvent` con l'azione coerente `platform.module.protocol.enabled/disabled` nello stesso commit. Se la riga non esiste, `NotFound` e nessuna creazione automatica.
+3. Rimangono gli altri confini esistenti: `RequireCurrentOrganization` prima del primo SQL, chiave consentita soltanto `protocol` via `ModuleCatalog`, validazione semantica tenant/resource/action audit, policy HTTP Admin verificata contro membership DB e organization attiva, RLS, atomicità e rollback; per nuovi domini serve una decisione separata. Non si modifica `/admin/modules` né la UI React.
+4. TDD con due `DbContext`/connessioni **reali e indipendenti** sotto `comuni_app_runtime`, prova HMAC tenant di ciascuna transazione, due Comuni sintetici e un terzo lock temporaneo dell'owner CI. Il test attende che entrambi i writer siano **bloccati in PostgreSQL** (da `pg_stat_activity.wait_event_type=Lock`, application_name solo sintetico), poi rilascia la lock: dei due risultati uno deve essere `Updated`, l'altro `Unchanged`, e il singolo audit deve esistere per disable e poi per enable; Comune B resta invariato. Timeout bounded per non lasciare worker bloccati e nessun nome personale/secret nelle query. Confermare RED reale prima della modifica e GREEN su **7/7 GitHub Actions sullo stesso SHA HEAD main**.
+5. La documentazione PostgreSQL 17 conferma che `FOR UPDATE` impedisce ad altre transazioni di bloccare/modificare la stessa riga fino al termine della transazione e, al rilascio in READ COMMITTED, restituisce la riga aggiornata: https://www.postgresql.org/docs/17/explicit-locking.html e https://www.postgresql.org/docs/17/applevel-consistency.html. Le policy RLS e i privilegi SQL restano indipendenti: https://www.postgresql.org/docs/17/ddl-rowsecurity.html.
+
+## Limiti e rischi residui
+
+La serializzazione è solo per la riga Protocollo del Comune e richiede che **tutte** le modifiche al flag passino per questo repository o rispettino lo stesso lock SQL; una scrittura owner fuori controllo può ignorare l'audit applicativo. Opposte operazioni concorrenti possono ancora produrre due transizioni reali in ordine di lock: non è implementata una versione HTTP/`If-Match` contro client obsoleti, né transazioni distributed, global lock, garanzie multi-replica Azure, change management DBA, firma WORM, retention legale o conformità GDPR/CAD/AgID. La test suite locale PostgreSQL17 non è un test di carico né un attacco reale. #3/#4/#5 rimangono aperte.

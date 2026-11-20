@@ -1,6 +1,7 @@
 using Comuni.Business.Organizations;
 using Comuni.Domains.Audit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Comuni.Infrastructures.Persistence;
 
@@ -46,6 +47,36 @@ public sealed class ModuleAdministrationRepository(ComuniDbContext db, TenantPro
         await using var transaction = ownsTransaction
             ? await TenantDatabaseTransaction.BeginAsync(db, signer, cancellationToken)
             : null;
+        // Acquire the per-organization row lock BEFORE reading the state.
+        // Two concurrent requests for the same target must not both create
+        // an audit event for a single transition. The lock uses the existing
+        // signed tenant RLS transaction, never an owner or global lock.
+        await using (var rowLock = db.Database.GetDbConnection().CreateCommand())
+        {
+            rowLock.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+            rowLock.CommandText = """
+                SELECT 1 FROM platform.organization_modules
+                WHERE organization_id = @organizationId AND module_key = @moduleKey
+                FOR UPDATE
+                """;
+
+            var org = rowLock.CreateParameter();
+            org.ParameterName = "organizationId";
+            org.Value = organizationId;
+            rowLock.Parameters.Add(org);
+
+            var key = rowLock.CreateParameter();
+            key.ParameterName = "moduleKey";
+            key.Value = moduleKey;
+            rowLock.Parameters.Add(key);
+
+            // Missing flag is not implicitly provisioned by an Admin.
+            if (await rowLock.ExecuteScalarAsync(cancellationToken) is null)
+                return ModuleUpdateStatus.NotFound;
+        }
+
+        // Under PostgreSQL READ COMMITTED, a concurrent writer that was
+        // awaited by FOR UPDATE is now visible to this fresh EF read.
         var module = await db.OrganizationModules.SingleOrDefaultAsync(
             m => m.OrganizationId == organizationId && m.ModuleKey == moduleKey, cancellationToken);
 

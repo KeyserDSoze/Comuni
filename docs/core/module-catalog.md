@@ -26,3 +26,8 @@ L'elenco ordinato delle 12 key riservate è: `administrative`, `archive`, `cemet
 Per promuovere un dominio da planned ad available: specifica funzionale e normativa verificata, issue e ADR, modello dati e migrazioni con RLS e privilegi minimi, test xUnit e Playwright RED→GREEN, enforcement backend delle autorizzazioni, migrazione/seed dei flag per Comune, dipendenze catalogate e configurazione del Superadmin approvata. La sola modifica della voce UI/DB non abilita una feature. Non esistono applicazioni o database per-modulo.
 
 Il catalogo attuale non dimostra conformità CAD/AgID/GDPR o disponibilità di integrazioni ANPR/pagoPA/SEND. Superadmin e provider OIDC live sono indipendenti e restano incompleti (#10/#2). Nessun deploy Azure viene eseguito da questa modifica.
+
+
+## Toggle concorrenti del modulo Protocollo — ADR 0113 / #129
+
+La riga di configurazione di Protocollo è l'unico lock del toggle, acquisito con `SELECT ... FOR UPDATE` *nella transazione tenant corrente* prima di confrontare lo stato del flag. Due richieste con lo stesso target serializzano e generano un solo audit; il secondo writer riceve un no-op. La riga non esistente rimane `NotFound`; i 11 domini planned non possono essere attivati. Non è optimistic concurrency HTTP né risolve le richieste contraddittorie provenienti da client con stato stale. [Runbook](../security/module-toggle-concurrency.md).
