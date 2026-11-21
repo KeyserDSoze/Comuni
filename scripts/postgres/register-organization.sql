@@ -78,7 +78,8 @@ DECLARE
     v_approver text := current_setting('comuni.register_approver', true);
     v_org uuid;
     v_existing_name text;
-    v_existing_audit bigint;
+    v_registered_events bigint;
+    v_matching_owner_event bigint;
 BEGIN
     -- Defense in depth. A compromised municipal runtime with an otherwise
     -- signed RLS context cannot create or silently adopt organizations.
@@ -123,18 +124,27 @@ BEGIN
       FROM platform.organizations WHERE id = v_org FOR UPDATE;
 
     IF FOUND THEN
-        -- Idempotence is allowed ONLY if the original audited registration
-        -- used the exact same identity/name/ticket. No retroactive adoption
-        -- of Development seeds or manually inserted organizations.
-        SELECT count(*) INTO v_existing_audit
-          FROM platform.audit_events
-         WHERE organization_id = v_org
-           AND action = 'platform.organization.registered'
-           AND resource_type = 'platform.organization'
-           AND resource_id = v_org
-           AND correlation_id = 'register:' || v_ticket;
+        -- Idempotence requires exactly one owner-origin registration event
+        -- with the original identity/name/change reference. Never silently
+        -- adopt manually seeded or ambiguous audit histories.
+        -- The retry is trustworthy only if ONE original registration
+        -- event exists for this organization. A filtered count alone could
+        -- ignore additional 'registered' events or adopt a hand-crafted
+        -- row with a non-owner actor and an otherwise matching ticket.
+        SELECT COUNT(*),
+               COUNT(*) FILTER (
+                   WHERE resource_type = 'platform.organization'
+                     AND resource_id = v_org
+                     AND correlation_id = 'register:' || v_ticket
+                     AND actor_subject = 'db-owner:' || current_user
+               )
+        INTO v_registered_events, v_matching_owner_event
+        FROM platform.audit_events
+        WHERE organization_id = v_org
+          AND action = 'platform.organization.registered';
 
-        IF v_existing_name <> v_name OR v_existing_audit <> 1 OR
+        IF v_existing_name <> v_name OR
+           v_registered_events <> 1 OR v_matching_owner_event <> 1 OR
            NOT EXISTS (
                SELECT 1 FROM platform.organization_modules
                WHERE organization_id = v_org AND module_key = 'protocol'

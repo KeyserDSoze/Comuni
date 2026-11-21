@@ -1,0 +1,9 @@
+# Retry canonico owner-only: provenance singola del Comune (#132 / ADR 0116)
+
+Il percorso di onboarding preferito è `scripts/postgres/register-organization.sql`, non il vecchio `provision-organization.sql`. Crea un Comune `created` (`is_activated=false`), una sola riga `protocol=false`, **nessuna** membership e un evento owner `platform.organization.registered`. Prima dell'esecuzione l'owner deve verificare esternamente il mandato del Comune, il ticket e il reviewer; il formato del ticket non ne dimostra l'approvazione.
+
+Il retry non può trattare la presenza di un evento *somigliante* come prova di registrazione. Deve trovare **esattamente un** `platform.organization.registered` per l'organization e richiedere sulla stessa riga: `resource_type='platform.organization'`, `resource_id` uguale al Comune, `correlation_id='register:<ticket originario>'` e `actor_subject='db-owner:<current_user>'`. Un evento manuale con actor errato oppure un secondo evento `registered` con altro ticket (anche se quello originale è valido) fanno fallire il retry senza modificare alcun dato. Non cancellare un evento ambiguo per far passare lo script: fare escalation out-of-band.
+
+Quando la provenance è coerente, il retry resta un no-op, anche se il Comune è stato attivato o sospeso in seguito: **non** reimposta flag, status, membership, ruoli o audit. Prima registrazione e attivazione sono procedure separate. Tutto è eseguito solo con SQL schema owner su runner privato trusted, TLS `verify-full`, `psql -X -q` senza echo, con input COPY client-side e guard su `pgaudit.log_parameter`. Base64(JSON) è reversibile, non cifratura.
+
+**Limiti:** un owner/DBA compromesso può forgiare dati e actor, e questo controllo non valida l'identità esterna né la conformità normativa. Non usare con Comuni reali prima dei gate di sicurezza e governance. [Test](../testing/canonical-registration-provenance.md), ADR 0116, #3/#4/#5/#84/#86/#92.

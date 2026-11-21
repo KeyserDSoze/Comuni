@@ -1,0 +1,10 @@
+# TDD retry registrazione canonica con audit owner unico (#132)
+
+In `tests/backend/Comuni.Api.Tests/OrganizationRegistrationTests.cs` le prove avviano **`psql` reale** su PostgreSQL17 sintetico con ruolo owner. Il runtime SQL limitato è esercitato separatamente da test già esistenti. Non sono richiesti Azure, OIDC live o dati di enti reali.
+
+1. **RED — attore errato:** inserire manualmente una organization `created` sintetica con flag `protocol=false` e un evento `platform.organization.registered` con resource e `register:<ticket>` validi ma `actor_subject='synthetic-untrusted-registrar'`. Chiedere il retry col ticket: prima del fix il comando termina **0** nonostante non sia un'autentica registrazione owner.
+2. **RED — evento doppio:** eseguire una vera prima registrazione con ticket A, poi aggiungere un ulteriore evento `registered` con ticket B (il primo rimane intatto). Chiedere retry con A: prima del fix il conteggio filtrato vede solo l'evento A e termina **0**.
+3. **GREEN:** entrambi i retry devono fallire con exit nonzero, output senza nome/ticket sintetici e snapshot `organizations`, `organization_modules`, `organization_memberships`, `audit_events` invariato. La query conta **tutti** gli eventi registered e l'evento unico deve essere owner-origin con tipo/ID risorsa e ticket esatti.
+4. **Regressione:** retry iniziale identico e concorrente resta idempotente, duplicati e name/ticket mismatched rifiutati, ripetizione dopo sospensione non modifica flag/lifecycle; privacy COPY, pgAudit, runtime role e RLS invariati.
+
+RED: commit [`31765ae`](https://github.com/KeyserDSoze/Comuni/commit/31765ae8029f25f715ff0162d2e93ddeb2dd155b), [CI 44882241647](https://github.com/KeyserDSoze/Comuni/actions/runs/44882241647): 56 unit passed; **382 API passati, 2 falliti attesi** (`Expected: Not 0, Actual: 0`). GREEN: 7/7 GitHub Actions sullo stesso SHA HEAD main (xUnit/PostgreSQL17 + pgAudit, Playwright, Terraform/Python, CodeQL, SCA, Docker) prima di chiudere. Questo test non dimostra identità esterna di un Comune, approvazione umana o resistenza a un owner SQL compromesso.
