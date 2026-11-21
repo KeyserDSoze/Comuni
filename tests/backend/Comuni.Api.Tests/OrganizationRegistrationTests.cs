@@ -366,4 +366,71 @@ public sealed class OrganizationRegistrationTests(ApiFactory factory) : IClassFi
                      || serverLog.Contains(reviewer, StringComparison.Ordinal),
             "PostgreSQL statement logs exposed a synthetic registration marker; raw logs withheld.");
     }
+
+    [Fact]
+    public async Task Registration_retry_rejects_manually_staged_row_with_wrong_audit_actor()
+    {
+        var id = Guid.NewGuid();
+        const string ticket = "CHANGE-2026-REGISTER132";
+        await using (var db = new NpgsqlConnection(OwnerConnection))
+        {
+            await db.OpenAsync();
+            await using var stage = new NpgsqlCommand("""
+                INSERT INTO platform.organizations (id, name, is_suspended, is_activated)
+                VALUES (@id, 'Comune Sintetico di Prova', FALSE, FALSE);
+                INSERT INTO platform.organization_modules (organization_id, module_key, enabled)
+                VALUES (@id, 'protocol', FALSE);
+                INSERT INTO platform.audit_events
+                    (id, organization_id, actor_subject, action, resource_type,
+                     resource_id, correlation_id, occurred_at)
+                VALUES
+                    (gen_random_uuid(), @id, 'synthetic-untrusted-registrar',
+                     'platform.organization.registered', 'platform.organization',
+                     @id, @correlation, now());
+                """, db);
+            stage.Parameters.AddWithValue("id", id);
+            stage.Parameters.AddWithValue("correlation", "register:" + ticket);
+            await stage.ExecuteNonQueryAsync();
+        }
+
+        var before = await StateAsync(id);
+        var retry = await RegisterAsync(id.ToString("D"), ticket: ticket);
+        Assert.NotEqual(0, retry.Code); // RED: matching ticket alone must not adopt a forged actor.
+        Assert.DoesNotContain(ticket, retry.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Comune Sintetico di Prova", retry.Output, StringComparison.Ordinal);
+        Assert.Equal(before, await StateAsync(id));
+    }
+
+    [Fact]
+    public async Task Registration_retry_rejects_extra_registered_audit_with_different_ticket()
+    {
+        var id = Guid.NewGuid();
+        const string originalTicket = "CHANGE-2026-REGISTER132-A";
+        const string extraTicket = "CHANGE-2026-REGISTER132-B";
+        Assert.Equal(0, (await RegisterAsync(id.ToString("D"), ticket: originalTicket)).Code);
+        await using (var db = new NpgsqlConnection(OwnerConnection))
+        {
+            await db.OpenAsync();
+            await using var stage = new NpgsqlCommand("""
+                INSERT INTO platform.audit_events
+                    (id, organization_id, actor_subject, action, resource_type,
+                     resource_id, correlation_id, occurred_at)
+                VALUES
+                    (gen_random_uuid(), @id, 'synthetic-untrusted-registrar',
+                     'platform.organization.registered', 'platform.organization',
+                     @id, @correlation, now());
+                """, db);
+            stage.Parameters.AddWithValue("id", id);
+            stage.Parameters.AddWithValue("correlation", "register:" + extraTicket);
+            await stage.ExecuteNonQueryAsync();
+        }
+
+        var before = await StateAsync(id);
+        Assert.Equal(2L, before.Audit);
+        var retry = await RegisterAsync(id.ToString("D"), ticket: originalTicket);
+        Assert.NotEqual(0, retry.Code); // RED: filtered count of 1 misses the extra event.
+        Assert.DoesNotContain(originalTicket, retry.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(extraTicket, retry.Output, StringComparison.Ordinal);
+        Assert.Equal(before, await StateAsync(id));
+    }
 }
